@@ -536,3 +536,336 @@ footer { border-top: 1px solid var(--border-color); padding: 30px 0; margin-top:
   }
   .target-highlight { animation: none !important; outline: 2px solid #f59e0b; }
 }
+
+/* ==========================================================================
+   VAGUE B — Onglets 1 (Matrice 360°) · 2 (Programme) · 3 (Cours side-by-side)
+   Ajouts UNIQUEMENT (les classes de base — .matrix-trim-card, .relational-node,
+   .bridge-*, .scans-side-rail, .fluid-pane, .content-box, .target-highlight —
+   existent déjà plus haut et ne sont pas redéfinies).
+   ========================================================================== */
+
+/* ── Badge primaire plein (parité template bg-primary) ── */
+.badge-primary { background: rgba(37,99,235,0.15); color: var(--primary); border: 1px solid rgba(37,99,235,0.35); }
+
+/* ── Encadré d'état vide (parité alert-secondary du template) ── */
+.alert-secondary-box {
+  background: var(--bg-surface-secondary); border: 1px solid var(--border-color);
+  border-radius: 10px; padding: 12px 16px; color: var(--text-muted);
+  font-size: 0.88rem; margin-bottom: 12px;
+}
+
+/* ── Matrice 360° : header cliquable + chevron rotatif + corps replié ── */
+.matrix-trim-header {
+  width: 100%; display: flex; flex-wrap: wrap; justify-content: space-between;
+  align-items: center; gap: 8px; padding: 16px;
+  background: var(--bg-surface-secondary); border: none; border-bottom: 1px solid var(--border-color);
+  cursor: pointer; text-align: start; color: inherit; font-family: inherit;
+}
+.matrix-chevron { transition: transform 0.25s cubic-bezier(0.16,1,0.3,1); }
+.matrix-chevron.open { transform: rotate(180deg); }
+.matrix-trim-collapse { padding: 16px; }
+@media (min-width: 768px) { .matrix-trim-collapse { padding: 24px; } }
+.matrix-col-title {
+  font-weight: 700; text-transform: uppercase; color: var(--text-muted);
+  font-size: 0.82rem; margin-bottom: 14px; display: flex; align-items: center; gap: 6px;
+}
+.matrix-eval-box {
+  padding: 12px; margin-bottom: 8px; border-radius: 12px;
+  border: 1px solid var(--border-color); background: var(--bg-surface-secondary);
+}
+/* Pont d'évaluation pleine largeur dans la colonne 4/12 (parité template w-100). */
+.matrix-eval-box .bridge-btn { width: 100%; justify-content: center; }
+
+/* ── Programme : carte + encadré ressources (retours ligne préservés) ── */
+.programme-card { display: flex; flex-direction: column; }
+.programme-resources {
+  margin-bottom: 12px; padding: 12px 16px; border-radius: 12px;
+  border: 1px solid var(--border-color); background: var(--bg-surface-secondary);
+  flex-grow: 1;
+}
+
+/* ── Cours : barre titre repliable + corps + vignettes du rail ── */
+.cours-title-toggle {
+  display: flex; align-items: center; gap: 8px; flex-grow: 1; flex-wrap: wrap;
+  cursor: pointer; background: transparent; border: none; text-align: start;
+  color: inherit; font-family: inherit; padding: 0;
+}
+.cours-body { animation: tabFadeSlide 0.3s cubic-bezier(0.16,1,0.3,1) forwards; }
+.cours-scan-thumb {
+  border: 1px solid var(--border-color); border-radius: 12px; overflow: hidden;
+  box-shadow: var(--card-shadow); background: var(--bg-surface);
+}
+.cours-scan-thumb-head {
+  display: flex; justify-content: space-between; align-items: center; gap: 8px;
+  padding: 8px 12px; background: #0f172a; color: #fff; font-size: 0.85rem;
+}
+
+/* ==========================================================================
+   VAGUE C — Onglets 4 (Banque d'exercices) · 5 (Évaluations 50/50) · 6 (Galerie)
+   Ajouts UNIQUEMENT en fin de fichier (les classes de base — .content-box,
+   .bridge-*, .scan-grid-card, .scan-thumb-wrap, .fluid-pane, .badge-*,
+   .target-highlight — existent déjà plus haut et ne sont PAS redéfinies).
+   ========================================================================== */
+
+/* ── Utilitaires partagés (RTL-safe, propriétés logiques) ── */
+.d-flex { display: flex; }
+.text-muted { color: var(--text-muted); font-size: 0.85rem; }
+.d-flex-header {
+  display: flex; flex-wrap: wrap; justify-content: space-between;
+  align-items: center; gap: 12px; margin-bottom: 18px;
+}
+.tab-title {
+  display: flex; align-items: center; gap: 8px;
+  margin: 0; font-weight: 800; font-size: 1.25rem;
+}
+
+/* ── btn-group (parité Bootstrap btn-group-sm : segments accolés) ── */
+.btn-group-c { display: inline-flex; }
+.btn-group-c .btn { border-radius: 0; }
+.btn-group-c .btn:first-child { border-start-start-radius: 20px; border-end-start-radius: 20px; }
+.btn-group-c .btn:last-child  { border-start-end-radius: 20px; border-end-end-radius: 20px; }
+.btn-group-c .btn + .btn { margin-inline-start: -1px; }
+/* État actif générique des filtres (parité .active du template) */
+.btn.active { background: var(--primary); color: #fff !important; border-color: var(--primary); box-shadow: 0 3px 10px rgba(37,99,235,0.3); z-index: 1; }
+.btn-outline-warning.active { background: var(--warning); color: #1e293b !important; border-color: var(--warning); }
+.btn-outline-info.active    { background: var(--info); color: #fff !important; border-color: var(--info); }
+.btn-outline-success.active { background: var(--success); color: #fff !important; border-color: var(--success); }
+
+/* ── Onglet 4 : grille d'exercices virtualisée (rangées de 2 cartes) ── */
+.exo-virtual-scroll { padding-inline: 2px; }
+.exo-virtual-row { min-width: 0; }
+.exo-grid-row {
+  display: grid; grid-template-columns: 1fr; gap: 16px; padding-block-end: 16px;
+}
+@media (min-width: 1200px) { .exo-grid-row { grid-template-columns: 1fr 1fr; } }
+.exo-card { height: 100%; display: flex; flex-direction: column; padding: 16px; }
+.exo-card-head {
+  display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;
+  margin-bottom: 10px; padding-bottom: 10px; border-bottom: 1px solid var(--border-color);
+}
+/* Aperçu du scan de page (collapse œil) — fond dark, thumb ≤ 280px */
+.exo-scan-preview { background: #0f172a; border-radius: 12px; padding: 8px; margin-bottom: 10px; text-align: center; }
+.exo-scan-preview-bar {
+  display: flex; justify-content: space-between; align-items: center;
+  color: #fff; font-size: 0.8rem; padding: 2px 6px 6px;
+}
+.exo-scan-fullscreen {
+  display: inline-flex; align-items: center; gap: 4px; background: transparent; border: none;
+  color: var(--warning); font-weight: 700; font-size: 0.8rem; cursor: pointer;
+}
+.exo-scan-img {
+  max-height: 280px; width: auto; max-width: 100%; border-radius: 8px;
+  border: 1px solid rgba(255,255,255,0.15); object-fit: contain;
+}
+.exo-section { margin-bottom: 10px; }
+.exo-section-title { font-weight: 700; font-size: 0.85rem; color: var(--text-muted); margin-bottom: 6px; }
+.exo-enonce {
+  font-size: 0.95rem; padding: 12px; border-radius: 12px;
+  border: 1px solid var(--border-color); background: var(--bg-surface-secondary);
+}
+.exo-corrige-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; gap: 8px; }
+/* Corrigé : fond vert d'évaluation (rgba(16,185,129,0.08)) */
+.exo-corrige-body {
+  font-size: 0.95rem; padding: 12px; border-radius: 12px;
+  border: 1px solid var(--border-color); background: rgba(16, 185, 129, 0.08);
+}
+
+/* ── Onglet 5 : évaluations 50/50 (fluid-pane) ── */
+.eval-item-card { margin-bottom: 24px; }
+.eval-card-head {
+  display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center;
+  gap: 8px; padding-bottom: 14px; margin-bottom: 14px; border-bottom: 1px solid var(--border-color);
+}
+.eval-title { margin: 0; font-weight: 700; font-size: 1.1rem; }
+.eval-panes { display: grid; grid-template-columns: 1fr; gap: 16px; align-items: start; }
+@media (min-width: 1200px) { .eval-panes.is-split { grid-template-columns: 1fr 1fr; } }
+.eval-pane { min-width: 0; }
+.eval-pane-subject, .eval-pane-correction { min-width: 0; }
+.eval-pane-inner { padding: 16px; border-radius: 12px; border: 1px solid var(--border-color); height: 100%; }
+.eval-pane-inner-subject { background: var(--bg-surface); }
+/* Colonne corrigé : fond vert d'évaluation */
+.eval-pane-inner-correction { background: rgba(16, 185, 129, 0.08); }
+.eval-pane-title { font-weight: 700; font-size: 0.95rem; margin-bottom: 10px; padding-bottom: 8px; border-bottom: 1px solid var(--border-color); }
+.eval-pane-title-subject { color: var(--primary); }
+.eval-pane-title-correction { color: var(--success); }
+.eval-correction-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 10px; padding-bottom: 8px; border-bottom: 1px solid var(--border-color); }
+
+/* ── Onglet 6 : galerie virtualisée (rangées, colonnes via grid inline) ── */
+.scan-virtual-scroll { padding-inline: 2px; }
+.scan-grid-row { display: grid; gap: 12px; padding-block-end: 12px; }
+.scan-card-flex { height: 100%; display: flex; flex-direction: column; }
+.scan-card-eval { border-color: var(--info); }
+.scan-card-body {
+  padding: 8px; display: flex; flex-direction: column; justify-content: space-between;
+  flex-grow: 1; border-top: 1px solid var(--border-color); background: var(--bg-surface);
+}
+.scan-chapter-title {
+  display: block; color: var(--text-muted); font-size: 0.78rem;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-bottom: 4px;
+}
+/* Badge n° page / type — position absolue en tête de vignette (start) */
+.scan-badge-page {
+  position: absolute; inset-block-start: 8px; inset-inline-start: 8px;
+  cursor: pointer; box-shadow: 0 2px 6px rgba(0,0,0,0.3); z-index: 2;
+}
+/* Badge trimestre / livre — bas / end de vignette */
+.scan-badge-trim {
+  position: absolute; inset-block-end: 8px; inset-inline-end: 8px;
+  background: rgba(15,23,42,0.78); color: #fff; border: none;
+  cursor: pointer; box-shadow: 0 2px 6px rgba(0,0,0,0.3); z-index: 2; font-size: 0.72rem;
+}
+/* Badge « N تمارين » (danger-subtle → filtre exercices) */
+.scan-badge-exos {
+  display: inline-flex; align-items: center; gap: 4px; margin-top: 4px;
+  background: rgba(239,68,68,0.12); color: var(--danger); border: 1px solid rgba(239,68,68,0.3);
+  cursor: pointer; font-size: 0.72rem;
+}
+.scan-card-actions { display: flex; gap: 6px; padding-top: 6px; border-top: 1px solid var(--border-color); margin-top: 6px; }
+.scan-card-actions .bridge-btn { flex: 1; justify-content: center; padding-block: 4px; }
+/* Séparateur vertical (parité .vr Bootstrap) */
+.scan-vr { display: inline-block; width: 1px; align-self: stretch; min-height: 24px; background: var(--border-color); margin-inline: 4px; }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   VAGUE D — Splash télémétrique · ChunkEditor · Télémétrie · Cycle de vie ·
+   Import Tier 3 · Command Palette (§5.2.1, §7.4/7.8/7.9/7.10/7.11, PARTIE 8)
+   Valeurs portées EXACTEMENT de Template_UI-UX/library.php (l.417-475).
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* ── Splash Screen (§5.2.1) ── */
+#splash-screen {
+  position: fixed; inset: 0; width: 100vw; height: 100vh;
+  background: radial-gradient(circle at center, #1e293b 0%, #070d1e 100%);
+  z-index: 99999;
+  display: flex; flex-direction: column; justify-content: center; align-items: center;
+  color: #ffffff;
+  transition: opacity 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+  user-select: none; opacity: 1;
+}
+#splash-screen.splash-leaving { opacity: 0; }
+
+.splash-card {
+  background: rgba(15, 23, 42, 0.85);
+  backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 28px; padding: 40px; max-width: 600px; width: 90%;
+  text-align: center;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5), 0 0 40px rgba(37, 99, 235, 0.2);
+}
+
+.splash-icon { margin-bottom: 20px; display: flex; justify-content: center; }
+.splash-atom { color: #f59e0b; animation: splashSpin 2s linear infinite, pulseGlow 2s infinite ease-in-out; }
+@keyframes splashSpin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+@keyframes pulseGlow {
+  0%, 100% { transform: scale(1); filter: drop-shadow(0 0 15px rgba(245, 158, 11, 0.5)); }
+  50% { transform: scale(1.08); filter: drop-shadow(0 0 25px rgba(37, 99, 235, 0.8)); }
+}
+
+.splash-title { font-weight: 800; margin: 0 0 4px 0; color: #fff; font-size: 1.5rem; }
+.splash-subtitle { color: #94a3b8; font-size: 0.9rem; margin: 0 0 12px 0; }
+.splash-accent-warning { color: #f59e0b; }
+
+.splash-progress-track {
+  background: rgba(255, 255, 255, 0.1); height: 10px; border-radius: 20px;
+  overflow: hidden; margin: 24px 0 16px 0; border: 1px solid rgba(255, 255, 255, 0.05);
+}
+.splash-progress-bar {
+  height: 100%; width: 0%;
+  background: linear-gradient(90deg, #3b82f6, #10b981, #f59e0b);
+  border-radius: 20px; transition: width 0.1s ease-out;
+  box-shadow: 0 0 15px rgba(16, 185, 129, 0.8);
+}
+
+.splash-status-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; gap: 12px; }
+.splash-status-text { color: #f59e0b; font-weight: 700; font-size: 0.85rem; }
+.splash-percent {
+  background: #3b82f6; color: #fff; padding: 4px 14px; border-radius: 20px;
+  font-size: 1rem; font-weight: 800;
+}
+.splash-badges {
+  display: flex; flex-wrap: wrap; justify-content: center; gap: 8px;
+  padding-top: 14px; border-top: 1px solid rgba(255, 255, 255, 0.15);
+}
+.splash-badge { font-size: 0.78rem; font-weight: 700; padding: 3px 12px; border-radius: 20px; }
+.splash-badge-success { background: rgba(16, 185, 129, 0.9); color: #fff; }
+.splash-badge-warning { background: rgba(245, 158, 11, 0.9); color: #1e293b; }
+.splash-badge-info { background: rgba(6, 182, 212, 0.9); color: #1e293b; }
+
+/* ── ChunkEditor (§7.4) ── */
+.chunk-editor-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+@media (max-width: 992px) { .chunk-editor-grid { grid-template-columns: 1fr; } }
+.chunk-editor-col { display: flex; flex-direction: column; }
+.chunk-editor-label { font-size: 0.8rem; font-weight: 700; color: var(--text-muted); margin-bottom: 6px; }
+.chunk-editor-textarea { min-height: 360px; font-size: 0.9rem; line-height: 1.7; }
+.chunk-editor-preview { min-height: 360px; max-height: 480px; overflow-y: auto; }
+.chunk-lint-panel {
+  margin-top: 16px; padding: 12px 14px; border-radius: 12px;
+  background: var(--bg-card-inner); border: 1px solid var(--border-color);
+  display: flex; flex-direction: column; gap: 6px;
+}
+.chunk-lint-row { display: flex; align-items: center; gap: 8px; font-size: 0.85rem; }
+.chunk-lint-ok { color: var(--success); }
+.chunk-lint-warning { color: var(--warning); }
+.chunk-lint-error { color: var(--danger); }
+.chunk-lint-divider { font-size: 0.78rem; font-weight: 700; color: var(--text-muted); margin-top: 6px; padding-top: 6px; border-top: 1px dashed var(--border-color); }
+
+/* ── Déclencheur d'édition discret (Mode Repli, §7.4) ── */
+.chunk-edit-trigger {
+  display: inline-flex; align-items: center; gap: 4px;
+  background: transparent; border: 1px solid var(--border-color);
+  color: var(--text-muted); border-radius: 20px; padding: 2px 10px;
+  font-size: 0.72rem; font-weight: 700; cursor: pointer; opacity: 0.55;
+  transition: opacity var(--dur-2) var(--ease-out-quad), color var(--dur-2), border-color var(--dur-2);
+}
+.content-box:hover .chunk-edit-trigger { opacity: 1; }
+.chunk-edit-trigger:hover, .chunk-edit-trigger:focus-visible { color: var(--primary); border-color: var(--primary); opacity: 1; }
+
+/* ── Bandeau d'état curriculum (§7.10) ── */
+.curriculum-status-banner {
+  border-radius: 12px; padding: 10px 16px; font-size: 0.88rem; font-weight: 700;
+  border: 1px solid var(--border-color);
+}
+.curriculum-status-banner.is-active { background: rgba(16, 185, 129, 0.1); color: var(--success); border-color: rgba(16, 185, 129, 0.35); }
+.curriculum-status-banner.is-fallback { background: var(--bg-surface-secondary); color: var(--text-muted); }
+
+/* ── Télémétrie (§7.9) ── */
+.telemetry-kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 16px; }
+.telemetry-kpi { background: var(--bg-card-inner); border: 1px solid var(--border-color); border-radius: 14px; padding: 16px 14px; text-align: center; }
+.telemetry-kpi-value { font-size: 1.6rem; font-weight: 800; color: var(--text-heading); }
+.telemetry-kpi-label { font-size: 0.78rem; color: var(--text-muted); margin-top: 4px; }
+.telemetry-chart { background: var(--bg-card-inner); border: 1px solid var(--border-color); border-radius: 14px; padding: 14px; }
+.telemetry-chart-caption { font-size: 0.78rem; color: var(--text-muted); margin-top: 8px; text-align: center; }
+
+/* ── Import Tier 3 (§7.11) ── */
+.artifact-field-label { display: block; font-size: 0.8rem; font-weight: 700; color: var(--text-muted); margin-bottom: 6px; }
+
+/* ── Command Palette (PARTIE 8) ── */
+.cmd-overlay {
+  position: fixed; inset: 0; z-index: 9500;
+  background: rgba(2, 6, 23, 0.55); backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);
+  display: flex; align-items: flex-start; justify-content: center; padding-top: 12vh;
+  animation: cmdFade var(--dur-2) var(--ease-out-quad);
+}
+@keyframes cmdFade { from { opacity: 0; } to { opacity: 1; } }
+.cmd-palette {
+  width: min(90vw, 620px); background: var(--bg-surface); border: 1px solid var(--border-color);
+  border-radius: 18px; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+  overflow: hidden; animation: cmdRise var(--dur-3) var(--ease-out-quart);
+}
+@keyframes cmdRise { from { transform: translateY(-12px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+.cmd-input-row { display: flex; align-items: center; gap: 10px; padding: 14px 18px; border-bottom: 1px solid var(--border-color); }
+.cmd-input-icon { color: var(--text-muted); flex-shrink: 0; }
+.cmd-input { flex: 1; background: transparent; border: none; outline: none; color: var(--text-heading); font-size: 1rem; }
+.cmd-kbd { font-size: 0.72rem; color: var(--text-muted); border: 1px solid var(--border-color); border-radius: 6px; padding: 2px 6px; background: var(--bg-surface-secondary); }
+.cmd-results { max-height: 52vh; overflow-y: auto; padding: 8px; }
+.cmd-empty { padding: 24px; text-align: center; color: var(--text-muted); }
+.cmd-group { margin-bottom: 8px; }
+.cmd-group-title { font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); padding: 6px 10px; }
+.cmd-item {
+  display: flex; align-items: center; gap: 12px; width: 100%; text-align: start;
+  background: transparent; border: none; border-radius: 10px; padding: 10px 12px;
+  color: var(--text-main); cursor: pointer; font-size: 0.92rem;
+  transition: background-color var(--dur-1) var(--ease-out-quad);
+}
+.cmd-item.is-active, .cmd-item:hover { background: color-mix(in srgb, var(--engine-accent) 14%, transparent); }
+.cmd-item-icon { color: var(--engine-accent); display: inline-flex; flex-shrink: 0; }
+.cmd-item-label { flex: 1; }

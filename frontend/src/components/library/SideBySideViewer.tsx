@@ -1,4 +1,5 @@
 import { useMemo } from 'react'
+import { Pencil } from 'lucide-react'
 import type { Chunk } from '@/types'
 import { api } from '@/lib/api'
 import { useLanguage } from '@/contexts/LanguageContext'
@@ -14,10 +15,12 @@ interface Props {
   onPrev: () => void
   onNext: () => void
   highlightChunkId: string | null
+  /** §7.4 — point d'accroche discret de la correction humaine (ChunkEditor). */
+  onEditChunk?: (chunk: Chunk) => void
 }
 
 /** SideBySideViewer : chunks de la page (Markdown+KaTeX) côte à côte avec le scan. */
-export default function SideBySideViewer({ db, documentId, page, totalPages, chunks, onPrev, onNext, highlightChunkId }: Props) {
+export default function SideBySideViewer({ db, documentId, page, totalPages, chunks, onPrev, onNext, highlightChunkId, onEditChunk }: Props) {
   const { t } = useLanguage()
   const scanUrl = useMemo(() => api.library.getPageScanUrl(db, documentId, page, false), [db, documentId, page])
   const thumbUrl = useMemo(() => api.library.getPageScanUrl(db, documentId, page, true), [db, documentId, page])
@@ -54,11 +57,23 @@ export default function SideBySideViewer({ db, documentId, page, totalPages, chu
                       {c.pedagogical_type && <span className="badge badge-secondary">{c.pedagogical_type}</span>}
                       {c.pedagogical_index != null && <span className="badge badge-info">#{c.pedagogical_index}</span>}
                     </span>
-                    {c.is_human_edited === 1 && (
-                      <span className="badge badge-human-edited" title="محمي من عمليات التطهير وإعادة الإدماج">
-                        <i className="fa-solid fa-user-pen" /> {t('library.human_edited')}
-                      </span>
-                    )}
+                    <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
+                      {c.is_human_edited === 1 && (
+                        <span className="badge badge-human-edited" title="محمي من عمليات التطهير وإعادة الإدماج">
+                          <i className="fa-solid fa-user-pen" /> {t('library.human_edited')}
+                        </span>
+                      )}
+                      {onEditChunk && (
+                        <button
+                          className="chunk-edit-trigger"
+                          onClick={() => onEditChunk(c)}
+                          title="تصحيح"
+                          aria-label="éditer ce chunk"
+                        >
+                          <Pencil size={13} /> تصحيح
+                        </button>
+                      )}
+                    </span>
                   </div>
                   <MarkdownContent source={c.content_markdown} className="content-box" />
                 </div>

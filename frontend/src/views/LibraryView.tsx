@@ -10,6 +10,7 @@ import LanguageSelector from '@/components/layout/LanguageSelector'
 import EngineBadge from '@/components/layout/EngineBadge'
 import TOCExplorer from '@/components/library/TOCExplorer'
 import SideBySideViewer from '@/components/library/SideBySideViewer'
+import ChunkEditor from '@/components/library/ChunkEditor'
 import SearchStudio from '@/components/library/SearchStudio'
 import AskStudio from '@/components/library/AskStudio'
 import OnboardingEmptyState from '@/components/common/OnboardingEmptyState'
@@ -42,6 +43,9 @@ export default function LibraryView() {
   const [highlightChunkId, setHighlightChunkId] = useState<string | null>(null)
 
   const [facets, setFacets] = useState<Facets | null>(null)
+
+  // ── Correction humaine (§7.4 ChunkEditor) ──
+  const [editingChunk, setEditingChunk] = useState<Chunk | null>(null)
 
   // ── Curriculum (V3.1 D1-B) : décide Mode Repli vs 6 onglets pixel-perfect ──
   const [curriculum, setCurriculum] = useState<CurriculumPayload | null>(null)
@@ -307,6 +311,7 @@ export default function LibraryView() {
                     onPrev={() => goToPage(Math.max(1, page - 1))}
                     onNext={() => goToPage(page + 1)}
                     highlightChunkId={highlightChunkId}
+                    onEditChunk={setEditingChunk}
                   />
                 </div>
               )
@@ -322,6 +327,19 @@ export default function LibraryView() {
       <button className="floating-sidebar-toggle" onClick={() => setSidebarOpen(o => !o)} aria-label="toggle sidebar">
         <i className="fa-solid fa-bars" />
       </button>
+
+      {editingChunk && activeDb && (
+        <ChunkEditor
+          chunk={editingChunk}
+          activeDb={activeDb}
+          open={!!editingChunk}
+          onClose={() => setEditingChunk(null)}
+          onSaved={(updated) => {
+            setChunks(prev => prev.map(c => (c.id === updated.id ? updated : c)))
+            setEditingChunk(null)
+          }}
+        />
+      )}
     </div>
   )
 }
