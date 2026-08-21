@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { api } from '@/lib/api'
+import { api, getAdminToken, setAdminToken } from '@/lib/api'
 import type { AppSettings } from '@/types'
 import { useLanguage } from '@/contexts/LanguageContext'
 import { useToast } from '@/components/common/Toast'
@@ -11,6 +11,15 @@ const DEFAULTS = { vec_distance_threshold: 0.45, bm25_score_threshold: -1.5 }
 export default function SettingsPanel() {
   const { t } = useLanguage()
   const toast = useToast()
+  const [adminToken, setTokenState] = useState<string>(() => getAdminToken() ?? '')
+  const [tokenSaved, setTokenSaved] = useState<boolean>(() => Boolean(getAdminToken()))
+
+  const saveToken = () => {
+    setAdminToken(adminToken || null)
+    setTokenSaved(Boolean(adminToken.trim()))
+    if (adminToken.trim()) toast.success('Jeton d\'administration enregistré (session)')
+    else toast.success('Jeton effacé')
+  }
   const [settings, setSettings] = useState<AppSettings | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -43,6 +52,32 @@ export default function SettingsPanel() {
       <h3 style={{ marginBottom: 14 }}><i className="fa-solid fa-sliders" /> {t('automation.settings_panel')}</h3>
       {loading ? <Spinner /> : error ? <ErrorBanner message={error} onRetry={load} /> : settings && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+          {/* Phase 7 — jeton d'administration (mode atelier web) */}
+          <div className="admin-token-row">
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+              <strong>🔑 Jeton d'administration (web)</strong>
+              <span className={tokenSaved ? 'badge-token-on' : 'badge-token-off'}>
+                {tokenSaved ? 'actif (session)' : 'non défini'}
+              </span>
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <input
+                type="password"
+                className="admin-token-input"
+                placeholder="RAGDOM_AUTH_TOKEN du serveur (atelier)"
+                value={adminToken}
+                onChange={e => setTokenState(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') saveToken() }}
+                autoComplete="off"
+              />
+              <button className="btn btn-primary" onClick={saveToken}>Enregistrer</button>
+            </div>
+            <p className="hint" style={{ marginTop: 6 }}>
+              Requis uniquement sur un déploiement web en mode atelier : envoyé en
+              Authorization Bearer sur les actions d'administration (ingestion, purge, clés…).
+              Stocké dans cet onglet seulement — jamais sur le serveur ni sur le disque.
+            </p>
+          </div>
           <SliderRow
             label={t('settings.vec_threshold')}
             hint={t('settings.vec_threshold_hint')}

@@ -11,9 +11,26 @@ import type {
 // vide en local (même origine via le proxy Vite / le reverse-proxy de production).
 const BASE_URL = `${import.meta.env.VITE_API_URL ?? ''}/api`
 
+// ── Phase 7 : jeton d'administration (mode atelier web, auth Bearer) ─────────
+// Stocké en sessionStorage uniquement (jamais persisté au-delà de l'onglet).
+const ADMIN_TOKEN_KEY = 'ragdom_admin_token'
+export function getAdminToken(): string | null {
+  try { return sessionStorage.getItem(ADMIN_TOKEN_KEY) } catch { return null }
+}
+export function setAdminToken(token: string | null): void {
+  try {
+    if (token && token.trim()) sessionStorage.setItem(ADMIN_TOKEN_KEY, token.trim())
+    else sessionStorage.removeItem(ADMIN_TOKEN_KEY)
+  } catch { /* stockage indisponible : le jeton reste requis par requête */ }
+}
+function authHeaders(): Record<string, string> {
+  const token = getAdminToken()
+  return token ? { Authorization: `Bearer ${token}` } : {}
+}
+
 async function request<T>(endpoint: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE_URL}${endpoint}`, {
-    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    headers: { 'Content-Type': 'application/json', ...authHeaders(), ...options?.headers },
     ...options,
   })
   if (!res.ok) {
@@ -39,7 +56,7 @@ export const api = {
     testVectorEngine: () => request<{ success: boolean; engine: string; message: string }>('/system/vector-engine/test', { method: 'POST' }),
     // ── AJOUTS V3.2 / V3.4 (§7.14) ──
     getSources: () => request<{ tree: SourceNode[] }>('/system/sources'),
-    uploadSource: (formData: FormData) => fetch(`${BASE_URL}/system/sources/upload`, { method: 'POST', body: formData }).then(r => r.json()),
+    uploadSource: (formData: FormData) => fetch(`${BASE_URL}/system/sources/upload`, { method: 'POST', headers: authHeaders(), body: formData }).then(r => r.json()),
     createSourceFolder: (relPath: string) => request('/system/sources/folder', { method: 'POST', body: JSON.stringify({ rel_path: relPath }) }),
     deleteSource: (relPath: string) => request(`/system/sources?rel_path=${encodeURIComponent(relPath)}`, { method: 'DELETE' }),
     getDatabaseExportUrl: (filename: string) => `${BASE_URL}/system/databases/${encodeURIComponent(filename)}/export`,
@@ -119,7 +136,11 @@ export const api = {
     cancelBatch: (batchId: string) => request(`/pipeline/batch/${batchId}`, { method: 'DELETE' }),
     reset: (db: string, documentId?: string) => // V3.1.1 : document_id optionnel (reset base entière)
       request(withDb('/pipeline/reset', db, documentId ? { document_id: documentId } : undefined), { method: 'POST' }),
-    createStream: (): EventSource => new EventSource(`${BASE_URL}/pipeline/stream`),
+    createStream: (): EventSource => {
+      const token = getAdminToken()
+      const qs = token ? `?auth_token=${encodeURIComponent(token)}` : ''
+      return new EventSource(`${BASE_URL}/pipeline/stream${qs}`)
+    },
     // ── AJOUTS V3.2 (§7.14) ──
     purge: (payload: PurgePayload) =>
       request<PurgeResult>('/pipeline/purge', { method: 'POST', body: JSON.stringify(payload) }),

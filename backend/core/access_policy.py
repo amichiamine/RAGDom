@@ -74,6 +74,11 @@ class AccessPolicyMiddleware(BaseHTTPMiddleware):
         # 2) Jeton d'administration (Palier 3).
         if not public and config.RAGDOM_AUTH_TOKEN:
             auth = request.headers.get("authorization", "")
+            if not auth and path == "/api/pipeline/stream":
+                # EventSource ne peut pas porter d'entêtes : jeton accepté en query param
+                query_token = request.query_params.get("auth_token", "")
+                if query_token:
+                    auth = "Bearer " + query_token
             if auth != "Bearer %s" % config.RAGDOM_AUTH_TOKEN:
                 return JSONResponse(
                     {"detail": "Jeton d'administration requis (Authorization: Bearer)"},
