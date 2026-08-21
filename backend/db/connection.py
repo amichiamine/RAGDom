@@ -200,11 +200,42 @@ def init_config_db() -> None:
                  " ('gemini-1.5-flash','llama-3.1-70b-versatile','gpt-4o-mini',"
                  "  'claude-3-haiku-20240307','local-model','llama3','webhook')")
     conn.commit()
+    _seed_llm_keys_from_env(conn)
     row = conn.execute("SELECT value FROM app_settings WHERE key='force_sqlite_vec'").fetchone()
     if row is not None:
         _vector_state["force"] = (row[0] == "true") or config.RAGDOM_FORCE_SQLITE_VEC
     conn.close()
 
+
+def _seed_llm_keys_from_env(conn) -> None:
+    """Seed IDEMPOTENT des clés LLM depuis RAGDOM_SEED_LLM_KEYS (déploiements web).
+
+    Format : entrées séparées par des virgules ou retours ligne, chacune
+    `provider:clé` ou `provider:clé:modèle`. À chaque démarrage, toute entrée
+    absente de llm_keys (même provider + même clé + même modèle) est insérée et
+    le provider est activé — indispensable sur disque ÉPHÉMÈRE (Render) où la
+    base de config repart de zéro. Jamais de secret dans le dépôt.
+    """
+    import os as _os
+    import uuid as _uuid
+    raw = _os.environ.get("RAGDOM_SEED_LLM_KEYS", "").strip()
+    if not raw:
+        return
+    for entry in [e.strip() for e in raw.replace("\n", ",").split(",") if e.strip()]:
+        parts = entry.split(":", 2)
+        if len(parts) < 2:
+            continue
+        provider, api_key = parts[0].strip().lower(), parts[1].strip()
+        model = parts[2].strip() if len(parts) > 2 and parts[2].strip() else None
+        exists = conn.execute(
+            "SELECT 1 FROM llm_keys WHERE provider=? AND api_key=?"
+            " AND COALESCE(active_model,'')=COALESCE(?,'')",
+            (provider, api_key, model)).fetchone()
+        if not exists:
+            conn.execute("INSERT INTO llm_keys (id, provider, api_key, active_model)"
+                         " VALUES (?,?,?,?)", (str(_uuid.uuid4()), provider, api_key, model))
+        conn.execute("UPDATE llm_settings SET is_enabled=1 WHERE provider=?", (provider,))
+    conn.commit()
 
 def _set_app_setting(key: str, value: str) -> None:
     conn = get_config_db()

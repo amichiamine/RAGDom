@@ -38,6 +38,11 @@ async def lifespan(app: FastAPI):
             raise RuntimeError("Variable d'environnement manquante : %s" % env_var)
         os.makedirs(path, exist_ok=True)
 
+    from api import routes_pipeline
+    resumed = routes_pipeline.resume_pending_queues()
+    if resumed:
+        print("[RAGDom] Reprise des files interrompues : %s" % resumed)
+
     engines = engine_registry.scan_engines()
     print("[RAGDom] Moteurs détectés : %s" % (", ".join(e["id"] for e in engines) or "aucun"))
     print("[RAGDom] Backend prêt.")
