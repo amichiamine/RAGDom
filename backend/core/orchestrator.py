@@ -182,6 +182,9 @@ class PipelineOrchestrator:
                         logger.info("SolutionLinker %s : %d liaison(s)", doc_id, linked)
                     except FileNotFoundError:
                         logger.warning("layer_3bis_link absent du moteur %s", manifest["id"])
+                    built = _build_toc_from_headings(conn, doc_id)
+                    if built:
+                        logger.info("Sommaire dérivé des titres pour %s : %d entrées", doc_id, built)
                 artifacts = conn.execute(
                     "SELECT COUNT(*) FROM scientific_artifacts WHERE document_id IN (%s)"
                     % ",".join("?" * len(docs)), docs).fetchone()[0] if docs else 0
@@ -287,6 +290,64 @@ class PipelineOrchestrator:
         finally:
             self._current = None
             gc.collect()  # Purge mémoire (Skills §2.1) — les couches purgent aussi leurs pixmaps.
+
+
+
+
+_HEADING_RE = None  # compilé paresseusement (module importé au boot)
+
+
+def _build_toc_from_headings(conn, doc_id: str) -> int:
+    """Sommaire de REPLI (documents scannés sans signets natifs) : dérivé des
+    titres Markdown (## niveau 1, ### niveau 2) produits par l'extraction.
+    N'écrit RIEN si un sommaire natif existe déjà. Idempotent (purge scope
+    incluse : les toc_entries du document sont recalculées à chaque finalize
+    complet). Relie les chunks du périmètre à leur entrée (toc_id).
+    """
+    import re as _re
+    import uuid as _uuid
+    global _HEADING_RE
+    if _HEADING_RE is None:
+        _HEADING_RE = _re.compile(r"^(#{2,3})\s+(.{3,120})$", _re.M)
+    if conn.execute("SELECT COUNT(*) FROM document_toc WHERE document_id=?",
+                    (doc_id,)).fetchone()[0] > 0:
+        return 0
+    rows = conn.execute(
+        "SELECT page_number, content_markdown FROM document_chunks"
+        " WHERE document_id=? AND content_markdown LIKE '%#%'"
+        " ORDER BY page_number, chunk_index", (doc_id,)).fetchall()
+    entries, last_title = [], {1: None, 2: None}
+    for page, md in rows:
+        for match in _HEADING_RE.finditer(md or ""):
+            level = 1 if len(match.group(1)) == 2 else 2
+            title = " ".join(match.group(2).split()).strip("*# ")
+            if not title or title == last_title.get(level):
+                continue
+            entries.append({"level": level, "title": title[:120], "page": page})
+            last_title[level] = title
+            if level == 1:
+                last_title[2] = None
+            break  # UNE entrée par page : granularité sommaire, pas index exhaustif
+    if not entries:
+        return 0
+    total = conn.execute("SELECT total_pages FROM documents WHERE id=?", (doc_id,)).fetchone()[0]
+    parent_l1 = None
+    for i, e in enumerate(entries):
+        nxt = next((n["page"] for n in entries[i + 1:] if n["level"] <= e["level"]), None)
+        e["id"] = str(_uuid.uuid4())
+        e["page_end"] = (nxt - 1) if nxt and nxt > e["page"] else (total or e["page"])
+        e["parent"] = parent_l1 if e["level"] == 2 else None
+        if e["level"] == 1:
+            parent_l1 = e["id"]
+        conn.execute(
+            "INSERT INTO document_toc (id, document_id, parent_id, level, title, page_start, page_end)"
+            " VALUES (?,?,?,?,?,?,?)",
+            (e["id"], doc_id, e["parent"], e["level"], e["title"], e["page"], e["page_end"]))
+        conn.execute(
+            "UPDATE document_chunks SET toc_id=? WHERE document_id=? AND toc_id IS NULL"
+            " AND page_number BETWEEN ? AND ?", (e["id"], doc_id, e["page"], e["page_end"]))
+    conn.commit()
+    return len(entries)
 
 
 def _rss_mb() -> int:
