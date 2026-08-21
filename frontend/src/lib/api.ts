@@ -75,8 +75,10 @@ function humanizeApiError(detail: unknown, status: number): string {
 
 async function request<T>(endpoint: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE_URL}${endpoint}`, {
-    headers: { 'Content-Type': 'application/json', ...authHeaders(), ...options?.headers },
     ...options,
+    // headers fusionnés EN DERNIER : Content-Type ne doit jamais être écrasé
+    // par un spread d'options (cause du bug 422 « Input should be a valid dictionary »).
+    headers: { 'Content-Type': 'application/json', ...authHeaders(), ...options?.headers },
   })
   if (!res.ok) {
     // /auth/* gère ses propres 401 (login/setup échoués) : ne pas intercepter.
