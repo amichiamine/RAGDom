@@ -1,0 +1,14 @@
+.venv/
+__pycache__/
+*.pyc
+node_modules/
+databases/*.sqlite
+databases/*.sqlite-wal
+databases/*.sqlite-shm
+pipeline-set/*
+!pipeline-set/.gitkeep
+backend/.env
+backend/ragdom_config.sqlite
+backend/models/embedding/*
+engines/*/models/*
+.pytest_cache/

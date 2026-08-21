@@ -1,0 +1,8 @@
+{
+  "id": "sci-engine",
+  "label": "Moteur Scientifique",
+  "version": "1.0.0",
+  "accent": "#2563eb",
+  "families_tier1": ["latex_formula", "data_table", "code_snippet", "geometry_vector", "flowchart", "dense_illustration", "microscopy_photo"],
+  "status": "active"
+}
