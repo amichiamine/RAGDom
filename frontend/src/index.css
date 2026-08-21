@@ -936,3 +936,43 @@ footer { border-top: 1px solid var(--border-color); padding: 30px 0; margin-top:
 .engine-tile-dot { width: 14px; height: 14px; border-radius: 50%; flex-shrink: 0; box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 8%, transparent); }
 .engine-tile-label { font-weight: 800; color: var(--text-heading); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .engine-tile-version { font-size: 0.78rem; color: var(--text-muted); font-family: 'Consolas','Courier New',monospace; }
+
+/* ── Providers unifiés (V3.7) : panneau accordéon fournisseurs LLM ── */
+.providers-accordion { display: flex; flex-direction: column; gap: 10px; }
+.provider-block {
+  border: 1px solid var(--border-color); border-radius: 14px;
+  background: var(--bg-card-inner); overflow: hidden;
+  transition: border-color var(--dur-2) var(--ease-out-quad);
+}
+.provider-block.is-open { border-color: color-mix(in srgb, var(--primary) 45%, transparent); }
+.provider-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  flex-wrap: wrap; padding: 12px 14px;
+}
+.provider-toggle {
+  display: inline-flex; align-items: center; gap: 10px;
+  background: none; border: none; cursor: pointer; padding: 4px 2px;
+  color: var(--text-heading); font: inherit;
+}
+.provider-chevron { color: var(--text-muted); width: 14px; text-align: center; }
+.provider-head-controls { display: inline-flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.provider-inline-field { display: inline-flex; align-items: center; gap: 6px; }
+.provider-mini-label { font-size: 0.78rem; color: var(--text-muted); }
+.provider-body {
+  display: flex; flex-direction: column; gap: 16px;
+  padding: 14px; border-top: 1px solid var(--border-color);
+}
+.provider-section { display: flex; flex-direction: column; gap: 8px; }
+.provider-section-title { font-weight: 700; font-size: 0.85rem; color: var(--text-heading); }
+.provider-section-title-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.provider-key-list { display: flex; flex-direction: column; gap: 8px; }
+.provider-key-row {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 8px 10px; border: 1px solid var(--border-color); border-radius: 10px;
+  background: var(--bg-surface);
+}
+.provider-key-mask { flex: 1; min-width: 140px; font-size: 0.85rem; }
+.provider-key-actions { display: inline-flex; gap: 6px; flex-wrap: wrap; }
+.provider-addkey { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 4px; }
+.provider-addkey .form-input { flex: 1; min-width: 200px; }
+.provider-models-empty { font-style: italic; }

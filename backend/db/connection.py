@@ -154,14 +154,15 @@ CREATE TABLE IF NOT EXISTS llm_settings (
     base_url      TEXT,                -- V3.5+ : endpoint personnalisé (LM Studio, proxy, webhook Make)
     updated_at    DATETIME DEFAULT CURRENT_TIMESTAMP
 );
+-- ZÉRO modèle codé en dur : active_model NULL → auto-détection live après saisie de la clé
 INSERT OR IGNORE INTO llm_settings (provider, active_model, is_enabled, priority) VALUES
-    ('gemini',    'gemini-1.5-flash', 0, 1),
-    ('groq',      'llama-3.1-70b-versatile', 0, 2),
-    ('openai',    'gpt-4o-mini', 0, 3),
-    ('anthropic', 'claude-3-haiku-20240307', 0, 4),
-    ('lmstudio',  'local-model', 0, 5),
-    ('make',      'webhook', 0, 6),
-    ('ollama',    'llama3', 0, 7);
+    ('gemini',    NULL, 0, 1),
+    ('groq',      NULL, 0, 2),
+    ('openai',    NULL, 0, 3),
+    ('anthropic', NULL, 0, 4),
+    ('lmstudio',  NULL, 0, 5),
+    ('make',      NULL, 0, 6),
+    ('ollama',    NULL, 0, 7);
 CREATE TABLE IF NOT EXISTS app_settings (
     key   TEXT PRIMARY KEY,
     value TEXT
@@ -189,6 +190,10 @@ def init_config_db() -> None:
         conn.execute("ALTER TABLE llm_settings ADD COLUMN base_url TEXT")
     conn.execute("UPDATE llm_settings SET base_url='http://localhost:1234/v1'"
                  " WHERE provider='lmstudio' AND base_url IS NULL")
+    # Purge des anciens modèles seedés en dur (obsolètes chez les providers → 404 au test)
+    conn.execute("UPDATE llm_settings SET active_model=NULL WHERE active_model IN"
+                 " ('gemini-1.5-flash','llama-3.1-70b-versatile','gpt-4o-mini',"
+                 "  'claude-3-haiku-20240307','local-model','llama3','webhook')")
     conn.commit()
     row = conn.execute("SELECT value FROM app_settings WHERE key='force_sqlite_vec'").fetchone()
     if row is not None:

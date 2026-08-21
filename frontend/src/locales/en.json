@@ -260,8 +260,19 @@
     "base_url": "Base URL",
     "save_row": "Save",
     "saved": "Provider updated",
-    "note": "LM Studio = local OpenAI-compatible API · Make = no-code webhook (Priority 3) · Ollama = final fallback",
-    "base_url_default": "official endpoint (empty)"
+    "note": "A key = an access secret · the provider is used in priority order when Enabled · the model is detected live at the provider.",
+    "base_url_default": "official endpoint (empty)",
+    "keys_title": "Access keys",
+    "no_keys": "No key registered for this provider.",
+    "add_key_placeholder": "Paste an API key…",
+    "model_active": "Active model",
+    "model_none": "— None —",
+    "detect_models": "Detect models",
+    "models_empty": "No model detected.",
+    "key_state_none": "No key",
+    "key_state_active": "Active key",
+    "key_state_blocked": "Blocked key",
+    "key_state_invalid": "Invalid key"
   },
   "engines": {
     "title": "Engines",

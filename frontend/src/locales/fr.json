@@ -260,8 +260,19 @@
     "base_url": "URL de base",
     "save_row": "Enregistrer",
     "saved": "Fournisseur mis à jour",
-    "note": "LM Studio = API compatible OpenAI locale · Make = webhook no-code (Priorité 3) · Ollama = repli final",
-    "base_url_default": "endpoint officiel (vide)"
+    "note": "Une clé = un secret d'accès · le fournisseur est utilisé dans l'ordre de priorité s'il est Actif · le modèle est détecté en direct chez le fournisseur.",
+    "base_url_default": "endpoint officiel (vide)",
+    "keys_title": "Clés d'accès",
+    "no_keys": "Aucune clé enregistrée pour ce fournisseur.",
+    "add_key_placeholder": "Coller une clé API…",
+    "model_active": "Modèle actif",
+    "model_none": "— Aucun —",
+    "detect_models": "Détecter les modèles",
+    "models_empty": "Aucun modèle détecté.",
+    "key_state_none": "Aucune clé",
+    "key_state_active": "Clé active",
+    "key_state_blocked": "Clé bloquée",
+    "key_state_invalid": "Clé invalide"
   },
   "engines": {
     "title": "Moteurs",
