@@ -14,7 +14,12 @@ import QuarantineManager from '@/components/automation/QuarantineManager'
 import PurgeStudio from '@/components/automation/PurgeStudio'
 import SourcesManager from '@/components/automation/SourcesManager'
 import SourceDocumentsTable from '@/components/automation/SourceDocumentsTable'
+import CurriculumStudio from '@/components/admin/CurriculumStudio'
+import TelemetryExplorer from '@/components/admin/TelemetryExplorer'
+import DatabaseLifecycle from '@/components/admin/DatabaseLifecycle'
+import ArtifactImportModal from '@/components/admin/ArtifactImportModal'
 import OnboardingEmptyState from '@/components/common/OnboardingEmptyState'
+import { FilePlus2 } from 'lucide-react'
 import { formatBytes, formatNumber } from '@/lib/utils'
 
 export default function AutomationView() {
@@ -25,6 +30,7 @@ export default function AutomationView() {
   const [health, setHealth] = useState<SystemHealth | null>(null)
   const [documents, setDocuments] = useState<Document[]>([])
   const [quarantineCount, setQuarantineCount] = useState(0)
+  const [artifactModalOpen, setArtifactModalOpen] = useState(false)
 
   const [lines, setLines] = useState<string[]>([])
   const [running, setRunning] = useState(false)
@@ -169,7 +175,8 @@ export default function AutomationView() {
         <SourcesManager onChanged={refresh} />
 
         {/* Documents sources */}
-        {activeDb && <SourceDocumentsTable db={activeDb} documents={documents} onIngested={loadDocs} />}
+        {activeDb && <SourceDocumentsTable db={activeDb} documents={documents} onIngested={loadDocs}
+          onBatchStarted={total => { setPagesTotal(prev => prev + total); setRunning(true) }} />}
 
         {/* Steps (5/12) + Console (7/12) */}
         <div className="row">
@@ -186,6 +193,25 @@ export default function AutomationView() {
           </div>
         </div>
 
+        {/* Import d'actif Tier 3 (§7.11) */}
+        {activeDb && (
+          <div className="auto-card" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+            <h3 style={{ margin: 0, display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+              <FilePlus2 size={20} /> Actifs Tier 3
+            </h3>
+            <button className="btn btn-outline-primary" onClick={() => setArtifactModalOpen(true)} disabled={documents.length === 0}>
+              <FilePlus2 size={16} /> ➕ Importer un actif
+            </button>
+          </div>
+        )}
+
+        {/* Curriculum Studio (§7.10) — clé de sortie du Mode Repli */}
+        {activeDb && <CurriculumStudio db={activeDb} onChanged={refresh} />}
+
+        {/* Télémétrie (§7.9) + Cycle de vie des bases (§7.8) */}
+        {activeDb && <TelemetryExplorer db={activeDb} documents={documents} />}
+        <DatabaseLifecycle databases={databases} onChanged={refresh} />
+
         {/* Purge + Settings */}
         {activeDb && <PurgeStudio db={activeDb} documents={documents} onPurged={refresh} />}
         <SettingsPanel />
@@ -196,6 +222,16 @@ export default function AutomationView() {
         {/* Clés LLM */}
         <KeyManager />
       </main>
+
+      {activeDb && (
+        <ArtifactImportModal
+          db={activeDb}
+          documents={documents}
+          open={artifactModalOpen}
+          onClose={() => setArtifactModalOpen(false)}
+          onImported={() => { setArtifactModalOpen(false); refresh() }}
+        />
+      )}
 
       <footer>
         <div className="container-app">

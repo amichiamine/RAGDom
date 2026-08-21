@@ -4,9 +4,12 @@ import type {
   AskResponse, PurgePayload, PurgeResult, QuarantineJob, SourceNode,
   BenchmarkRow, BenchmarkAggregates, AppSettings, EngineManifest,
   Document, TocNode, Chunk, Artifact, PaginatedResponse,
+  PageScanManifestEntry,
 } from '@/types'
 
-const BASE_URL = '/api'
+// Phase 7 : VITE_API_URL (origine du backend) pour l'UI hébergée (Cloudflare/tunnel) ;
+// vide en local (même origine via le proxy Vite / le reverse-proxy de production).
+const BASE_URL = `${import.meta.env.VITE_API_URL ?? ''}/api`
 
 async function request<T>(endpoint: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE_URL}${endpoint}`, {
@@ -55,13 +58,32 @@ export const api = {
       request<Facets>(withDb('/library/facets', db)),
     getCurriculum: (db: string) =>
       request<CurriculumPayload>(withDb('/library/curriculum', db)), // V3.1 — D1-B
-    getChunks: (db: string, documentId: string, page = 1) =>
-      request<{ chunks: Chunk[]; total_pages: number }>(withDb('/library/chunks', db, { document_id: documentId, page: String(page) })),
+    getChunks: (db: string, documentId: string, page = 1, filters?: { pedagogical_type?: string; page_start?: number; page_end?: number; toc_id?: string; term_index?: number }) =>
+      // Backend renvoie { data, chunks, pagination:{total_pages} } (routes_library.py) — on
+      // normalise en exposant `total_pages` au niveau racine attendu par les appelants.
+      request<{ chunks: Chunk[]; pagination: { total_pages: number } }>(withDb('/library/chunks', db, {
+        document_id: documentId,
+        page: String(page),
+        ...(filters?.pedagogical_type ? { pedagogical_type: filters.pedagogical_type } : {}),
+        ...(filters?.page_start != null ? { page_start: String(filters.page_start) } : {}),
+        ...(filters?.page_end != null ? { page_end: String(filters.page_end) } : {}),
+        ...(filters?.toc_id ? { toc_id: filters.toc_id } : {}),
+        ...(filters?.term_index != null ? { term_index: String(filters.term_index) } : {}),
+      })).then(r => ({ chunks: r.chunks ?? [], total_pages: r.pagination?.total_pages ?? 1 })),
     getArtifacts: (db: string, chunkId: string) =>
       request<{ artifacts: Artifact[] }>(withDb('/library/artifacts', db, { chunk_id: chunkId })),
     getPageScanUrl: (db: string, documentId: string, pageNumber: number, thumb = false) =>
       // V3.5 : servi depuis la table page_scans (base autonome). thumb=true → vignette pour galeries virtualisées.
       `${BASE_URL}${withDb('/library/page-scan', db, { document_id: documentId, page: String(pageNumber), ...(thumb ? { thumb: 'true' } : {}) })}`,
+    // V3.5 (Lot 1) : manifeste des scans de pages (jointure page_scans × toc × chunks) — jamais de glob fichiers.
+    getPageScansManifest: (db: string, documentId?: string) =>
+      // Backend renvoie { data, pagination } (routes_library.py page_scans_manifest) — on
+      // normalise en exposant `pages` (nom consommé par CurriculumWorkspace).
+      request<{ data: PageScanManifestEntry[] }>(withDb('/library/page-scans', db, documentId ? { document_id: documentId } : undefined))
+        .then(r => ({ pages: r.data ?? [] })),
+    // Binaire d'un artefact (figure) — cible de asset://figures/… résolue par le pipeline KaTeX.
+    getArtifactBinaryUrl: (db: string, artifactId: string) =>
+      `${BASE_URL}${withDb('/library/artifact-binary', db, { artifact_id: artifactId })}`,
     // ── AJOUTS V3.2 (§7.14) ──
     updateChunk: (db: string, id: string, patch: { content_markdown?: string; section_title?: string; pedagogical_type?: string }) =>
       request(withDb(`/library/chunks/${id}`, db), { method: 'PUT', body: JSON.stringify(patch) }),

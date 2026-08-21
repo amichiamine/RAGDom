@@ -251,3 +251,21 @@ Contre-audit indépendant du corpus V3.5 complet (7 fichiers, 4748 lignes) : **0
 
 Déviations Règle 7 consignées au feedback_log : sandbox Linux/Python 3.9 (code 3.9-compatible,
 cible Windows/3.11), RAGDOM_OFFLINE=true (modèles non téléchargeables ici), llama-cpp-python différé.
+
+
+## 10. JOURNAL D'IMPLÉMENTATION N°2 (2026-08-21 soir — exécution autonome complète)
+
+| Commit | Branche | Contenu | Preuves |
+|---|---|---|---|
+| 1df8936 | main | Plan du sprint parité pixel-perfect (11 lots) | inventaire exhaustif library.php (2346 l.) |
+| 746a3b6 / c0e7fa3 | main | Phase 7 documentée (3 paliers + §2bis moteurs) + master_plan | — |
+| 2084854 | main | Lot 1 : manifeste page-scans, agrégats curriculum, filtres chunks | pytest 38/38 |
+| 9859771 | main | Phase 5 : bench RAM 100p (57/489/356 Mo, 86 p/min) + Recovery SIGTERM | PASS, JSON de preuve en 04_state/ |
+| d099bf7 | main | Vague A : moteur KaTeX monopasse, ponts halo, shell 320px, TabHost | contrats publiés pour B/C/D |
+| e1ae94d | main | Vagues B/C/D : 6 onglets (virtualisés), Splash, CurriculumStudio, ChunkEditor, Telemetry, Lifecycle, ImportModal, Palette + audit croisé | 2 bugs runtime corrigés (pagination) |
+| c3d1a84 | post-v1 | Lot Web-Ready : readonly/Bearer/rate-limit/reveal/CORS | 6 tests, 44/44 |
+| 0337ccd | post-v1 | Phase 6 D4-B : layer_2_extract_v2 add-only, pool borné | équivalence prouvée, 47/47 |
+
+Sous-agents déployés : 5 (fondations, onglets 1-3, onglets 4-6, admin/splash, audit croisé)
++ 1 analyste template. Total tests backend : 47/47. npm resté bloqué (403) : build final
+et recette visuelle transférés à la machine cible (frontend/VALIDATION.md).
