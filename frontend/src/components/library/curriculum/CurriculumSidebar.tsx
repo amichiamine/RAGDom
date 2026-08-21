@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import {
   Atom, Network, GraduationCap, BookOpen, PenTool, FilePen, Images,
-  X, Search, Sun, Moon, ChevronDown, Database, CalendarRange, ArrowRight,
+  X, Search, Sun, Moon, ChevronDown, Database, CalendarRange, ArrowRight, MessageSquare,
 } from 'lucide-react'
 import type { DatabaseInfo, CurriculumAggregates } from '@/types'
 import { useTheme } from '@/contexts/ThemeContext'
@@ -18,6 +18,8 @@ interface Props {
   /** Bornes du Page Jumper : min/max réels issus du manifeste des scans. */
   pageBounds: { min: number; max: number } | null
   onPageJump: (page: number) => void
+  /** Curriculum peuplé ? Sinon le filtre trimestre 360° est désactivé (tooltip). */
+  curriculumAvailable: boolean
 }
 
 /** Filtres trimestre 360° (libellés + emojis normatifs, §5.2.2). */
@@ -39,7 +41,7 @@ const NAV_ITEMS: { tab: TabKey; icon: ReactNode; label: string; color: string }[
 ]
 
 export default function CurriculumSidebar({
-  open, onClose, databases, activeDb, onSelectDb, aggregates, pageBounds, onPageJump,
+  open, onClose, databases, activeDb, onSelectDb, aggregates, pageBounds, onPageJump, curriculumAvailable,
 }: Props) {
   const { theme, toggleTheme } = useTheme()
   const { activeTab, switchTab, trimFilter, setTrimFilter, searchQuery, setSearch } = useCurriculumBridge()
@@ -132,17 +134,19 @@ export default function CurriculumSidebar({
           )}
         </div>
 
-        {/* Dropdown Trimestre (bordure verte) */}
+        {/* Dropdown Trimestre 360° (bordure verte) — désactivé sans curriculum (tooltip) */}
         <div style={{ position: 'relative' }}>
           <button
             className="btn btn-sm"
-            style={{ width: '100%', justifyContent: 'space-between', background: 'var(--sidebar-bg-secondary)', color: '#fff', border: '1px solid var(--success)' }}
-            onClick={() => { setTrimMenuOpen(o => !o); setDbMenuOpen(false) }}
+            style={{ width: '100%', justifyContent: 'space-between', background: 'var(--sidebar-bg-secondary)', color: '#fff', border: '1px solid var(--success)', opacity: curriculumAvailable ? 1 : 0.5, cursor: curriculumAvailable ? 'pointer' : 'not-allowed' }}
+            onClick={() => { if (!curriculumAvailable) return; setTrimMenuOpen(o => !o); setDbMenuOpen(false) }}
+            disabled={!curriculumAvailable}
+            title={curriculumAvailable ? undefined : 'التصفية حسب الفصل تتطلب بناء المنهاج لهذه القاعدة'}
           >
             <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}><CalendarRange size={15} /> {activeTrimLabel}</span>
             <ChevronDown size={15} />
           </button>
-          {trimMenuOpen && (
+          {curriculumAvailable && trimMenuOpen && (
             <div className="dropdown-menu" style={{ position: 'absolute', insetInlineStart: 0, insetInlineEnd: 0, marginTop: 6 }}>
               {TRIM_OPTIONS.map(o => (
                 <button
@@ -218,6 +222,15 @@ export default function CurriculumSidebar({
 
       {/* Footer */}
       <div style={{ padding: 16, borderTop: '1px solid rgba(255,255,255,0.08)', display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {/* Accès direct aux studios Recherche / Sondage (Mode Repli) */}
+        <div style={{ display: 'flex', gap: 8 }}>
+          <Link to="/library?classic=1&tab=search" className="btn btn-outline-primary btn-sm rounded-pill" style={{ flex: 1, justifyContent: 'center' }}>
+            <Search size={14} /> بحث
+          </Link>
+          <Link to="/library?classic=1&tab=ask" className="btn btn-outline-info btn-sm rounded-pill" style={{ flex: 1, justifyContent: 'center' }}>
+            <MessageSquare size={14} /> استفسار
+          </Link>
+        </div>
         <button className="btn btn-sm" style={{ background: 'var(--sidebar-bg-secondary)', color: '#fff', border: '1px solid rgba(255,255,255,0.15)', justifyContent: 'center' }} onClick={toggleTheme}>
           {theme === 'dark' ? <><Sun size={15} /> الوضع النهاري</> : <><Moon size={15} /> الوضع الليلي</>}
         </button>

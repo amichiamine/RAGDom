@@ -112,7 +112,8 @@
     "no_scans": "Aucun scan disponible",
     "editor_show_scan": "Afficher le scan",
     "editor_hide_scan": "Masquer le scan",
-    "editor_original_scan": "Scan original (rappel)"
+    "editor_original_scan": "Scan original (rappel)",
+    "back_workspace": "Espace bibliothèque"
   },
   "search": {
     "placeholder": "Rechercher dans cette base...",
@@ -150,7 +151,25 @@
     "source_documents": "Documents sources",
     "key_manager": "Gestionnaire de clés",
     "purge_studio": "Studio de purge",
-    "settings_panel": "Seuils & Réglages"
+    "settings_panel": "Seuils & Réglages",
+    "first_use_title": "Première utilisation",
+    "first_use_msg": "Aucune base pour l'instant — déposez un PDF dans la carte Sources puis lancez l'ingestion : la base sera créée automatiquement.",
+    "tier3_assets": "Actifs Tier 3",
+    "import_asset": "Importer un actif",
+    "queue_state": "État de la file",
+    "queue_length": "En file",
+    "tabs": {
+      "ingestion": "Ingestion",
+      "ingestion_sub": "Lancez, ré-exécutez ou arrêtez le pipeline et gérez vos sources (arbre, dossiers, upload).",
+      "monitoring": "Suivi",
+      "monitoring_sub": "Monitoring temps réel : étapes du pipeline, console live (SSE) et état de la file.",
+      "documents": "Documents",
+      "documents_sub": "Documents ingérés par base, purge scopée et relance des éléments en quarantaine.",
+      "providers": "Fournisseurs IA",
+      "providers_sub": "Configurez vos fournisseurs, clés API et modèles détectés par clé.",
+      "settings": "Réglages",
+      "settings_sub": "Moteur vectoriel, seuils système et réglages avancés de l'atelier."
+    }
   },
   "pipeline": {
     "doc": "Document",

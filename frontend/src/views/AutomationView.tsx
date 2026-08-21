@@ -1,5 +1,6 @@
 import { useEffect, useState, useRef, useCallback, useMemo } from 'react'
-import { useNavigate } from 'react-router-dom'
+import type { ReactNode } from 'react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { api } from '@/lib/api'
 import { useDatabase } from '@/contexts/DatabaseContext'
 import { useLanguage } from '@/contexts/LanguageContext'
@@ -20,14 +21,29 @@ import CurriculumStudio from '@/components/admin/CurriculumStudio'
 import TelemetryExplorer from '@/components/admin/TelemetryExplorer'
 import DatabaseLifecycle from '@/components/admin/DatabaseLifecycle'
 import ArtifactImportModal from '@/components/admin/ArtifactImportModal'
-import { FilePlus2 } from 'lucide-react'
+import { FilePlus2, Rocket, Activity, FolderOpen, BrainCircuit, SlidersHorizontal } from 'lucide-react'
 import { formatBytes, formatNumber } from '@/lib/utils'
+
+type TabKey = 'ingestion' | 'monitoring' | 'documents' | 'providers' | 'settings'
+const TAB_ORDER: TabKey[] = ['ingestion', 'monitoring', 'documents', 'providers', 'settings']
 
 export default function AutomationView() {
   const { databases, activeDb, setActiveDb, isLoading: dbLoading, refresh } = useDatabase()
   const { t } = useLanguage()
   const toast = useToast()
   const navigate = useNavigate()
+
+  // ── Onglet actif dans l'URL (?tab=) pour être partageable ; défaut = 1er ──
+  const [searchParams, setSearchParams] = useSearchParams()
+  const rawTab = searchParams.get('tab') as TabKey | null
+  const activeTab: TabKey = rawTab && TAB_ORDER.includes(rawTab) ? rawTab : 'ingestion'
+  const setActiveTab = useCallback((tab: TabKey) => {
+    setSearchParams(prev => {
+      const next = new URLSearchParams(prev)
+      next.set('tab', tab)
+      return next
+    }, { replace: true })
+  }, [setSearchParams])
 
   // ── Garde d'authentification (V3.6) : au montage, si l'atelier exige une
   // session et qu'aucune n'est active → /login. Seule cette vue est protégée. ──
@@ -72,6 +88,17 @@ export default function AutomationView() {
   }, [activeDb])
 
   useEffect(loadDocs, [loadDocs])
+
+  // ── Compteur de quarantaine (badge de l'onglet Documents) — sondé
+  // indépendamment de l'onglet actif pour garder la pastille vivante. ──
+  const loadQuarantineCount = useCallback(() => {
+    if (!activeDb) { setQuarantineCount(0); return }
+    api.pipeline.getQuarantine(activeDb)
+      .then(res => setQuarantineCount(res.jobs.length))
+      .catch(() => setQuarantineCount(0))
+  }, [activeDb])
+
+  useEffect(loadQuarantineCount, [loadQuarantineCount])
 
   // ── SSE : une seule connexion, fermée au démontage ──
   useEffect(() => {
@@ -118,6 +145,13 @@ export default function AutomationView() {
     } catch (e) { toast.error(e instanceof Error ? e.message : t('common.error_generic')) }
   }
 
+  // ── Un lancement depuis Ingestion bascule automatiquement sur Suivi ──
+  const onBatchStarted = useCallback((total: number) => {
+    setPagesTotal(prev => prev + total)
+    setRunning(true)
+    setActiveTab('monitoring')
+  }, [setActiveTab])
+
   // ── ETA & Débit (moyenne mobile des latences page_update) ──
   const eta = useMemo(() => {
     if (latencies.length === 0) return null
@@ -135,18 +169,26 @@ export default function AutomationView() {
   // le premier PDF (la base est créée automatiquement à l'ingestion, §13).
   const noDatabases = !dbLoading && databases.length === 0
 
+  const TABS: { key: TabKey; label: string; sub: string; icon: ReactNode; dot?: 'run' | 'warn' }[] = [
+    { key: 'ingestion', label: t('automation.tabs.ingestion'), sub: t('automation.tabs.ingestion_sub'), icon: <Rocket size={16} /> },
+    { key: 'monitoring', label: t('automation.tabs.monitoring'), sub: t('automation.tabs.monitoring_sub'), icon: <Activity size={16} />, dot: running ? 'run' : undefined },
+    { key: 'documents', label: t('automation.tabs.documents'), sub: t('automation.tabs.documents_sub'), icon: <FolderOpen size={16} />, dot: quarantineCount > 0 ? 'warn' : undefined },
+    { key: 'providers', label: t('automation.tabs.providers'), sub: t('automation.tabs.providers_sub'), icon: <BrainCircuit size={16} /> },
+    { key: 'settings', label: t('automation.tabs.settings'), sub: t('automation.tabs.settings_sub'), icon: <SlidersHorizontal size={16} /> },
+  ]
+  const currentTabMeta = TABS.find(tb => tb.key === activeTab) ?? TABS[0]
+
   return (
     <div>
       <TopNav variant="automation" />
-      <main className="container-app" style={{ paddingTop: 24, paddingBottom: 40 }}>
+      <main className="container-app" style={{ paddingTop: 24, paddingBottom: 40, maxWidth: 1320 }}>
         {noDatabases && (
           <div className="auto-card" style={{ borderColor: 'var(--warning)', borderStyle: 'dashed' }}>
-            <strong>🚀 Première utilisation :</strong> aucune base pour l'instant — déposez un PDF
-            dans la carte <em>Sources</em> ci-dessous puis lancez l'ingestion : la base
-            <code> Matière_Niveau.sqlite</code> sera créée automatiquement.
+            <strong>🚀 {t('automation.first_use_title')} :</strong> {t('automation.first_use_msg')}
           </div>
         )}
-        {/* Sélecteur de base + Status live */}
+
+        {/* Sélecteur de base + Status live (persistant sur tous les onglets) */}
         <div className="auto-card">
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -169,82 +211,134 @@ export default function AutomationView() {
           </div>
         </div>
 
-        {/* Bandeau moteur vectoriel */}
-        <VectorEngineAlert health={health} onRefresh={loadHealth} />
-
-        {/* Lanceur du pipeline — ACTION PRINCIPALE (ingestion + ré-exécution scopée) */}
-        <PipelineLauncher
-          databases={databases}
-          activeDb={activeDb}
-          running={running}
-          onBatchStarted={total => { setPagesTotal(prev => prev + total); setRunning(true) }}
-          onStop={stop}
-          onChanged={() => { refresh(); loadDocs() }}
-        />
-
-        {/* ETA & Débit (pendant un batch) */}
-        {eta && (
-          <div className="auto-card">
-            <h3 style={{ marginBottom: 12 }}><i className="fa-solid fa-gauge-high" /> {t('automation.eta')}</h3>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 14 }}>
-              <EtaMetric label={t('automation.throughput')} value={`${eta.pagesPerHour} ${t('pipeline.pages_per_hour')}`} />
-              <EtaMetric label={t('automation.pages_remaining')} value={String(eta.remaining)} />
-              <EtaMetric label={t('automation.eta_finish')} value={eta.finishAt.toLocaleTimeString()} />
-              {health && <EtaMetric label={t('automation.resident_engine')} value={health.vector_engine} />}
-            </div>
-          </div>
-        )}
-
-        {/* Sources + upload */}
-        <SourcesManager onChanged={refresh} />
-
-        {/* Documents sources */}
-        {activeDb && <SourceDocumentsTable db={activeDb} documents={documents} onIngested={loadDocs}
-          onBatchStarted={total => { setPagesTotal(prev => prev + total); setRunning(true) }} />}
-
-        {/* Steps (5/12) + Console (7/12) */}
-        <div className="row">
-          <div className="col-4 col-lg-6" style={{ minWidth: 280 }}>
-            <div className="auto-card">
-              <h3 style={{ marginBottom: 12 }}><i className="fa-solid fa-layer-group" /> {t('automation.steps')}</h3>
-              <PipelineSteps currentStatus={currentStatus} running={running} />
-            </div>
-          </div>
-          <div className="col-6 col-lg-6" style={{ minWidth: 280, flex: 1 }}>
-            <div className="auto-card">
-              <LiveConsole lines={lines} running={running} onStop={stop} />
-            </div>
-          </div>
-        </div>
-
-        {/* Import d'actif Tier 3 (§7.11) */}
-        {activeDb && (
-          <div className="auto-card" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-            <h3 style={{ margin: 0, display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-              <FilePlus2 size={20} /> Actifs Tier 3
-            </h3>
-            <button className="btn btn-outline-primary" onClick={() => setArtifactModalOpen(true)} disabled={documents.length === 0}>
-              <FilePlus2 size={16} /> ➕ Importer un actif
+        {/* Barre d'onglets segmentée persistante */}
+        <nav className="auto-tabs" role="tablist" aria-label={t('automation.title')}>
+          {TABS.map(tb => (
+            <button
+              key={tb.key}
+              role="tab"
+              aria-selected={activeTab === tb.key}
+              className={`auto-tab${activeTab === tb.key ? ' active' : ''}`}
+              onClick={() => setActiveTab(tb.key)}
+            >
+              {tb.icon}
+              <span>{tb.label}</span>
+              {tb.dot && <span className={`auto-tab-dot${tb.dot === 'run' ? ' is-run' : ''}`} aria-hidden />}
             </button>
+          ))}
+        </nav>
+
+        {/* Sous-titre de l'onglet courant */}
+        <p className="auto-tab-subtitle">{currentTabMeta.sub}</p>
+
+        {/* ─────────────────── ONGLET INGESTION ─────────────────── */}
+        {activeTab === 'ingestion' && (
+          <div className="workspace-tab">
+            {/* Bandeau moteur vectoriel (contexte du lancement) */}
+            <VectorEngineAlert health={health} onRefresh={loadHealth} />
+
+            {/* Lanceur — ACTION PRINCIPALE (ingestion + ré-exécution scopée) */}
+            <PipelineLauncher
+              databases={databases}
+              activeDb={activeDb}
+              running={running}
+              onBatchStarted={onBatchStarted}
+              onStop={stop}
+              onChanged={() => { refresh(); loadDocs() }}
+            />
+
+            {/* Sources + upload (arbre, dossiers) */}
+            <SourcesManager onChanged={refresh} />
           </div>
         )}
 
-        {/* Curriculum Studio (§7.10) — clé de sortie du Mode Repli */}
-        {activeDb && <CurriculumStudio db={activeDb} onChanged={refresh} />}
+        {/* ─────────────────── ONGLET SUIVI ─────────────────── */}
+        {activeTab === 'monitoring' && (
+          <div className="workspace-tab">
+            {/* ETA & Débit (pendant un batch) */}
+            {eta && (
+              <div className="auto-card">
+                <h3 style={{ marginBottom: 12 }}><i className="fa-solid fa-gauge-high" /> {t('automation.eta')}</h3>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 14 }}>
+                  <EtaMetric label={t('automation.throughput')} value={`${eta.pagesPerHour} ${t('pipeline.pages_per_hour')}`} />
+                  <EtaMetric label={t('automation.pages_remaining')} value={String(eta.remaining)} />
+                  <EtaMetric label={t('automation.eta_finish')} value={eta.finishAt.toLocaleTimeString()} />
+                  {health && <EtaMetric label={t('automation.queue_length')} value={String(health.queue_length)} />}
+                </div>
+              </div>
+            )}
 
-        {/* Télémétrie (§7.9) + Cycle de vie des bases (§7.8) */}
-        {activeDb && <TelemetryExplorer db={activeDb} documents={documents} />}
-        <DatabaseLifecycle databases={databases} onChanged={refresh} />
+            {/* Steps (5/12) + Console (7/12) */}
+            <div className="row">
+              <div className="col-4 col-lg-6" style={{ minWidth: 280 }}>
+                <div className="auto-card">
+                  <h3 style={{ marginBottom: 12 }}><i className="fa-solid fa-layer-group" /> {t('automation.steps')}</h3>
+                  <PipelineSteps currentStatus={currentStatus} running={running} />
+                </div>
+              </div>
+              <div className="col-6 col-lg-6" style={{ minWidth: 280, flex: 1 }}>
+                <div className="auto-card">
+                  <LiveConsole lines={lines} running={running} onStop={stop} />
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
 
-        {/* Purge + Settings */}
-        {activeDb && <PurgeStudio db={activeDb} documents={documents} onPurged={refresh} />}
-        <SettingsPanel />
+        {/* ─────────────────── ONGLET DOCUMENTS ─────────────────── */}
+        {activeTab === 'documents' && (
+          <div className="workspace-tab">
+            {/* Documents sources ingérés par base */}
+            {activeDb && <SourceDocumentsTable db={activeDb} documents={documents} onIngested={loadDocs}
+              onBatchStarted={onBatchStarted} />}
 
-        {/* Quarantaine */}
-        {activeDb && <QuarantineManager db={activeDb} onCount={setQuarantineCount} />}
+            {/* Import d'actif Tier 3 (§7.11) */}
+            {activeDb && (
+              <div className="auto-card" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+                <h3 style={{ margin: 0, display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                  <FilePlus2 size={20} /> {t('automation.tier3_assets')}
+                </h3>
+                <button className="btn btn-outline-primary" onClick={() => setArtifactModalOpen(true)} disabled={documents.length === 0}>
+                  <FilePlus2 size={16} /> ➕ {t('automation.import_asset')}
+                </button>
+              </div>
+            )}
 
-        {/* Fournisseurs LLM (panneau unifié : clés + config + détection modèles) */}
-        <ProvidersPanel />
+            {/* Curriculum Studio (§7.10) — clé de sortie du Mode Repli */}
+            {activeDb && <CurriculumStudio db={activeDb} onChanged={refresh} />}
+
+            {/* Télémétrie (§7.9) */}
+            {activeDb && <TelemetryExplorer db={activeDb} documents={documents} />}
+
+            {/* Purge scopée */}
+            {activeDb && <PurgeStudio db={activeDb} documents={documents} onPurged={refresh} />}
+
+            {/* Quarantaine (relances) */}
+            {activeDb && <QuarantineManager db={activeDb} onCount={setQuarantineCount} />}
+          </div>
+        )}
+
+        {/* ─────────────────── ONGLET FOURNISSEURS IA ─────────────────── */}
+        {activeTab === 'providers' && (
+          <div className="workspace-tab">
+            {/* Fournisseurs LLM (panneau unifié : clés + config + détection modèles) */}
+            <ProvidersPanel />
+          </div>
+        )}
+
+        {/* ─────────────────── ONGLET RÉGLAGES ─────────────────── */}
+        {activeTab === 'settings' && (
+          <div className="workspace-tab">
+            {/* Bandeau moteur vectoriel + test/force strict */}
+            <VectorEngineAlert health={health} onRefresh={loadHealth} />
+
+            {/* Seuils & réglages système */}
+            <SettingsPanel />
+
+            {/* Cycle de vie des bases (§7.8) */}
+            <DatabaseLifecycle databases={databases} onChanged={refresh} />
+          </div>
+        )}
       </main>
 
       {activeDb && (

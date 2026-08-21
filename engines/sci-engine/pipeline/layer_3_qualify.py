@@ -13,12 +13,21 @@ import re
 import struct
 import time
 
+# Ordinaux arabes → indices (typographie réelle des sujets algériens :
+# « التمرين الأول » plutôt que « تمرين رقم 1 »). Mapping linguistique générique.
+_AR_ORDINALS = {"الأول": 1, "الاول": 1, "الثاني": 2, "الثالث": 3, "الرابع": 4,
+                "الخامس": 5, "السادس": 6, "السابع": 7, "الثامن": 8, "التاسع": 9,
+                "العاشر": 10}
+_AR_ORD_RE = "|".join(_AR_ORDINALS)
+
 # ── Regex de qualification (Skills §2.5) — opportunistes, jamais imposées ──
 _PATTERNS = [
     ("exercise_unsolved", re.compile(r"(?:^|\n)\s*(?:\*{0,2})(?:Exercice|Exercise|Problem|Activité)\s*(?:n?[°ºo]\s*)?(\d{1,3})", re.I)),
     ("exercise_unsolved", re.compile(r"(?:تمرين|مسألة|نشاط)\s*(?:رقم\s*)?(\d{1,3})")),
+    ("exercise_unsolved", re.compile(r"(?:ال)?(?:تمرين|مسألة|نشاط|وضعية)\s+(%s)" % _AR_ORD_RE)),
     ("solution_only", re.compile(r"(?:^|\n)\s*(?:\*{0,2})(?:Solution|Corrigé|Correction)\s*(?:de\s+l['']exercice\s*)?(?:n?[°ºo]\s*)?(\d{1,3})?", re.I)),
-    ("solution_only", re.compile(r"(?:حل|تصحيح)\s*(?:التمرين\s*)?(?:رقم\s*)?(\d{1,3})?")),
+    ("solution_only", re.compile(r"(?:حل|تصحيح)\s*(?:ال)?(?:تمرين|فرض|اختبار)?\s*(?:رقم\s*)?(\d{1,3})?")),
+    ("solution_only", re.compile(r"(?:حل|تصحيح)\s+(?:ال)?(?:تمرين|فرض|اختبار)\s+(%s)" % _AR_ORD_RE)),
     ("evaluation_exam", re.compile(r"(?:Devoir|Composition|Examen|Contrôle|BEM|BAC)\b|(?:فرض|اختبار|امتحان)", re.I)),
     ("proof_demonstration", re.compile(r"(?:Démonstration|Preuve|Proof)\b|(?:برهان|إثبات)", re.I)),
     ("practical_work", re.compile(r"(?:TP|Travaux\s+pratiques|Manipulation)\b|(?:عمل\s*تطبيقي)", re.I)),
@@ -35,6 +44,9 @@ def _qualify(text: str):
         if match:
             index = None
             if match.groups() and match.group(1):
+                if match.group(1) in _AR_ORDINALS:
+                    index = _AR_ORDINALS[match.group(1)]
+                    return ptype, index
                 try:
                     index = int(match.group(1))
                 except ValueError:

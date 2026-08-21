@@ -58,6 +58,7 @@ function WorkspaceInner({ activeDb, databases, onSelectDb, curriculum, manifest 
           aggregates={curriculum.aggregates ?? null}
           pageBounds={pageBounds}
           onPageJump={n => { bridge.jumpTo('scans', `scan_${n}`); closeSidebarOnMobile() }}
+          curriculumAvailable={curriculum.curriculum_available}
         />
       }
       topbar={
@@ -132,12 +133,14 @@ export default function CurriculumWorkspace(props: Props) {
 
   const preloadItems = useMemo(() => collectPreloadItems(props.curriculum), [props.curriculum])
 
-  // Onglet initial depuis ?tab= (si valide).
+  // Onglet initial depuis ?tab= (si valide). Sans curriculum, la matrice affiche
+  // un empty-state : on ouvre alors « Cours » (fonctionne sur TOC + chunks) par défaut.
   const initialTab = useMemo<TabKey>(() => {
     const t = new URLSearchParams(window.location.search).get('tab')
     const valid: TabKey[] = ['matrix', 'programme', 'cours', 'exercices', 'evaluations', 'scans']
-    return (valid as string[]).includes(t ?? '') ? (t as TabKey) : 'matrix'
-  }, [])
+    if ((valid as string[]).includes(t ?? '')) return t as TabKey
+    return props.curriculum.curriculum_available ? 'matrix' : 'cours'
+  }, [props.curriculum.curriculum_available])
 
   const showSplash = splashDoneFor !== props.activeDb
 
