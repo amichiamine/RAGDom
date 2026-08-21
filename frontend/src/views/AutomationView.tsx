@@ -9,7 +9,6 @@ import TopNav from '@/components/layout/TopNav'
 import VectorEngineAlert from '@/components/automation/VectorEngineAlert'
 import PipelineSteps from '@/components/automation/PipelineSteps'
 import LiveConsole from '@/components/automation/LiveConsole'
-import KeyManager from '@/components/automation/KeyManager'
 import ProvidersPanel from '@/components/automation/ProvidersPanel'
 import SettingsPanel from '@/components/automation/SettingsPanel'
 import QuarantineManager from '@/components/automation/QuarantineManager'
@@ -233,15 +232,8 @@ export default function AutomationView() {
         {/* Quarantaine */}
         {activeDb && <QuarantineManager db={activeDb} onCount={setQuarantineCount} />}
 
-        {/* Clés LLM + Fournisseurs LLM (côte à côte) */}
-        <div className="row">
-          <div className="col-6 col-lg-6" style={{ minWidth: 320, flex: 1 }}>
-            <KeyManager />
-          </div>
-          <div className="col-6 col-lg-6" style={{ minWidth: 320, flex: 1 }}>
-            <ProvidersPanel />
-          </div>
-        </div>
+        {/* Fournisseurs LLM (panneau unifié : clés + config + détection modèles) */}
+        <ProvidersPanel />
       </main>
 
       {activeDb && (

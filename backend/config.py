@@ -14,20 +14,26 @@ _ENV_PATH = Path(__file__).resolve().parent / ".env"
 load_dotenv(_ENV_PATH)
 
 
-def _require(name: str) -> str:
+# Racine du projet = parent de backend/ — les chemins par défaut en découlent :
+# le .env devient OPTIONNEL (portabilité clone-and-run), l'env reste prioritaire.
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+
+def _path(name: str, default: Path) -> str:
     value = os.environ.get(name)
-    if not value:
-        raise RuntimeError("Variable d'environnement manquante : %s (voir backend/.env)" % name)
-    return value
+    if value:
+        return value
+    os.environ[name] = str(default)  # visible par le lifespan et les sous-modules
+    return str(default)
 
 
-# ── Chemins physiques (tech_specs §10) ─────────────────────────
-SOURCES_DIR = _require("SOURCES_DIR")
-DATABASES_DIR = _require("DATABASES_DIR")
-PIPELINE_SET_DIR = _require("PIPELINE_SET_DIR")
-MODELS_DIR = _require("MODELS_DIR")
-ENGINES_DIR = _require("ENGINES_DIR")
-CONFIG_DB_PATH = _require("CONFIG_DB_PATH")
+# ── Chemins physiques (tech_specs §10 — défauts relatifs à la racine du projet) ──
+SOURCES_DIR = _path("SOURCES_DIR", _PROJECT_ROOT / "sources")
+DATABASES_DIR = _path("DATABASES_DIR", _PROJECT_ROOT / "databases")
+PIPELINE_SET_DIR = _path("PIPELINE_SET_DIR", _PROJECT_ROOT / "pipeline_set")
+MODELS_DIR = _path("MODELS_DIR", _PROJECT_ROOT / "models")
+ENGINES_DIR = _path("ENGINES_DIR", _PROJECT_ROOT / "engines")
+CONFIG_DB_PATH = _path("CONFIG_DB_PATH", _PROJECT_ROOT / "backend" / "ragdom_config.sqlite")
 
 # ── Serveur ────────────────────────────────────────────────────
 BACKEND_HOST = os.environ.get("BACKEND_HOST", "0.0.0.0")

@@ -1,0 +1,5 @@
+# OPTIONNEL — moteur GGUF local embarqué (Blueprint fallback ultime).
+# Ollama et LM Studio couvrent déjà le LLM local sans compilation.
+# Sous Windows, préférer la roue précompilée CPU :
+#   pip install llama-cpp-python --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu
+llama-cpp-python==0.3.1

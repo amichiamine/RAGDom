@@ -123,6 +123,65 @@ def _call_ollama(prompt: str, timeout_s: int) -> Optional[str]:
         return None
 
 
+def list_models(provider: str) -> dict:
+    """Détection EN DIRECT des modèles du provider (zéro liste codée en dur).
+
+    Utilise la clé active stockée (ou la clé .env) et la base_url éventuelle.
+    Retourne {"models": [...], "error": None|str}.
+    """
+    conn = db.get_config_db()
+    try:
+        row = conn.execute("SELECT base_url FROM llm_settings WHERE provider=?", (provider,)).fetchone()
+    finally:
+        conn.close()
+    base_url = row[0] if row else None
+    keys = _active_keys(provider)
+    api_key = keys[0][1] if keys else (config.env_api_key(provider) or "")
+
+    try:
+        if provider == "gemini":
+            if not api_key:
+                return {"models": [], "error": "Aucune clé enregistrée"}
+            response = httpx.get(
+                "https://generativelanguage.googleapis.com/v1beta/models?key=" + api_key,
+                timeout=15)
+            response.raise_for_status()
+            models = [m["name"].split("/")[-1] for m in response.json().get("models", [])
+                      if "generateContent" in m.get("supportedGenerationMethods", [])]
+            return {"models": models, "error": None}
+        if provider == "anthropic":
+            if not api_key:
+                return {"models": [], "error": "Aucune clé enregistrée"}
+            response = httpx.get("https://api.anthropic.com/v1/models",
+                                 headers={"x-api-key": api_key,
+                                          "anthropic-version": "2023-06-01"}, timeout=15)
+            response.raise_for_status()
+            return {"models": [m["id"] for m in response.json().get("data", [])], "error": None}
+        if provider == "ollama":
+            response = httpx.get((base_url or config.OLLAMA_BASE_URL) + "/api/tags", timeout=10)
+            response.raise_for_status()
+            return {"models": [m["name"] for m in response.json().get("models", [])], "error": None}
+        if provider == "make":
+            return {"models": ["webhook"], "error": None}
+        # openai / groq / lmstudio : API OpenAI-compatible GET /models
+        endpoint = ((base_url.rstrip("/") + "/models") if base_url
+                    else {"openai": "https://api.openai.com/v1/models",
+                          "groq": "https://api.groq.com/openai/v1/models"}.get(provider))
+        if endpoint is None:
+            return {"models": [], "error": "base_url requise pour ce provider"}
+        if not api_key and provider != "lmstudio":
+            return {"models": [], "error": "Aucune clé enregistrée"}
+        headers = {"Authorization": "Bearer " + api_key} if api_key else {}
+        response = httpx.get(endpoint, headers=headers, timeout=15)
+        response.raise_for_status()
+        return {"models": sorted(m["id"] for m in response.json().get("data", [])), "error": None}
+    except httpx.HTTPStatusError as exc:
+        return {"models": [], "error": "HTTP %d — clé invalide ou endpoint incorrect"
+                                        % exc.response.status_code}
+    except httpx.HTTPError as exc:
+        return {"models": [], "error": "Injoignable : %s" % type(exc).__name__}
+
+
 def generate(prompt: str, image_b64: Optional[str] = None,
              timeout_s: Optional[int] = None) -> Optional[dict]:
     """Chaîne complète : providers activés par priorité → rotation de clés → Ollama.
@@ -208,12 +267,21 @@ def test_key(key_id: str) -> dict:
         return {"success": False, "status": "unknown", "message": "Clé introuvable."}
     provider, api_key = row
     conn2 = db.get_config_db()
-    model = (conn2.execute("SELECT active_model FROM llm_settings WHERE provider=?", (provider,)).fetchone()
-             or ["gpt-4o-mini"])[0]
+    settings_row = conn2.execute(
+        "SELECT active_model, base_url FROM llm_settings WHERE provider=?", (provider,)).fetchone()
     conn2.close()
+    model = settings_row[0] if settings_row else None
+    base_url = settings_row[1] if settings_row else None
+    if not model:  # aucun modèle choisi : auto-détection en direct (zéro dur)
+        detected = list_models(provider)
+        if detected["models"]:
+            model = detected["models"][0]
+        elif detected["error"]:
+            return {"success": False, "status": "unknown",
+                    "message": "Détection des modèles impossible : %s" % detected["error"]}
     started = time.perf_counter()
     try:
-        _call_provider(provider, model, api_key, "ping", None, 15)
+        _call_provider(provider, model, api_key, "ping", None, 15, base_url=base_url)
         _mark_key(key_id, status="active")
         return {"success": True, "status": "active",
                 "latency_ms": int((time.perf_counter() - started) * 1000),

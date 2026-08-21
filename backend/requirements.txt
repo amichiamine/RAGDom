@@ -29,7 +29,7 @@ google-genai==0.8.0
 groq==0.11.0
 openai==1.47.1
 anthropic==0.34.2
-llama-cpp-python==0.3.1
+# llama-cpp-python==0.3.1  # OPTIONNEL (GGUF local) → requirements-llm-local.txt (la 0.3.1 ne compile pas sous MSVC 14.44 ; Ollama/LM Studio couvrent le LLM local)
 httpx==0.27.2
 python-multipart==0.0.12
 aiofiles==24.1.0

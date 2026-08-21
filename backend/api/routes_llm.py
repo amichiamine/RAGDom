@@ -107,6 +107,12 @@ def add_key(body: KeyBody):
     return {"key_id": key_id, "status": "active"}
 
 
+@router.get("/providers/{provider}/models")
+def provider_models(provider: str):
+    """Modèles AUTO-DÉTECTÉS en direct chez le provider (jamais de liste codée en dur)."""
+    return key_manager.list_models(provider)
+
+
 @router.post("/keys/{key_id}/test")
 def test_key(key_id: str):
     return key_manager.test_key(key_id)

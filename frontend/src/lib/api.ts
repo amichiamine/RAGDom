@@ -229,7 +229,11 @@ export const api = {
     // V3.6 : PUT partiel — provider requis + tout sous-ensemble de {active_model, is_enabled, priority, base_url}.
     updateSettings: (provider: string, patch: { active_model?: string | null; is_enabled?: boolean; priority?: number; base_url?: string | null }) =>
       request<{ setting: LlmSetting }>('/llm/settings', { method: 'PUT', body: JSON.stringify({ provider, ...patch }) }),
-    testKey: (keyId: string) => request<{ success: boolean; message: string }>(`/llm/keys/${keyId}/test`, { method: 'POST' }),
+    testKey: (keyId: string) => request<{ success: boolean; status?: string; latency_ms?: number; message: string }>(`/llm/keys/${keyId}/test`, { method: 'POST' }),
+    // V3.7 : détection LIVE des modèles chez le fournisseur (clé stockée + base_url).
+    // Renvoie { models, error } — error non nul = pas de clé / URL injoignable / provider sans modèles.
+    getProviderModels: (provider: string) =>
+      request<{ models: string[]; error: string | null }>(`/llm/providers/${encodeURIComponent(provider)}/models`),
   },
   curriculum: {
     list: (db: string, kind: 'terms' | 'programs' | 'assessments' | 'links') => request(withDb(`/curriculum/${kind}`, db)),
