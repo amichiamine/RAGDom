@@ -41,6 +41,73 @@ def _get_engines():
     return _engines
 
 
+
+
+_VOWELLESS_RE = re.compile(r"[A-Za-z]{4,}")
+
+
+def _looks_unreadable(text: str) -> bool:
+    """Gate qualité GÉNÉRIQUE : vide/court, soupe latine sans voyelles, ou
+    poussière de jetons ultra-courts (OCR inadapté à l'écriture, police
+    non-Unicode). Ne se déclenche jamais sur du texte arabe/latin sain."""
+    t = text.strip()
+    if len(t) < 20:
+        return True
+    letters = [ch for ch in t if ch.isalpha()]
+    if not letters:
+        return True
+    arabic = sum(1 for ch in letters if "\u0600" <= ch <= "\u06ff")
+    if arabic / len(letters) >= 0.3:
+        return False  # texte arabe substantiel : lisible
+    tokens = re.findall(r"[A-Za-z\u00c0-\u024f]+", t)
+    if len(tokens) < 6:
+        return False
+    short_ratio = sum(1 for w in tokens if len(w) <= 3) / len(tokens)
+    long_words = [w for w in tokens if len(w) >= 4]
+    vowelless = (sum(1 for w in long_words if not re.search(r"[aeiouyAEIOUY]", w))
+                 / len(long_words)) if long_words else 0.0
+    return short_ratio > 0.55 or vowelless > 0.4
+
+
+_VLM_OCR_PROMPT = (
+    "Transcris INTÉGRALEMENT cette page de manuel scolaire en Markdown fidèle :\n"
+    "- titres et sous-titres en ## / ###, texte arabe EXACT (sens RTL préservé) ;\n"
+    "- toute formule ou expression mathématique en LaTeX ($...$ ou $$...$$) ;\n"
+    "- numéros d'exercices/activités conservés tels quels ;\n"
+    "- tableaux en Markdown ; ignore les décorations purement graphiques.\n"
+    "Retourne UNIQUEMENT la transcription, sans commentaire ni préambule.")
+
+
+def _maybe_vlm_page_ocr(ctx: dict, current_text: str):
+    """Tier 2 (contrat D3-B) : OCR de PAGE ENTIÈRE par VLM quand l'extraction
+    Tier 1 est illisible. Rotation de clés/providers gérée par le noyau
+    (llm.key_manager.generate) ; aucun provider joignable → None (repli Tier 1,
+    le pipeline ne s'arrête jamais ici). Désactivable : RAGDOM_VLM_PAGE_OCR=false."""
+    if os.environ.get("RAGDOM_VLM_PAGE_OCR", "auto").lower() == "false":
+        return None
+    if not _looks_unreadable(current_text):
+        return None
+    try:
+        import base64
+        import sys
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "..", "backend"))
+        from llm.key_manager import generate
+    except Exception:  # noqa: BLE001
+        return None
+    image = ctx.get("restored_rgb")
+    if image is None:
+        return None
+    webp = _webp(image)
+    if not webp:
+        return None
+    result = generate(_VLM_OCR_PROMPT, image_b64=base64.b64encode(webp).decode("ascii"),
+                      timeout_s=90)
+    if result and result.get("content") and len(result["content"].strip()) > 20:
+        ctx.setdefault("vlm", {})["page_ocr_provider"] = result.get("provider")
+        return result["content"].strip()
+    return None
+
+
 def _crop(ctx, bbox):
     x0, y0, x1, y1 = [max(0, int(v)) for v in bbox]
     return ctx["restored_rgb"][y0:min(y1, ctx["height_px"]), x0:min(x1, ctx["width_px"])]
@@ -78,6 +145,15 @@ def run(ctx: dict) -> dict:
                 content_markdown = "\n".join(str(line[1]) for line in result)
         if not content_markdown:
             content_markdown = ""  # page image sans texte détecté : chunk vide filtré en couche 3
+
+    # ── Tier 2 (D3-B) : OCR de page entière par VLM — page SCANNÉE : toujours
+    # tenté (RapidOCR sans modèle adapté = repli hors-ligne) ; page native :
+    # seulement si le texte extrait est illisible (police non-Unicode).
+    force_vlm = not ctx["is_native_vector"]
+    vlm_text = _maybe_vlm_page_ocr(ctx, "" if force_vlm else content_markdown)
+    if vlm_text:
+        content_markdown = vlm_text
+        engine_used = "VLM-OCR"
 
     # ── Artefacts : formules LaTeX inline du markdown (Tier 1) ──
     for i, match in enumerate(_FORMULA_RE.finditer(content_markdown), start=1):
