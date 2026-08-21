@@ -229,5 +229,44 @@
     "error_generic": "An error occurred. Please retry.",
     "empty": "No data",
     "engine": "Engine"
+  },
+  "auth": {
+    "login_title": "Sign in",
+    "setup_title": "Create the administrator account",
+    "login_subtitle": "Access to the RAGDom administration workspace.",
+    "setup_subtitle": "First launch: set the administrator credentials.",
+    "username": "Username",
+    "username_hint": "3 to 64 characters: letters, digits, _ - .",
+    "password": "Password",
+    "password_hint": "8 characters minimum.",
+    "confirm_password": "Confirm password",
+    "init_token": "Initialization token",
+    "init_token_hint": "The server requires an initialization token (RAGDOM_AUTH_TOKEN). Enter it to create the account.",
+    "submit_login": "Sign in",
+    "submit_setup": "Create account",
+    "password_mismatch": "Passwords do not match.",
+    "password_too_short": "The password must contain at least 8 characters.",
+    "username_invalid": "Invalid username (3–64 characters: letters, digits, _ - .).",
+    "logged_in_as": "Signed in",
+    "logout": "Sign out",
+    "session_state": "Session state"
+  },
+  "providers": {
+    "title": "LLM Providers",
+    "provider": "Provider",
+    "enabled": "Enabled",
+    "priority": "Priority",
+    "model": "Model",
+    "base_url": "Base URL",
+    "save_row": "Save",
+    "saved": "Provider updated",
+    "note": "LM Studio = local OpenAI-compatible API · Make = no-code webhook (Priority 3) · Ollama = final fallback",
+    "base_url_default": "official endpoint (empty)"
+  },
+  "engines": {
+    "title": "Engines",
+    "detected": "Detected engines",
+    "active": "Active",
+    "empty": "No engine detected"
   }
 }

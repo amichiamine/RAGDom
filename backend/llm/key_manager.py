@@ -32,7 +32,7 @@ def _providers_by_priority():
     conn = db.get_config_db()
     try:
         return conn.execute(
-            "SELECT provider, active_model FROM llm_settings WHERE is_enabled=1 ORDER BY priority"
+            "SELECT provider, active_model, base_url FROM llm_settings WHERE is_enabled=1 ORDER BY priority"
         ).fetchall()
     finally:
         conn.close()
@@ -63,8 +63,19 @@ def _mark_key(key_id: str, status: Optional[str] = None, blocked_minutes: int = 
         conn.close()
 
 
+def _call_make(base_url: str, prompt: str, timeout_s: int) -> str:
+    """Make.com (Skills.md §Make AI Provider) : webhook REST → {content} ou texte brut."""
+    response = httpx.post(base_url, json={"prompt": prompt, "source": "ragdom"}, timeout=timeout_s)
+    response.raise_for_status()
+    try:
+        payload = response.json()
+        return payload.get("content") or payload.get("answer") or response.text
+    except ValueError:
+        return response.text
+
+
 def _call_provider(provider: str, model: str, api_key: str, prompt: str,
-                   image_b64: Optional[str], timeout_s: int) -> str:
+                   image_b64: Optional[str], timeout_s: int, base_url: Optional[str] = None) -> str:
     if provider == "gemini":
         parts = [{"text": prompt}]
         if image_b64:
@@ -84,11 +95,15 @@ def _call_provider(provider: str, model: str, api_key: str, prompt: str,
                                     "messages": [{"role": "user", "content": content}]}, timeout=timeout_s)
         response.raise_for_status()
         return response.json()["content"][0]["text"]
-    # groq / openai : API OpenAI-compatible
+    # groq / openai / lmstudio : API OpenAI-compatible (base_url personnalisable —
+    # LM Studio expose http://localhost:1234/v1 sans clé obligatoire)
+    endpoint = ((base_url.rstrip("/") + "/chat/completions") if base_url
+                else _ENDPOINTS.get(provider, _ENDPOINTS["openai"]))
     messages = [{"role": "user", "content": prompt if not image_b64 else [
         {"type": "text", "text": prompt},
         {"type": "image_url", "image_url": {"url": "data:image/webp;base64," + image_b64}}]}]
-    response = httpx.post(_ENDPOINTS[provider], headers={"Authorization": "Bearer " + api_key},
+    headers = {"Authorization": "Bearer " + api_key} if api_key else {}
+    response = httpx.post(endpoint, headers=headers,
                           json={"model": model, "messages": messages, "max_tokens": 2048}, timeout=timeout_s)
     response.raise_for_status()
     return response.json()["choices"][0]["message"]["content"]
@@ -117,19 +132,31 @@ def generate(prompt: str, image_b64: Optional[str] = None,
     """
     timeout_s = timeout_s or config.VLM_TIMEOUT_SECONDS
     fallback_triggered = False
-    for provider, model in _providers_by_priority():
+    for provider, model, base_url in _providers_by_priority():
         if provider == "ollama":
             continue  # traité en dernier recours ci-dessous
+        if provider == "make":  # webhook no-code (Priorité 3, Blueprint §3) — sans clé
+            if base_url:
+                try:
+                    content = _call_make(base_url, prompt, timeout_s)
+                    return {"content": content, "provider": "make/webhook",
+                            "fallback_triggered": fallback_triggered}
+                except httpx.HTTPError:
+                    fallback_triggered = True
+            continue
         keys = _active_keys(provider)
         env_key = config.env_api_key(provider)
         if env_key and not keys:  # fallback .env de démarrage (tech_specs §10)
             keys = [(None, env_key)]
+        if provider == "lmstudio" and not keys:  # serveur local : clé facultative
+            keys = [(None, "")]
         for key_id, api_key in keys:
             for attempt, delay in enumerate((0, 2, 4, 8)):
                 if delay:
                     time.sleep(delay)
                 try:
-                    content = _call_provider(provider, model, api_key, prompt, image_b64, timeout_s)
+                    content = _call_provider(provider, model, api_key, prompt, image_b64,
+                                             timeout_s, base_url=base_url)
                     return {"content": content, "provider": "%s/%s" % (provider, model),
                             "fallback_triggered": fallback_triggered}
                 except httpx.HTTPStatusError as exc:

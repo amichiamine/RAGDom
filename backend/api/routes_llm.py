@@ -41,8 +41,9 @@ def get_settings():
     conn = db.get_config_db()
     try:
         return {"settings": [{"provider": r[0], "active_model": r[1], "is_enabled": bool(r[2]),
-                              "priority": r[3]} for r in conn.execute(
-                "SELECT provider, active_model, is_enabled, priority FROM llm_settings ORDER BY priority")]}
+                              "priority": r[3], "base_url": r[4]} for r in conn.execute(
+                "SELECT provider, active_model, is_enabled, priority, base_url"
+                " FROM llm_settings ORDER BY priority")]}
     finally:
         conn.close()
 
@@ -52,6 +53,7 @@ class SettingsBody(BaseModel):
     active_model: Optional[str] = None
     is_enabled: Optional[bool] = None
     priority: Optional[int] = None
+    base_url: Optional[str] = None  # LM Studio / proxy OpenAI-compatible / webhook Make
 
 
 @router.put("/settings")
@@ -67,6 +69,8 @@ def put_settings(body: SettingsBody):
             sets.append("is_enabled=?"); args.append(1 if body.is_enabled else 0)
         if body.priority is not None:
             sets.append("priority=?"); args.append(body.priority)
+        if body.base_url is not None:  # chaîne vide = effacer (retour à l'endpoint officiel)
+            sets.append("base_url=?"); args.append(body.base_url or None)
         conn.execute("UPDATE llm_settings SET %s WHERE provider=?" % ", ".join(sets),
                      args + [body.provider])
         conn.commit()

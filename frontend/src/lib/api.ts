@@ -4,7 +4,7 @@ import type {
   AskResponse, PurgePayload, PurgeResult, QuarantineJob, SourceNode,
   BenchmarkRow, BenchmarkAggregates, AppSettings, EngineManifest,
   Document, TocNode, Chunk, Artifact, PaginatedResponse,
-  PageScanManifestEntry,
+  PageScanManifestEntry, AuthState, AuthSession,
 } from '@/types'
 
 // Phase 7 : VITE_API_URL (origine du backend) pour l'UI hébergée (Cloudflare/tunnel) ;
@@ -28,12 +28,35 @@ function authHeaders(): Record<string, string> {
   return token ? { Authorization: `Bearer ${token}` } : {}
 }
 
+// ── Intercepteur 401 (V3.6) ──────────────────────────────────────────────────
+// Si une réponse admin renvoie 401 ET que /auth/me confirme auth_required, on
+// redirige vers /login. Throttle (une seule redirection par fenêtre) pour éviter
+// les boucles quand plusieurs requêtes échouent en rafale.
+let lastAuthRedirect = 0
+const AUTH_REDIRECT_THROTTLE_MS = 4000
+async function handleUnauthorized(): Promise<void> {
+  const now = Date.now()
+  if (now - lastAuthRedirect < AUTH_REDIRECT_THROTTLE_MS) return
+  // Ne pas boucler si on est déjà sur /login.
+  if (typeof window !== 'undefined' && window.location.pathname === '/login') return
+  try {
+    const me = await fetch(`${BASE_URL}/auth/me`, { headers: { 'Content-Type': 'application/json', ...authHeaders() } }).then(r => r.json() as Promise<AuthState>)
+    if (me.auth_required && !me.authenticated) {
+      lastAuthRedirect = Date.now()
+      setAdminToken(null)
+      window.location.assign('/login')
+    }
+  } catch { /* /auth/me injoignable : on n'interfère pas */ }
+}
+
 async function request<T>(endpoint: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE_URL}${endpoint}`, {
     headers: { 'Content-Type': 'application/json', ...authHeaders(), ...options?.headers },
     ...options,
   })
   if (!res.ok) {
+    // /auth/* gère ses propres 401 (login/setup échoués) : ne pas intercepter.
+    if (res.status === 401 && !endpoint.startsWith('/auth/')) { void handleUnauthorized() }
     const error = await res.json().catch(() => ({ detail: res.statusText }))
     throw new Error(error.detail || `HTTP ${res.status}`)
   }
@@ -46,6 +69,29 @@ function withDb(endpoint: string, db: string, params?: Record<string, string>): 
 }
 
 export const api = {
+  // ── Authentification session (V3.6) ──
+  auth: {
+    me: () => request<AuthState>('/auth/me'), // request() joint déjà le Bearer si présent
+    setup: async (username: string, password: string, initToken?: string): Promise<AuthSession> => {
+      // Si un jeton d'initialisation est fourni (cas 401 : jeton env exigé côté serveur),
+      // on l'envoie en Authorization Bearer pour le POST de création du compte.
+      const headers = initToken && initToken.trim() ? { Authorization: `Bearer ${initToken.trim()}` } : undefined
+      const res = await request<AuthSession>('/auth/setup', {
+        method: 'POST', body: JSON.stringify({ username, password }), ...(headers ? { headers } : {}),
+      })
+      setAdminToken(res.session_token)
+      return res
+    },
+    login: async (username: string, password: string): Promise<AuthSession> => {
+      const res = await request<AuthSession>('/auth/login', { method: 'POST', body: JSON.stringify({ username, password }) })
+      setAdminToken(res.session_token)
+      return res
+    },
+    logout: async (): Promise<void> => {
+      try { await request('/auth/logout', { method: 'POST' }) }
+      finally { setAdminToken(null) }
+    },
+  },
   system: {
     getDatabases: () => request<{ databases: DatabaseInfo[] }>('/system/databases'),
     getHealth: () => request<SystemHealth>('/system/health'),
@@ -154,8 +200,9 @@ export const api = {
       request<LlmKey>('/llm/keys', { method: 'POST', body: JSON.stringify({ provider, api_key: apiKey }) }),
     deleteKey: (keyId: string) => request<{ deleted: boolean }>(`/llm/keys/${keyId}`, { method: 'DELETE' }),
     getSettings: () => request<{ settings: LlmSetting[] }>('/llm/settings'),
-    updateSettings: (provider: string, model: string, isEnabled: boolean) =>
-      request('/llm/settings', { method: 'PUT', body: JSON.stringify({ provider, active_model: model, is_enabled: isEnabled }) }),
+    // V3.6 : PUT partiel — provider requis + tout sous-ensemble de {active_model, is_enabled, priority, base_url}.
+    updateSettings: (provider: string, patch: { active_model?: string | null; is_enabled?: boolean; priority?: number; base_url?: string | null }) =>
+      request<{ setting: LlmSetting }>('/llm/settings', { method: 'PUT', body: JSON.stringify({ provider, ...patch }) }),
     testKey: (keyId: string) => request<{ success: boolean; message: string }>(`/llm/keys/${keyId}/test`, { method: 'POST' }),
   },
   curriculum: {

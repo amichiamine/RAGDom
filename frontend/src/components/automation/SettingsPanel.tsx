@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { api, getAdminToken, setAdminToken } from '@/lib/api'
-import type { AppSettings } from '@/types'
+import type { AppSettings, AuthState } from '@/types'
 import { useLanguage } from '@/contexts/LanguageContext'
 import { useToast } from '@/components/common/Toast'
 import { Spinner, ErrorBanner } from '@/components/common/Feedback'
@@ -11,8 +12,23 @@ const DEFAULTS = { vec_distance_threshold: 0.45, bm25_score_threshold: -1.5 }
 export default function SettingsPanel() {
   const { t } = useLanguage()
   const toast = useToast()
+  const navigate = useNavigate()
   const [adminToken, setTokenState] = useState<string>(() => getAdminToken() ?? '')
   const [tokenSaved, setTokenSaved] = useState<boolean>(() => Boolean(getAdminToken()))
+
+  // ── État de session (V3.6) : affiché quand /auth/me → authenticated + username ──
+  const [auth, setAuth] = useState<AuthState | null>(null)
+  useEffect(() => {
+    let cancelled = false
+    api.auth.me().then(me => { if (!cancelled) setAuth(me) }).catch(() => { if (!cancelled) setAuth(null) })
+    return () => { cancelled = true }
+  }, [])
+
+  const logout = async () => {
+    try { await api.auth.logout() } catch { /* on force la déconnexion locale de toute façon */ }
+    setTokenState(''); setTokenSaved(false)
+    navigate('/login', { replace: true })
+  }
 
   const saveToken = () => {
     setAdminToken(adminToken || null)
@@ -78,6 +94,21 @@ export default function SettingsPanel() {
               Stocké dans cet onglet seulement — jamais sur le serveur ni sur le disque.
             </p>
           </div>
+
+          {/* État de session (V3.6) — affiché uniquement si authentifié avec username */}
+          {auth?.authenticated && auth.username && (
+            <div className="session-state-row">
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                <i className="fa-solid fa-user-check" style={{ color: 'var(--success)' }} />
+                <span style={{ fontWeight: 700 }}>{t('auth.logged_in_as')} : </span>
+                <span className="badge badge-success">{auth.username}</span>
+                {auth.readonly && <span className="badge badge-warning">read-only</span>}
+              </div>
+              <button className="btn btn-sm btn-outline-danger" onClick={logout}>
+                <i className="fa-solid fa-right-from-bracket" /> {t('auth.logout')}
+              </button>
+            </div>
+          )}
           <SliderRow
             label={t('settings.vec_threshold')}
             hint={t('settings.vec_threshold_hint')}
