@@ -175,7 +175,8 @@ export default function AutomationView() {
         <SourcesManager onChanged={refresh} />
 
         {/* Documents sources */}
-        {activeDb && <SourceDocumentsTable db={activeDb} documents={documents} onIngested={loadDocs} />}
+        {activeDb && <SourceDocumentsTable db={activeDb} documents={documents} onIngested={loadDocs}
+          onBatchStarted={total => { setPagesTotal(prev => prev + total); setRunning(true) }} />}
 
         {/* Steps (5/12) + Console (7/12) */}
         <div className="row">

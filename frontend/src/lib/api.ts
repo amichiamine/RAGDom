@@ -7,7 +7,9 @@ import type {
   PageScanManifestEntry,
 } from '@/types'
 
-const BASE_URL = '/api'
+// Phase 7 : VITE_API_URL (origine du backend) pour l'UI hébergée (Cloudflare/tunnel) ;
+// vide en local (même origine via le proxy Vite / le reverse-proxy de production).
+const BASE_URL = `${import.meta.env.VITE_API_URL ?? ''}/api`
 
 async function request<T>(endpoint: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE_URL}${endpoint}`, {

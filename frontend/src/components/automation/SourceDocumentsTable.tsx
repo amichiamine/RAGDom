@@ -9,10 +9,11 @@ interface Props {
   db: string
   documents: Document[]
   onIngested: () => void
+  onBatchStarted?: (pagesTotal: number) => void
 }
 
 /** §5.3 Source Documents Table — bouton « Ingérer » (pipeline.start). */
-export default function SourceDocumentsTable({ db, documents, onIngested }: Props) {
+export default function SourceDocumentsTable({ db, documents, onIngested, onBatchStarted }: Props) {
   const { t } = useLanguage()
   const toast = useToast()
   const [busyId, setBusyId] = useState<string | null>(null)
@@ -22,6 +23,7 @@ export default function SourceDocumentsTable({ db, documents, onIngested }: Prop
     try {
       const res = await api.pipeline.start({ source_path: doc.filename, target_db: db, mode: 'document' })
       toast.success(`${t('buttons.ingest')} — batch ${res.batch_id} (${res.pages_total})`)
+      onBatchStarted?.(res.pages_total)
       onIngested()
     } catch (e) { toast.error(e instanceof Error ? e.message : t('common.error_generic')) }
     finally { setBusyId(null) }

@@ -29,9 +29,9 @@ extensions post-v1 (Web-Ready + Parallélisme D4-B) livrées sur la branche `pos
       équivalence des sorties prouvée, flag RAGDOM_INTRA_PAGE_WORKERS
 
 ## RESTE À FAIRE (machine cible uniquement)
-1. `npm install` + `npx tsc --noEmit` + `vite build` (frontend/VALIDATION.md) — le registre npm
-   est resté bloqué dans le sandbox pendant TOUTE l'exécution ; ~25 nouveaux fichiers TS écrits
-   sous revue statique stricte, 1 passe de tsc réel attendue avec corrections mineures probables.
+1. ~~npm install + tsc + vite build~~ **FAIT le 2026-08-21 soir** (registre ouvert par l'utilisateur) :
+   tsc strict **0 erreur** (1 corrigée : câblage pages_total de la carte ETA), build **OK**
+   (1 647 modules). VITE_API_URL ajouté + wrangler.jsonc (vitrine Cloudflare Workers-assets).
 2. Recette visuelle pixel-perfect sur base 2G réelle (checklist Lot 11 du sprint) + modèles
    rapid-*/fastembed au 1er run (RAGDOM_OFFLINE=false).
 3. Tests Jest/Playwright (node_modules requis). Reliquat mineur PARTIE 8 : toggle densité,

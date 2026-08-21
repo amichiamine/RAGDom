@@ -60,8 +60,8 @@
 - [x] TelemetryExplorer.tsx (agrégats animés + graphe SVG pur) · DatabaseLifecycle.tsx · ArtifactImportModal.tsx (Tier 3)
 - [x] PARTIE 8 : virtualisation @tanstack/react-virtual (Exercices+Scans), Command Palette Ctrl+K, compteurs animés — restants mineurs : toggle densité, sélection en masse, Inspecteur de Cycle de Vie
 
-## Phase 5 : Intégration, Tests & Documentation — 🔴 À FAIRE (machine cible)
-- [ ] `npm install` + `npx tsc --noEmit` + `vite build` (frontend/VALIDATION.md) — bloqué sandbox (registre npm 403)
+## Phase 5 : Intégration, Tests & Documentation — 🟢 QUASI-TERMINÉE (reste Playwright + recette visuelle)
+- [x] `npm install` + `npx tsc --noEmit` + `vite build` — VALIDÉ le 2026-08-21 après ouverture du registre : tsc 0 erreur (1 corrigée), build OK 1647 modules (frontend/VALIDATION.md)
 - [ ] Tests d'intégration End-to-End complets (Playwright)
 - [x] Benchmarks RAM 3 paliers PDF 100 pages : plancher 57 Mo / pic 489 Mo (≤2048 OK) / résiduel 356 Mo · débit 86 p/min (sandbox, moteurs natifs — à rejouer machine cible)
 - [x] Test Recovery SIGTERM processus réel : PASS (kill à 5/30 pages, 24 transitoires récupérés, 30/30 READY, zéro doublon)

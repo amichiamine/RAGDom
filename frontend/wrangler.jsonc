@@ -1,0 +1,11 @@
+// RAGDom — vitrine UI sur Cloudflare Workers (assets statiques).
+// Le backend NE tourne PAS sur Cloudflare : définir VITE_API_URL au build
+// (tunnel cloudflared ou VPS — voir docs/ragdom/02_walkthroughs/phase7_deploiement_web.md).
+{
+  "name": "ragdom",
+  "compatibility_date": "2026-08-21",
+  "assets": {
+    "directory": "./dist",
+    "not_found_handling": "single-page-application"
+  }
+}
