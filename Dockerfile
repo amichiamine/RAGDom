@@ -37,10 +37,13 @@ RUN pip install opencv-python-headless==4.10.0.84 numpy==1.26.4
 
 COPY backend/ backend/
 COPY engines/ engines/
+# Corpus embarqué : les PDF du dépôt font partie de l'image (persistants aux restarts,
+# disque Render FREE éphémère). Les uploads web atterrissent au même endroit.
+COPY sources/ sources/
 COPY --from=ui /app/frontend/dist frontend/dist
 
 # Données persistantes (sources, bases, modèles) : volume /data.
-ENV SOURCES_DIR=/data/sources \
+ENV SOURCES_DIR=/app/sources \
     DATABASES_DIR=/data/databases \
     PIPELINE_SET_DIR=/data/pipeline_set \
     MODELS_DIR=/data/models \
