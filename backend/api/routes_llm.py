@@ -6,6 +6,7 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
+import config
 from db import connection as db
 from llm import key_manager
 
@@ -109,6 +110,8 @@ def test_key(key_id: str):
 
 @router.post("/keys/{key_id}/reveal")
 def reveal_key(key_id: str):
+    if not config.RAGDOM_ALLOW_REVEAL:  # Phase 7 : verrouillé sur les déploiements web
+        raise HTTPException(403, "Révélation des clés désactivée (RAGDOM_ALLOW_REVEAL=false)")
     """Seule route retournant la clé complète (usage local — bouton « Révéler »)."""
     conn = db.get_config_db()
     try:

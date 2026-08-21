@@ -72,6 +72,7 @@ def health() -> dict:
         "vector_engine_status": state["status"],
         "vector_engine_message": state["message"],
         "force_sqlite_vec": state["force"],
+        "readonly": config.RAGDOM_READONLY,  # Phase 7 : le frontend masque la Vue 3
     }
 
 

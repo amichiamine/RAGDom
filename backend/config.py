@@ -45,6 +45,24 @@ RAGDOM_FORCE_SQLITE_VEC = os.environ.get("RAGDOM_FORCE_SQLITE_VEC", "false").low
 # ── LLM (fallback de démarrage — gestion principale : ragdom_config.sqlite) ──
 OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
 
+# ── Phase 7 : Lot Web-Ready (défauts = comportement local inchangé) ──────────
+# Mode consultation : seules les routes de LECTURE (library/search/system-read)
+# répondent ; toute route d'administration est absente (404).
+RAGDOM_READONLY = os.environ.get("RAGDOM_READONLY", "false").lower() == "true"
+# Jeton d'administration (Palier 3) : si défini, les routes admin exigent
+# Authorization: Bearer <jeton>. Vide = aucun contrôle (mode local nominal).
+RAGDOM_AUTH_TOKEN = os.environ.get("RAGDOM_AUTH_TOKEN", "") or None
+# Révélation des clés LLM en clair (/api/llm/keys/{id}/reveal).
+# true par défaut (postulat local §7) — DOIT être false sur tout déploiement web.
+RAGDOM_ALLOW_REVEAL = os.environ.get("RAGDOM_ALLOW_REVEAL", "true").lower() == "true"
+# Quota /api/search/ask par IP et par minute (0 = désactivé, défaut local).
+RAGDOM_ASK_RATE_PER_MIN = int(os.environ.get("RAGDOM_ASK_RATE_PER_MIN", "0"))
+
+# ── Phase 6 (post-v1, D4-B) : parallélisme intra-page borné ──────────────────
+# 1 = séquentiel strict (D4-A, défaut). 2-3 = pool de workers PAR BLOCS d'une
+# même page, via les modules *_v2 add-only déclarés par le moteur.
+RAGDOM_INTRA_PAGE_WORKERS = max(1, min(3, int(os.environ.get("RAGDOM_INTRA_PAGE_WORKERS", "1"))))
+
 
 def env_api_key(provider: str) -> Optional[str]:
     """Clé API de fallback depuis l'environnement (jamais loggée)."""

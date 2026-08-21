@@ -216,6 +216,18 @@ class PipelineOrchestrator:
         finally:
             conn.close()
 
+    @staticmethod
+    def _load_layer_variant(engine_id: str, layer_module: str):
+        """Phase 6 (D4-B, post-v1) : préfère la variante parallèle *_v2 d'une
+        couche quand RAGDOM_INTRA_PAGE_WORKERS >= 2 ET que le moteur la fournit.
+        Repli silencieux sur la couche séquentielle sinon (add-only)."""
+        if config.RAGDOM_INTRA_PAGE_WORKERS >= 2:
+            try:
+                return engine_registry.load_layer(engine_id, layer_module + "_v2")
+            except Exception:  # noqa: BLE001 — variante absente : séquentiel
+                pass
+        return engine_registry.load_layer(engine_id, layer_module)
+
     def _process_page(self, db_name: str, manifest: dict, job: dict) -> str:
         """Isolation par page : try/except indépendant, purge mémoire systématique."""
         self._current = dict(job, status="PROCESSING_CV")
@@ -237,7 +249,7 @@ class PipelineOrchestrator:
             for layer_module, status in LAYER_SEQUENCE:
                 self._set_status(db_name, job["id"], status)
                 self._current["status"] = status
-                module = engine_registry.load_layer(manifest["id"], layer_module)
+                module = self._load_layer_variant(manifest["id"], layer_module)
                 ctx = module.run(ctx)
                 if ctx.get("status") == "INVALID_SOURCE":
                     self._set_status(db_name, job["id"], "INVALID_SOURCE",
