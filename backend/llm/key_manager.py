@@ -112,9 +112,14 @@ def _call_provider(provider: str, model: str, api_key: str, prompt: str,
 def _call_ollama(prompt: str, timeout_s: int) -> Optional[str]:
     try:
         conn = db.get_config_db()
-        model = (conn.execute("SELECT active_model FROM llm_settings WHERE provider='ollama'").fetchone()
-                 or ["llama3"])[0]
+        row = conn.execute("SELECT active_model FROM llm_settings WHERE provider='ollama'").fetchone()
         conn.close()
+        model = row[0] if row and row[0] else None
+        if not model:  # aucun modèle choisi : auto-détection sur le serveur Ollama local
+            detected = list_models("ollama")
+            if not detected["models"]:
+                return None
+            model = detected["models"][0]
         response = httpx.post(config.OLLAMA_BASE_URL + "/api/generate",
                               json={"model": model, "prompt": prompt, "stream": False}, timeout=timeout_s)
         response.raise_for_status()
