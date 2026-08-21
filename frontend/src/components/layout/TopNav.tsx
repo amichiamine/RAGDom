@@ -2,7 +2,6 @@ import { Link } from 'react-router-dom'
 import { useLanguage } from '@/contexts/LanguageContext'
 import ThemeToggle from '@/components/layout/ThemeToggle'
 import LanguageSelector from '@/components/layout/LanguageSelector'
-import EngineBadge from '@/components/layout/EngineBadge'
 
 interface Props {
   variant: 'index' | 'automation'
@@ -40,7 +39,6 @@ export default function TopNav({ variant }: Props) {
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-          <EngineBadge />
           {isIndex ? (
             <Link to="/automation" className="btn btn-outline-success rounded-pill">
               <i className="fa-solid fa-gears" /> {t('nav.automation')}

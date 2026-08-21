@@ -9,6 +9,7 @@ import CommandPalette from '@/components/common/CommandPalette'
 import IndexView from '@/views/IndexView'
 import LibraryView from '@/views/LibraryView'
 import AutomationView from '@/views/AutomationView'
+import LoginView from '@/views/LoginView'
 
 /**
  * App.tsx — base imposée §4.4, étendue avec les providers requis par le sprint
@@ -27,6 +28,7 @@ export default function App() {
                   <CommandPalette />
                   <Routes>
                     <Route path="/" element={<IndexView />} />
+                    <Route path="/login" element={<LoginView />} />
                     <Route path="/library" element={<LibraryView />} />
                     <Route path="/automation" element={<AutomationView />} />
                     <Route path="*" element={<Navigate to="/" replace />} />

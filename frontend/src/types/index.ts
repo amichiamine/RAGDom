@@ -173,14 +173,25 @@ export interface LlmKey {
   created_at: string;
 }
 
-export type LlmProvider = 'gemini' | 'groq' | 'openai' | 'anthropic' | 'ollama';
+export type LlmProvider = 'gemini' | 'groq' | 'openai' | 'anthropic' | 'lmstudio' | 'make' | 'ollama';
 
 export interface LlmSetting {
   provider: LlmProvider;
   active_model: string | null;
   is_enabled: boolean;
   priority: number;
+  base_url: string | null; // V3.6 : endpoint personnalisable (lmstudio local, make webhook…)
 }
+
+// ── Authentification session (V3.6 — atelier web, canal Bearer réutilisé) ──
+export interface AuthState {
+  auth_required: boolean;
+  setup_required: boolean;
+  authenticated: boolean;
+  username: string | null;
+  readonly: boolean;
+}
+export interface AuthSession { session_token: string; username: string; }
 
 export type BatchStatus = 'QUEUED' | 'RUNNING' | 'COMPLETED' | 'STOPPED' | 'FAILED'; // V3.1.1
 

@@ -151,6 +151,7 @@ CREATE TABLE IF NOT EXISTS llm_settings (
     active_model  TEXT,
     is_enabled    INTEGER DEFAULT 1,
     priority      INTEGER DEFAULT 99,
+    base_url      TEXT,                -- V3.5+ : endpoint personnalisé (LM Studio, proxy, webhook Make)
     updated_at    DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 INSERT OR IGNORE INTO llm_settings (provider, active_model, is_enabled, priority) VALUES
@@ -158,7 +159,9 @@ INSERT OR IGNORE INTO llm_settings (provider, active_model, is_enabled, priority
     ('groq',      'llama-3.1-70b-versatile', 0, 2),
     ('openai',    'gpt-4o-mini', 0, 3),
     ('anthropic', 'claude-3-haiku-20240307', 0, 4),
-    ('ollama',    'llama3', 0, 5);
+    ('lmstudio',  'local-model', 0, 5),
+    ('make',      'webhook', 0, 6),
+    ('ollama',    'llama3', 0, 7);
 CREATE TABLE IF NOT EXISTS app_settings (
     key   TEXT PRIMARY KEY,
     value TEXT
@@ -180,6 +183,12 @@ def get_config_db() -> sqlite3.Connection:
 def init_config_db() -> None:
     conn = get_config_db()
     conn.executescript(_CONFIG_DDL)
+    # Migration douce (bases de config antérieures) : colonne base_url, PUIS défauts.
+    cols = [r[1] for r in conn.execute("PRAGMA table_info(llm_settings)")]
+    if "base_url" not in cols:
+        conn.execute("ALTER TABLE llm_settings ADD COLUMN base_url TEXT")
+    conn.execute("UPDATE llm_settings SET base_url='http://localhost:1234/v1'"
+                 " WHERE provider='lmstudio' AND base_url IS NULL")
     conn.commit()
     row = conn.execute("SELECT value FROM app_settings WHERE key='force_sqlite_vec'").fetchone()
     if row is not None:

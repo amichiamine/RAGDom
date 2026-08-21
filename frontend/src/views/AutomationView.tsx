@@ -1,4 +1,5 @@
 import { useEffect, useState, useRef, useCallback, useMemo } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { api } from '@/lib/api'
 import { useDatabase } from '@/contexts/DatabaseContext'
 import { useLanguage } from '@/contexts/LanguageContext'
@@ -9,6 +10,7 @@ import VectorEngineAlert from '@/components/automation/VectorEngineAlert'
 import PipelineSteps from '@/components/automation/PipelineSteps'
 import LiveConsole from '@/components/automation/LiveConsole'
 import KeyManager from '@/components/automation/KeyManager'
+import ProvidersPanel from '@/components/automation/ProvidersPanel'
 import SettingsPanel from '@/components/automation/SettingsPanel'
 import QuarantineManager from '@/components/automation/QuarantineManager'
 import PurgeStudio from '@/components/automation/PurgeStudio'
@@ -25,6 +27,17 @@ export default function AutomationView() {
   const { databases, activeDb, setActiveDb, isLoading: dbLoading, refresh } = useDatabase()
   const { t } = useLanguage()
   const toast = useToast()
+  const navigate = useNavigate()
+
+  // ── Garde d'authentification (V3.6) : au montage, si l'atelier exige une
+  // session et qu'aucune n'est active → /login. Seule cette vue est protégée. ──
+  useEffect(() => {
+    let cancelled = false
+    api.auth.me()
+      .then(me => { if (!cancelled && me.auth_required && !me.authenticated) navigate('/login', { replace: true }) })
+      .catch(() => { /* /auth/me injoignable : ne pas bloquer l'atelier */ })
+    return () => { cancelled = true }
+  }, [navigate])
 
   const [health, setHealth] = useState<SystemHealth | null>(null)
   const [documents, setDocuments] = useState<Document[]>([])
@@ -220,8 +233,15 @@ export default function AutomationView() {
         {/* Quarantaine */}
         {activeDb && <QuarantineManager db={activeDb} onCount={setQuarantineCount} />}
 
-        {/* Clés LLM */}
-        <KeyManager />
+        {/* Clés LLM + Fournisseurs LLM (côte à côte) */}
+        <div className="row">
+          <div className="col-6 col-lg-6" style={{ minWidth: 320, flex: 1 }}>
+            <KeyManager />
+          </div>
+          <div className="col-6 col-lg-6" style={{ minWidth: 320, flex: 1 }}>
+            <ProvidersPanel />
+          </div>
+        </div>
       </main>
 
       {activeDb && (

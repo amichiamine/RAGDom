@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useDatabase } from '@/contexts/DatabaseContext'
 import { useLanguage } from '@/contexts/LanguageContext'
+import { useEngine } from '@/contexts/EngineContext'
 import TopNav from '@/components/layout/TopNav'
 import StatMetricCard from '@/components/index/StatMetricCard'
 import OnboardingEmptyState from '@/components/common/OnboardingEmptyState'
@@ -11,6 +12,7 @@ import { formatBytes, formatNumber } from '@/lib/utils'
 export default function IndexView() {
   const { databases, isLoading, refresh } = useDatabase()
   const { t } = useLanguage()
+  const { engines, activeEngine } = useEngine()
   const navigate = useNavigate()
   const [query, setQuery] = useState('')
 
@@ -84,6 +86,33 @@ export default function IndexView() {
               <StatMetricCard key={i} icon={k.icon} colorVar={k.color} value={k.value} label={k.label} />
             ))}
           </div>
+        )}
+
+        {/* Moteurs détectés (V3.6 — badge moteur déplacé du header vers l'accueil) */}
+        {engines.length > 0 && (
+          <section style={{ marginBottom: 40 }}>
+            <h2 style={{ marginBottom: 18 }}>
+              <i className="fa-solid fa-microchip" /> {t('engines.title')}
+              <span className="badge badge-subtle" style={{ marginInlineStart: 10 }}>
+                {t('engines.detected')}: {formatNumber(engines.length)}
+              </span>
+            </h2>
+            <div className="engines-grid">
+              {engines.map(e => {
+                const isActive = activeEngine ? e.id === activeEngine.id : e.status === 'active'
+                return (
+                  <div key={e.id} className={`engine-tile${isActive ? ' is-active' : ''}`}>
+                    <span className="engine-tile-dot" style={{ background: e.accent }} aria-hidden="true" />
+                    <div style={{ minWidth: 0, flex: 1 }}>
+                      <div className="engine-tile-label" dir="auto">{e.label}</div>
+                      <div className="engine-tile-version">v{e.version}</div>
+                    </div>
+                    {isActive && <span className="badge badge-success">{t('engines.active')}</span>}
+                  </div>
+                )
+              })}
+            </div>
+          </section>
         )}
 
         {databases.length === 0 && !isLoading ? (

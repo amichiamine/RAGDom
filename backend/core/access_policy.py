@@ -28,6 +28,8 @@ _PUBLIC_RULES = [
                        r"artifact-binary|page-scan|page-scans|curriculum|benchmarks)$")),
     ("POST", re.compile(r"^/api/search/(hybrid|hybrid-multi|ask)$")),
     ("GET", re.compile(r"^/api/system/(health|engines|databases|settings)$")),
+    ("GET", re.compile(r"^/api/auth/me$")),          # état d'authentification (pilote l'UI)
+    ("POST", re.compile(r"^/api/auth/(login|setup|logout)$")),  # setup a sa propre garde interne
     ("GET", re.compile(r"^/(docs|openapi\.json|redoc)$")),  # documentation API
 ]
 # Tout le reste est ADMINISTRATION (pipeline, llm, curriculum CRUD, sources,
@@ -71,18 +73,24 @@ class AccessPolicyMiddleware(BaseHTTPMiddleware):
         if config.RAGDOM_READONLY and not public:
             return JSONResponse({"detail": "Not Found"}, status_code=404)
 
-        # 2) Jeton d'administration (Palier 3).
-        if not public and config.RAGDOM_AUTH_TOKEN:
-            auth = request.headers.get("authorization", "")
-            if not auth and path == "/api/pipeline/stream":
-                # EventSource ne peut pas porter d'entêtes : jeton accepté en query param
-                query_token = request.query_params.get("auth_token", "")
-                if query_token:
-                    auth = "Bearer " + query_token
-            if auth != "Bearer %s" % config.RAGDOM_AUTH_TOKEN:
-                return JSONResponse(
-                    {"detail": "Jeton d'administration requis (Authorization: Bearer)"},
-                    status_code=401)
+        # 2) Authentification d'administration : session utilisateur OU jeton env.
+        #    Active dès qu'un compte existe (login embarqué) ou qu'un jeton env est défini.
+        if not public:
+            from api import routes_auth  # import tardif : évite le cycle au démarrage
+            auth_enabled = bool(config.RAGDOM_AUTH_TOKEN) or routes_auth.users_exist()
+            if auth_enabled:
+                auth = request.headers.get("authorization", "")
+                if not auth and path == "/api/pipeline/stream":
+                    # EventSource ne peut pas porter d'entêtes : jeton accepté en query param
+                    query_token = request.query_params.get("auth_token", "")
+                    if query_token:
+                        auth = "Bearer " + query_token
+                token = auth[7:] if auth.startswith("Bearer ") else ""
+                env_ok = bool(config.RAGDOM_AUTH_TOKEN) and token == config.RAGDOM_AUTH_TOKEN
+                if not env_ok and routes_auth.validate_session(token) is None:
+                    return JSONResponse(
+                        {"detail": "Authentification requise — connectez-vous (/login)"},
+                        status_code=401)
 
         # 3) Quota /ask (protège les clés LLM contre l'épuisement).
         if path == "/api/search/ask" and config.RAGDOM_ASK_RATE_PER_MIN > 0:

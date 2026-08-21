@@ -229,5 +229,44 @@
     "error_generic": "حدث خطأ. الرجاء إعادة المحاولة.",
     "empty": "لا توجد بيانات",
     "engine": "المحرك"
+  },
+  "auth": {
+    "login_title": "تسجيل الدخول",
+    "setup_title": "إنشاء حساب المسؤول",
+    "login_subtitle": "الوصول إلى مساحة إدارة RAGDom.",
+    "setup_subtitle": "التشغيل الأول: حدّد بيانات المسؤول.",
+    "username": "اسم المستخدم",
+    "username_hint": "من 3 إلى 64 حرفًا: أحرف وأرقام و _ - .",
+    "password": "كلمة المرور",
+    "password_hint": "8 أحرف على الأقل.",
+    "confirm_password": "تأكيد كلمة المرور",
+    "init_token": "رمز التهيئة",
+    "init_token_hint": "يتطلب الخادم رمز تهيئة (RAGDOM_AUTH_TOKEN). أدخله لإنشاء الحساب.",
+    "submit_login": "تسجيل الدخول",
+    "submit_setup": "إنشاء الحساب",
+    "password_mismatch": "كلمتا المرور غير متطابقتين.",
+    "password_too_short": "يجب أن تحتوي كلمة المرور على 8 أحرف على الأقل.",
+    "username_invalid": "اسم مستخدم غير صالح (3–64 حرفًا: أحرف وأرقام و _ - .).",
+    "logged_in_as": "متصل",
+    "logout": "تسجيل الخروج",
+    "session_state": "حالة الجلسة"
+  },
+  "providers": {
+    "title": "مزوّدو نماذج اللغة",
+    "provider": "المزوّد",
+    "enabled": "مُفعّل",
+    "priority": "الأولوية",
+    "model": "النموذج",
+    "base_url": "عنوان القاعدة",
+    "save_row": "حفظ",
+    "saved": "تم تحديث المزوّد",
+    "note": "LM Studio = واجهة محلية متوافقة مع OpenAI · Make = خطاف بدون كود (الأولوية 3) · Ollama = الملاذ الأخير",
+    "base_url_default": "النقطة الرسمية (فارغ)"
+  },
+  "engines": {
+    "title": "المحركات",
+    "detected": "المحركات المكتشفة",
+    "active": "نشط",
+    "empty": "لم يُكتشف أي محرك"
   }
 }
