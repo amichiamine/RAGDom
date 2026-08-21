@@ -90,8 +90,8 @@ a{color:#60a5fa;text-decoration:none}a:hover{text-decoration:underline}
   <text x="600" y="52" fill="#e6eaf6" font-size="15" font-weight="700">Qui exécute cette image ?</text>
   <rect x="590" y="70" width="290" height="120" rx="12" fill="rgba(16,185,129,.08)" stroke="#10b981" stroke-width="1.5"/>
   <text x="606" y="97" fill="#34d399" font-size="13.5" font-weight="700">✅ Hébergeurs de CONTENEURS</text>
-  <text x="606" y="121" fill="#e6eaf6" font-size="12.5">Hugging Face Spaces (gratuit)</text>
-  <text x="606" y="141" fill="#e6eaf6" font-size="12.5">Render (gratuit) · Koyeb (gratuit)</text>
+  <text x="606" y="121" fill="#e6eaf6" font-size="12.5">Render (gratuit) · HF Spaces (PRO $)</text>
+  <text x="606" y="141" fill="#e6eaf6" font-size="12.5">Koyeb (gratuit) · Railway ($)</text>
   <text x="606" y="161" fill="#e6eaf6" font-size="12.5">Railway · Fly.io · VPS · CF Containers ($)</text>
   <rect x="590" y="210" width="290" height="110" rx="12" fill="rgba(245,158,11,.07)" stroke="#f59e0b" stroke-width="1.5"/>
   <text x="606" y="237" fill="#fbbf24" font-size="13.5" font-weight="700">🖼️ UI seule (vitrine statique)</text>
@@ -103,7 +103,7 @@ a{color:#60a5fa;text-decoration:none}a:hover{text-decoration:underline}
 
 <table>
 <tr><th>Tu veux</th><th>Solution</th><th>Coût</th><th>Section</th></tr>
-<tr><td><strong>La version web complète, gratuite, tout de suite</strong></td><td>Hugging Face Spaces (Docker)</td><td>0 € — sans carte bancaire</td><td>§1 ⭐</td></tr>
+<tr><td><strong>La version web complète, gratuite, tout de suite</strong></td><td><strong>Render (Docker)</strong> — HF Spaces Docker est devenu PRO (§1)</td><td>0 €</td><td>§2 ⭐</td></tr>
 <tr><td>Alternative gratuite avec domaine .onrender.com</td><td>Render (Docker)</td><td>0 € (veille après 15 min d'inactivité)</td><td>§2</td></tr>
 <tr><td>Confort maximal + disque persistant</td><td>Railway (Docker)</td><td>essai 5 $ puis ~5 $/mois</td><td>§3</td></tr>
 <tr><td>Vitrine UI ultra-rapide sur ton pipeline actuel</td><td>Cloudflare (assets)</td><td>0 €</td><td>§4</td></tr>
@@ -112,8 +112,8 @@ a{color:#60a5fa;text-decoration:none}a:hover{text-decoration:underline}
 
 <div class="callout"><strong>⚠️ La seule vraie limite du 100 % gratuit :</strong> les offres gratuites (HF Spaces, Render, Koyeb) ont un <strong>stockage éphémère</strong> — au redémarrage du conteneur, les bases <code>.sqlite</code> uploadées sont perdues. Deux parades : ① ingérer localement puis <em>ré-uploader la base finie</em> (fichier unique, grâce à la Base Autonome V3.5) après chaque redémarrage — parfait pour démo/consultation ; ② passer à un plan avec volume (Railway/Fly/HF persistent ~5 $/mois) pour la persistance réelle.</div>
 
-<h2><span class="num">01</span>⭐ Hugging Face Spaces — gratuit, 2 vCPU / 16 Go RAM, sans carte</h2>
-<p class="sub">Le meilleur hébergeur Docker gratuit du marché. L'image RAGDom y tourne intégralement : ingestion comprise.</p>
+<h2><span class="num">01</span>Hugging Face Spaces — ⚠️ devenu PAYANT pour Docker (vérifié en conditions réelles)</h2>
+<div class="callout danger"><strong>Testé le 21/08/2026 avec un vrai compte :</strong> l'API HF répond désormais <code>402 — « hosting Gradio and Docker Spaces on free cpu-basic requires a PRO subscription »</code>. Les Spaces Docker (privés ET publics) exigent l'abonnement HF PRO. <strong>Le gratuit de référence devient Render (§2)</strong> — la section ci-dessous reste valable pour les abonnés PRO.</div>
 
 <div class="step"><div class="n">1</div><div class="body">
 <h3>Créer le Space</h3>
