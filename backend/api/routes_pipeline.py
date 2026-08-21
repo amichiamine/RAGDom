@@ -23,7 +23,7 @@ router = APIRouter()
 
 _LEVEL_RE = re.compile(r"^(\d?A[MPS]|Term|BEM|BAC|L\d|M\d|\dAM|\dAP|\dAS)$", re.I)
 _sse_queues: List[queue_module.Queue] = []
-_worker: dict = {"thread": None}
+_worker: dict = {"thread": None, "pending": [], "lock": threading.Lock()}
 
 
 def _broadcast(event: str, data: dict) -> None:
@@ -117,6 +117,41 @@ def _run_worker(db_name: str) -> None:
         orchestrator.run_queue(db_name)
     except Exception as exc:  # noqa: BLE001
         _broadcast("error", {"error": type(exc).__name__, "details": str(exc)})
+    finally:
+        # Relance en chaîne : un lot enfilé sur une AUTRE base pendant ce run
+        # attend dans _worker["pending"] — le worker suivant prend le relais.
+        with _worker["lock"]:
+            next_db = _worker["pending"].pop(0) if _worker["pending"] else None
+            if next_db:
+                worker = threading.Thread(target=_run_worker, args=(next_db,), daemon=True)
+                _worker["thread"] = worker
+                worker.start()
+
+
+def resume_pending_queues() -> list:
+    """Reprise au DÉMARRAGE (crash/redéploiement) : toute base ayant des jobs
+    QUEUED/RUNNING voit ses RUNNING re-mis en file (recover) puis son worker
+    relancé — aucun lot orphelin après un restart. Retourne les bases reprises."""
+    resumed = []
+    try:
+        db_files = [f for f in os.listdir(config.DATABASES_DIR) if f.endswith(".sqlite")]
+    except OSError:
+        return resumed
+    for filename in db_files:
+        try:
+            conn = db.get_connection(filename)
+            try:
+                row = conn.execute("SELECT COUNT(*) FROM pipeline_jobs"
+                                   " WHERE status IN ('QUEUED','RUNNING')").fetchone()
+            finally:
+                conn.close()
+            if row and row[0] > 0:
+                orchestrator.recover(filename)
+                _launch(filename)
+                resumed.append({"db": filename, "jobs": row[0]})
+        except Exception:  # noqa: BLE001 — base illisible : on n'empêche pas le boot
+            continue
+    return resumed
 
 
 @router.post("/start", status_code=202)
@@ -150,12 +185,18 @@ def start(body: StartBody):
 
 
 def _launch(db_name: str) -> None:
-    thread = _worker.get("thread")
-    if thread is not None and thread.is_alive():
-        return  # queue séquentielle stricte : le worker en cours drainera la file
-    worker = threading.Thread(target=_run_worker, args=(db_name,), daemon=True)
-    _worker["thread"] = worker
-    worker.start()
+    with _worker["lock"]:
+        thread = _worker.get("thread")
+        if thread is not None and thread.is_alive():
+            # Séquentiel strict D2-B : UNE base à la fois. Le worker en cours ne
+            # draine que SA base → toute autre base est mise en attente et sera
+            # relancée en chaîne à la fin du run (jamais de lot orphelin).
+            if db_name not in _worker["pending"]:
+                _worker["pending"].append(db_name)
+            return
+        worker = threading.Thread(target=_run_worker, args=(db_name,), daemon=True)
+        _worker["thread"] = worker
+        worker.start()
 
 
 @router.get("/status")

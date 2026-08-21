@@ -223,6 +223,11 @@ def generate(prompt: str, image_b64: Optional[str] = None,
             keys = [(None, "", None)]
         for key_id, api_key, key_model in keys:
             effective_model = key_model or model  # priorité au modèle DE LA CLÉ
+            if not effective_model and provider not in ("lmstudio", "make"):
+                effective_model, _err = _autodetect_working_model(
+                    provider, key_id, api_key, base_url)  # zéro dur : live + mémorisé
+                if not effective_model:
+                    continue
             for attempt, delay in enumerate((0, 2, 4, 8)):
                 if delay:
                     time.sleep(delay)
@@ -272,6 +277,50 @@ def add_key(provider: str, api_key: str) -> str:
     return key_id
 
 
+
+# Indices de modèles NON-texte (capacités, pas des noms de versions) : relégués en
+# fin de liste lors de l'auto-détection — un modèle TTS/image répond 400 en texte.
+_NON_TEXT_HINTS = ("tts", "image", "audio", "embedding", "live", "veo", "imagen")
+
+
+def _autodetect_working_model(provider: str, key_id: Optional[str], api_key: str,
+                              base_url: Optional[str]) -> tuple:
+    """Premier modèle détecté EN DIRECT qui répond réellement à la génération.
+
+    Les listes des providers contiennent des modèles dépréciés (404 pour les
+    nouveaux comptes) ou non-texte (400) : on parcourt les candidats jusqu'au
+    premier succès, puis on le MÉMORISE sur la clé (zéro valeur en dur).
+    Retourne (model, None) ou (None, message_d_erreur).
+    """
+    detected = list_models(provider, key_id=key_id)
+    models = detected["models"]
+    if not models:
+        return None, (detected["error"] or "Aucun modèle détecté")
+    ordered = ([m for m in models if not any(h in m.lower() for h in _NON_TEXT_HINTS)]
+               + [m for m in models if any(h in m.lower() for h in _NON_TEXT_HINTS)])
+    last_err = None
+    for candidate in ordered[:12]:
+        try:
+            _call_provider(provider, candidate, api_key, "ping", None, 15, base_url=base_url)
+        except httpx.HTTPStatusError as exc:
+            # Déprécié (404), non-texte (400), interdit pour CETTE clé (403),
+            # saturé (429/503)… : candidat suivant — ne lève JAMAIS, le verdict
+            # final est rendu sur l'ensemble de la liste.
+            last_err = "HTTP %s sur %s" % (exc.response.status_code, candidate)
+            continue
+        except httpx.HTTPError as exc:
+            last_err = str(exc)
+            continue
+        if key_id:
+            conn = db.get_config_db()
+            conn.execute("UPDATE llm_keys SET active_model=? WHERE id=?"
+                         " AND active_model IS NULL", (candidate, key_id))
+            conn.commit()
+            conn.close()
+        return candidate, None
+    return None, last_err
+
+
 def test_key(key_id: str) -> dict:
     conn = db.get_config_db()
     row = conn.execute("SELECT provider, api_key FROM llm_keys WHERE id=?", (key_id,)).fetchone()
@@ -286,20 +335,20 @@ def test_key(key_id: str) -> dict:
     conn2.close()
     model = (key_model_row[0] if key_model_row and key_model_row[0] else None)         or (settings_row[0] if settings_row else None)
     base_url = settings_row[1] if settings_row else None
+    auto_note = ""
     if not model:  # aucun modèle choisi : auto-détection en direct (zéro dur)
-        detected = list_models(provider, key_id=key_id)
-        if detected["models"]:
-            model = detected["models"][0]
-        elif detected["error"]:
+        model, err = _autodetect_working_model(provider, key_id, api_key, base_url)
+        if not model:
             return {"success": False, "status": "unknown",
-                    "message": "Détection des modèles impossible : %s" % detected["error"]}
+                    "message": "Aucun modèle utilisable détecté : %s" % err}
+        auto_note = " Modèle auto-détecté : %s (mémorisé sur la clé)." % model
     started = time.perf_counter()
     try:
         _call_provider(provider, model, api_key, "ping", None, 15, base_url=base_url)
         _mark_key(key_id, status="active")
-        return {"success": True, "status": "active",
+        return {"success": True, "status": "active", "model": model,
                 "latency_ms": int((time.perf_counter() - started) * 1000),
-                "message": "Clé API validée avec succès."}
+                "message": "Clé API validée avec succès." + auto_note}
     except httpx.HTTPStatusError as exc:
         code = exc.response.status_code
         _mark_key(key_id, status="disabled" if code == 401 else None, error_code=code)
