@@ -74,6 +74,29 @@ app.include_router(pipeline_router, prefix="/api/pipeline", tags=["Pipeline"])
 app.include_router(llm_router, prefix="/api/llm", tags=["LLM"])
 app.include_router(curriculum_router, prefix="/api/curriculum", tags=["Curriculum"])
 
+# ── Single-Origin (Phase 7) : FastAPI sert l'UI compilée s'il la trouve ──
+# UN SEUL processus sert tout (UI + API) : zéro CORS inter-origines, zéro
+# VITE_API_URL. Actif dès que frontend/dist existe (npm run build) ou que
+# RAGDOM_UI_DIST pointe vers un dossier de build. Les routes /api/* gardent
+# la priorité (montées avant) ; toute autre URL sert l'application (SPA).
+_DIST_DIR = os.environ.get("RAGDOM_UI_DIST") or os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "frontend", "dist")
+if os.path.isdir(_DIST_DIR):
+    from fastapi.staticfiles import StaticFiles
+    from starlette.exceptions import HTTPException as StarletteHTTPException
+
+    class _SPAStaticFiles(StaticFiles):
+        async def get_response(self, path: str, scope):
+            try:
+                return await super().get_response(path, scope)
+            except StarletteHTTPException as exc:
+                if exc.status_code == 404 and "." not in path.rsplit("/", 1)[-1]:
+                    return await super().get_response("index.html", scope)  # routes SPA
+                raise
+
+    app.mount("/", _SPAStaticFiles(directory=_DIST_DIR, html=True), name="ui")
+    print("[RAGDom] UI servie en single-origin depuis %s" % _DIST_DIR)
+
 # ── Point d'entrée direct ─────────────────────────────────────
 if __name__ == "__main__":
     import uvicorn
