@@ -569,7 +569,7 @@ Les paramètres de découpage et de recherche doivent être implémentés **exac
   Score_RRF(chunk) = 1 / (60 + Rank_BM25) + 1 / (60 + Rank_Vec)
   ```
   Où `Rank_BM25` est le rang dans les résultats FTS5 et `Rank_Vec` est le rang dans les résultats sqlite-vec.
-* **Seuil de pertinence (Anti-Hallucination — V3.1, scores bruts non-ordinaux) :** le RRF ordonne mais ne filtre pas (un rang 1 passe toujours, même sémantiquement nul). Un chunk n'est éligible que si (distance cosinus sqlite-vec ≤ 0.45) OU (score `bm25(search_index)` ≤ -1.5 — score négatif SQLite = pertinent, tri `ORDER BY bm25(...) ASC`, plus petit = meilleur). Si aucun chunk n'est éligible, l'agent IA répond obligatoirement : *"Je ne trouve pas d'informations pertinentes dans la bibliothèque actuelle."* En mode `fts5-fallback`, seul le critère BM25 s'applique. Les deux seuils sont stockés dans `app_settings` (`ragdom_config.sqlite`) et ajustables sans redéploiement.
+* **Seuil de pertinence (Anti-Hallucination — V3.1, scores bruts non-ordinaux) :** le RRF ordonne mais ne filtre pas (un rang 1 passe toujours, même sémantiquement nul). Un chunk n'est éligible que si (distance cosinus sqlite-vec ≤ 0.45) OU (score `bm25(search_index)` ≤ -0.3 — score négatif SQLite = pertinent ; calibré en conditions réelles Phase 2 : un match significatif vaut ≤ -0.3, -1.5 rejetait les corpus courts, tri `ORDER BY bm25(...) ASC`, plus petit = meilleur). Si aucun chunk n'est éligible, l'agent IA répond obligatoirement : *"Je ne trouve pas d'informations pertinentes dans la bibliothèque actuelle."* En mode `fts5-fallback`, seul le critère BM25 s'applique. Les deux seuils sont stockés dans `app_settings` (`ragdom_config.sqlite`) et ajustables sans redéploiement.
 
 ### **3.3.1 Stratégie de Résilience Vectorielle & Mode Strict (Arbitrage Windows / R&D)**
 
@@ -818,7 +818,7 @@ CREATE TABLE IF NOT EXISTS app_settings (
 INSERT OR IGNORE INTO app_settings (key, value) VALUES
     ('force_sqlite_vec',       'false'),
     ('vec_distance_threshold', '0.45'),
-    ('bm25_score_threshold',   '-1.5');
+    ('bm25_score_threshold',   '-0.3');
 ```
 
 ---

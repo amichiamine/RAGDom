@@ -1,6 +1,6 @@
 # État Actuel du Projet RAGDom
 
-**Phase :** Phase 1 TERMINÉE (Backend Pipeline complet) → Phase 2 : API REST
+**Phase :** Phase 2 TERMINÉE (API REST complète, 35/35 tests) → Phase 3/4 : Frontend (sous-agent en cours)
 **Date de mise à jour :** 2026-08-21
 **Sprint actuel :** Sprint 2 — Routes API (library, search, pipeline+SSE, llm, administration §7.6)
 
@@ -20,7 +20,8 @@
       (copie .sqlite seule = 100% servie), INVALID_SOURCE sans arrêt
 
 ## Ce qui est EN COURS
-- [ ] Sprint 2 : routes_library / routes_search (hybrid RRF + ask) / routes_pipeline (start/stop/purge/
+- [ ] Frontend React (sous-agent parallèle : fondations + 3 vues Mode Repli)
+- [x] Sprint 2 TERMINÉ : routes_library / routes_search (hybrid RRF + ask) / routes_pipeline (start/stop/purge/
       quarantine + SSE) / routes_llm + llm/key_manager.py / routes administration §7.6
 
 ## Blocages & Points d'Attention

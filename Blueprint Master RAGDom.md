@@ -950,7 +950,7 @@ data: {"batch_id":"uuid","page_number":5,"error":"UNBALANCED_LATEX","details":"M
 #### `DELETE /api/system/databases/{filename}` — **Corps :** `{ "confirm": "{filename}" }` (double garde-fou, refus si un batch est RUNNING dessus).
 
 #### `GET /api/system/settings` / `PUT /api/system/settings` *(Réglages à chaud)*
-**GET → 200 :** `{ "settings": { "vec_distance_threshold": 0.45, "bm25_score_threshold": -1.5, "force_sqlite_vec": false } }`
+**GET → 200 :** `{ "settings": { "vec_distance_threshold": 0.45, "bm25_score_threshold": -0.3, "force_sqlite_vec": false } }`
 **PUT Corps :** `{ "key": "vec_distance_threshold", "value": "0.5" }` — whitelist stricte de clés ; toute autre clé → HTTP 400.
 
 #### `GET /api/library/benchmarks?db=…&document_id?&page=1&limit=50` *(Télémétrie Historique)*

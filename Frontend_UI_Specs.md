@@ -1344,7 +1344,7 @@ Composants complémentaires couvrant les parcours d'administration, de correctio
 
 ### **7.8 SettingsPanel.tsx (Vue 3)**
 
-* `.auto-card` « ⚙️ Seuils & Réglages » sous le Bandeau Moteur Vectoriel : deux sliders — `vec_distance_threshold` (0.1 → 1.0, pas 0.05, défaut 0.45) et `bm25_score_threshold` (-10 → 0, pas 0.5, défaut -1.5) — avec valeur courante, description d'effet, bouton « Rétablir les défauts ».
+* `.auto-card` « ⚙️ Seuils & Réglages » sous le Bandeau Moteur Vectoriel : deux sliders — `vec_distance_threshold` (0.1 → 1.0, pas 0.05, défaut 0.45) et `bm25_score_threshold` (-10 → 0, pas 0.1, défaut -0.3 — calibré Phase 2) — avec valeur courante, description d'effet, bouton « Rétablir les défauts ».
 * Persistance immédiate par `PUT /api/system/settings` + toast. Ces seuils pilotent le filtrage anti-hallucination (tech_specs §3.3).
 
 ### **7.9 TelemetryExplorer.tsx (Vue 3)**

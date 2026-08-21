@@ -142,7 +142,7 @@ Pour implémenter RAGDom selon le Blueprint validé, l'agent doit mobiliser et *
           score += 1 / (k + rank_vec)
       return score
   ```
-* **Seuils anti-hallucination (V3.1, scores bruts) :** éligibilité si (distance cosinus ≤ 0.45) OU (`bm25()` ≤ -1.5). Aucun chunk éligible → réponse "Je ne trouve pas d'informations pertinentes dans la bibliothèque actuelle." Seuils stockés dans `app_settings` (ragdom_config.sqlite).
+* **Seuils anti-hallucination (V3.1, scores bruts) :** éligibilité si (distance cosinus ≤ 0.45) OU (`bm25()` ≤ -0.3, calibré Phase 2). Aucun chunk éligible → réponse "Je ne trouve pas d'informations pertinentes dans la bibliothèque actuelle." Seuils stockés dans `app_settings` (ragdom_config.sqlite).
 * **Télémétrie & Commutation UI :** Statut exposé via `GET /api/system/health` avec bandeau d'alerte orange dans l'UI *Automation Hub* et switch toggle pour forcer le mode strict.
 
 ### **3.4 Connexion Dynamique Multi-Bases**

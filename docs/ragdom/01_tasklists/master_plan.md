@@ -25,12 +25,12 @@
 - [x] core/orchestrator.py — queue séquentielle stricte, recovery, skip READY, isolation par page, batchs, événements SSE (testé)
 
 ## Phase 2 : Backend — API REST (FastAPI Routes)
-- [ ] routes_system.py (/api/system/*)
-- [ ] routes_library.py (/api/library/*)
-- [ ] routes_pipeline.py (/api/pipeline/* + SSE + /stop)
-- [ ] routes_search.py (/api/search/hybrid + /api/search/hybrid-multi)
-- [ ] llm/key_manager.py + /api/llm/*
-- [ ] Tests Pytest (D.O.D. tech_specs.md section 5)
+- [x] routes_system.py — databases/health/vector-engine/engines + admin §7.6 (sources, cycle de vie bases, settings whitelistés)
+- [x] routes_library.py — documents/toc/facets/chunks/artifacts/page-scan binaire+en-têtes/curriculum GET/benchmarks+agrégats/PUT corrections/import Tier 3
+- [x] routes_pipeline.py — start (métadonnées §13 auto, 4 modes), status/queue, stop, purge scopée 7 niveaux + dry_run, quarantine+retry, reset alias, SSE 4 événements
+- [x] routes_search.py — hybrid RRF k=60 + seuils réels, hybrid-multi parallèle + RRF global, ask (zéro LLM sans contexte)
+- [x] llm/key_manager.py (rotation 429/403, 401 désactivation, backoff 5xx, fallback Ollama) + routes_llm (clés masquées + reveal)
+- [x] Tests Pytest : 35/35 PASSED (12 socle + 9 e2e moteur + 14 API réelle)
 
 ## Phase 3 : Frontend — Fondations & Design System
 - [ ] Initialisation Vite + React 19 + TypeScript + Tailwind

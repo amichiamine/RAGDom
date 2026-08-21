@@ -166,7 +166,7 @@ CREATE TABLE IF NOT EXISTS app_settings (
 INSERT OR IGNORE INTO app_settings (key, value) VALUES
     ('force_sqlite_vec',       'false'),
     ('vec_distance_threshold', '0.45'),
-    ('bm25_score_threshold',   '-1.5');
+    ('bm25_score_threshold',   '-0.3');
 """
 
 

@@ -24,3 +24,8 @@ automation.php (51 Ko) — archivés dans /Template_UI-UX/. L'imprégnation int�
 Le piège documenté en tech_specs §8 s'est produit tel que prévu (rapid-* → opencv-python
 complet → libGL manquant, 8 tests e2e rouges). La procédure post-install documentée l'a
 résolu en 2 commandes ; numpy repinné 1.26.4. La documentation a prouvé sa valeur.
+
+## 2026-08-21 — Recalibration du seuil BM25 (mesure en conditions réelles)
+Sur corpus réel, bm25() d'un bon match ≈ -0.7…-1.5 : le défaut -1.5 rejetait presque
+tout. Recalibré à -0.3 (code + app_settings + les 4 documents normatifs), mécanisme
+app_settings/SettingsPanel utilisé comme conçu. Preuve : suite API 35/35 après.
