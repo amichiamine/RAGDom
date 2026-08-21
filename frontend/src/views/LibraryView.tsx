@@ -62,6 +62,9 @@ export default function LibraryView() {
     const qDb = params.get('db')
     if (qDb && databases.some(d => d.filename === qDb)) setActiveDb(qDb)
     if (params.get('q')) setTab('search')
+    // Deep-link vers un onglet du Mode Repli (?tab=search|ask|scans|explore).
+    const qTab = params.get('tab')
+    if (qTab === 'search' || qTab === 'ask' || qTab === 'scans' || qTab === 'explore') setTab(qTab)
   }, [params, databases, setActiveDb])
 
   // Raccourci Ctrl/Cmd+B
@@ -200,8 +203,12 @@ export default function LibraryView() {
     )
   }
 
-  // ── Bascule Vue 2 pixel-perfect : base dont les tables curriculum sont peuplées ──
-  if (activeDb && curriculum?.curriculum_available === true) {
+  // ── Coquille pixel-perfect (library.php) TOUJOURS ACTIVE dès qu'une base est
+  //    chargée : avec curriculum → 6 onglets complets ; sans curriculum → onglets
+  //    Cours/Exercices/Évaluations/Scans fonctionnels + empty-states élégants pour
+  //    Matrice/Programme. Le « Mode Repli Générique » reste accessible via ?classic=1. ──
+  const classicMode = params.get('classic') === '1'
+  if (activeDb && curriculum && !classicMode) {
     return (
       <CurriculumWorkspace
         activeDb={activeDb}
@@ -212,7 +219,7 @@ export default function LibraryView() {
     )
   }
 
-  // ── Mode Repli Générique (INCHANGÉ) — affiché tant que le curriculum n'est pas peuplé ──
+  // ── Mode Repli Générique (classique) — accessible via ?classic=1 (lien discret) ──
   return (
     <div className="app-layout">
       {/* Sidebar (Mode Repli Générique : sélecteur de base + navigation) */}
@@ -298,6 +305,9 @@ export default function LibraryView() {
               <i className="fa-solid fa-bars" />
             </button>
             <Link to="/" className="btn btn-outline-primary btn-sm rounded-pill"><i className="fa-solid fa-house" /> {t('nav.back_portal')}</Link>
+            <Link to="/library" className="btn btn-outline-warning btn-sm rounded-pill" title={t('library.back_workspace')}>
+              <i className="fa-solid fa-table-cells-large" /> {t('library.back_workspace')}
+            </Link>
             <span style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }} dir="auto">
               {activeDb} {activeDoc ? `/ ${activeDoc.title || activeDoc.filename}` : ''}
             </span>

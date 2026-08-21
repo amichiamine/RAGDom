@@ -297,6 +297,16 @@ h1,h2,h3,h4,h5,h6 { font-family: var(--font-heading); font-weight:700; color: va
 .workspace-tab { animation: tabFadeSlide 0.35s cubic-bezier(0.16,1,0.3,1) forwards; }
 @keyframes tabFadeSlide { 0% { opacity: 0; transform: translateY(12px) scale(0.995); } 100% { opacity: 1; transform: translateY(0) scale(1); } }
 
+/* ── Automation Segmented Tabs (sticky top strip) ── */
+.auto-tabs { position: sticky; top: 0; z-index: 40; display: flex; flex-wrap: wrap; gap: 6px; padding: 8px; margin-bottom: 20px; background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: 18px; box-shadow: var(--card-shadow); backdrop-filter: blur(6px); }
+.auto-tab { position: relative; flex: 1 1 auto; display: inline-flex; align-items: center; justify-content: center; gap: 8px; padding: 10px 16px; border: 1px solid transparent; border-radius: 14px; background: transparent; color: var(--text-sub); font-weight: 700; font-size: 0.9rem; cursor: pointer; white-space: nowrap; transition: all 0.2s cubic-bezier(0.16,1,0.3,1); }
+.auto-tab:hover { background: var(--bg-surface-secondary); color: var(--text-heading); }
+.auto-tab.active { background: var(--primary); color: #fff; border-color: var(--primary); box-shadow: 0 4px 14px rgba(37,99,235,0.3); }
+.auto-tab-dot { position: absolute; top: 6px; inset-inline-end: 8px; width: 9px; height: 9px; border-radius: 50%; background: var(--warning); box-shadow: 0 0 0 0 rgba(245,158,11,0.6); animation: autoTabPulse 1.6s infinite; }
+.auto-tab-dot.is-run { background: var(--success); box-shadow: 0 0 0 0 rgba(16,185,129,0.6); }
+@keyframes autoTabPulse { 0% { box-shadow: 0 0 0 0 rgba(245,158,11,0.55); } 70% { box-shadow: 0 0 0 7px rgba(245,158,11,0); } 100% { box-shadow: 0 0 0 0 rgba(245,158,11,0); } }
+.auto-tab-subtitle { color: var(--text-muted); font-size: 0.9rem; margin: 0 0 18px; }
+
 /* ── Floating Sidebar Toggle (mobile) ── */
 .floating-sidebar-toggle { position: fixed; bottom: 24px; right: 24px; z-index: 1050; background: var(--primary); color: #fff; border: none; width: 54px; height: 54px; border-radius: 50%; box-shadow: 0 6px 20px rgba(37,99,235,0.4); display: flex; align-items: center; justify-content: center; font-size: 1.25rem; cursor: pointer; transition: all 0.2s cubic-bezier(0.16,1,0.3,1); }
 .floating-sidebar-toggle:hover { transform: scale(1.1); }

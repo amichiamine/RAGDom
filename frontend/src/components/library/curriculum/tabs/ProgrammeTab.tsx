@@ -5,6 +5,7 @@ import {
 import type { CurriculumPayload, TocNode } from '@/types'
 import { useCurriculumBridge, HighlightTarget } from '@/contexts/CurriculumBridgeContext'
 import BridgeButton from '@/components/library/BridgeButton'
+import CurriculumEmptyState from '../CurriculumEmptyState'
 import {
   buildCurriculumModel, coursForProgram, parseCompetencies,
   type CurriculumModel,
@@ -27,6 +28,17 @@ export default function ProgrammeTab({ curriculum, toc }: Props) {
   const { trimFilter, searchQuery, jumpTo, filterExercicesByCours } = useCurriculumBridge()
 
   const model = useMemo<CurriculumModel>(() => buildCurriculumModel(curriculum, toc), [curriculum, toc])
+
+  // Le programme officiel EXIGE le curriculum (مقاطع + كفاءات). Sans lui : empty-state
+  // élégant + CTA vers le studio du curriculum, jamais d'écran vide/cassé.
+  if (!curriculum.curriculum_available || model.programs.length === 0) {
+    return (
+      <CurriculumEmptyState
+        title="المنهاج والتدرج السنوي غير متوفر"
+        description="لم يُبنَ المخطط الوزاري الرسمي (المقاطع، الموارد والكفاءات المستهدفة) لهذه القاعدة بعد."
+      />
+    )
+  }
 
   const q = searchQuery.trim().toLowerCase()
 

@@ -112,7 +112,8 @@
     "no_scans": "No scans available",
     "editor_show_scan": "Show scan",
     "editor_hide_scan": "Hide scan",
-    "editor_original_scan": "Original scan (reference)"
+    "editor_original_scan": "Original scan (reference)",
+    "back_workspace": "Library workspace"
   },
   "search": {
     "placeholder": "Search this database...",
@@ -150,7 +151,25 @@
     "source_documents": "Source documents",
     "key_manager": "Key manager",
     "purge_studio": "Purge Studio",
-    "settings_panel": "Thresholds & Settings"
+    "settings_panel": "Thresholds & Settings",
+    "first_use_title": "First use",
+    "first_use_msg": "No database yet — drop a PDF into the Sources card then launch ingestion: the database will be created automatically.",
+    "tier3_assets": "Tier 3 assets",
+    "import_asset": "Import an asset",
+    "queue_state": "Queue state",
+    "queue_length": "Queued",
+    "tabs": {
+      "ingestion": "Ingestion",
+      "ingestion_sub": "Launch, re-run or stop the pipeline and manage your sources (tree, folders, upload).",
+      "monitoring": "Monitoring",
+      "monitoring_sub": "Real-time monitoring: pipeline steps, live console (SSE) and queue state.",
+      "documents": "Documents",
+      "documents_sub": "Documents ingested per database, scoped purge and quarantine re-runs.",
+      "providers": "AI Providers",
+      "providers_sub": "Configure your providers, API keys and models detected per key.",
+      "settings": "Settings",
+      "settings_sub": "Vector engine, system thresholds and advanced workshop settings."
+    }
   },
   "pipeline": {
     "doc": "Document",

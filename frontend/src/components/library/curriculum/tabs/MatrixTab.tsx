@@ -6,6 +6,7 @@ import {
 import type { CurriculumPayload, TocNode } from '@/types'
 import { useCurriculumBridge, HighlightTarget } from '@/contexts/CurriculumBridgeContext'
 import BridgeButton from '@/components/library/BridgeButton'
+import CurriculumEmptyState from '../CurriculumEmptyState'
 import {
   buildCurriculumModel, coursForTerm, assessmentsForTerm,
   TERM_EMOJI, TERM_BADGE_CLASS, type CoursNode, type CurriculumModel,
@@ -32,6 +33,17 @@ export default function MatrixTab({ curriculum, toc }: Props) {
   const { trimFilter, searchQuery, expandedIds, toggleExpanded, expandAll, jumpTo, filterExercicesByCours } = useCurriculumBridge()
 
   const model = useMemo<CurriculumModel>(() => buildCurriculumModel(curriculum, toc), [curriculum, toc])
+
+  // La matrice 360° EXIGE le curriculum (trimestres + مقاطع). Sans lui : empty-state
+  // élégant + CTA vers le studio du curriculum, jamais d'écran vide/cassé.
+  if (!curriculum.curriculum_available || model.terms.length === 0) {
+    return (
+      <CurriculumEmptyState
+        title="المصفوفة الشاملة 360° غير متوفرة"
+        description="لم يُبنَ المنهاج (الفصول والمقاطع) لهذه القاعدة بعد. تعتمد المصفوفة على التدرج السنوي الرسمي لعرض الترابط بين الدروس والتمارين والاختبارات."
+      />
+    )
+  }
 
   // Termes visibles (1/2/3) présents dans le corpus, dans l'ordre.
   const termIndexes = useMemo(() => model.terms.map(t => t.term_index), [model])
