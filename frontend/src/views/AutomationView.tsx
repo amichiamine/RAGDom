@@ -18,7 +18,6 @@ import CurriculumStudio from '@/components/admin/CurriculumStudio'
 import TelemetryExplorer from '@/components/admin/TelemetryExplorer'
 import DatabaseLifecycle from '@/components/admin/DatabaseLifecycle'
 import ArtifactImportModal from '@/components/admin/ArtifactImportModal'
-import OnboardingEmptyState from '@/components/common/OnboardingEmptyState'
 import { FilePlus2 } from 'lucide-react'
 import { formatBytes, formatNumber } from '@/lib/utils'
 
@@ -119,19 +118,21 @@ export default function AutomationView() {
 
   const activeDbInfo = databases.find(d => d.filename === activeDb)
 
-  if (!dbLoading && databases.length === 0) {
-    return (
-      <div>
-        <TopNav variant="automation" />
-        <main className="container-app"><OnboardingEmptyState /></main>
-      </div>
-    )
-  }
+  // Zéro base ≠ écran bloquant : le hub DOIT rester accessible pour déposer
+  // le premier PDF (la base est créée automatiquement à l'ingestion, §13).
+  const noDatabases = !dbLoading && databases.length === 0
 
   return (
     <div>
       <TopNav variant="automation" />
       <main className="container-app" style={{ paddingTop: 24, paddingBottom: 40 }}>
+        {noDatabases && (
+          <div className="auto-card" style={{ borderColor: 'var(--warning)', borderStyle: 'dashed' }}>
+            <strong>🚀 Première utilisation :</strong> aucune base pour l'instant — déposez un PDF
+            dans la carte <em>Sources</em> ci-dessous puis lancez l'ingestion : la base
+            <code> Matière_Niveau.sqlite</code> sera créée automatiquement.
+          </div>
+        )}
         {/* Sélecteur de base + Status live */}
         <div className="auto-card">
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
