@@ -235,3 +235,19 @@ Contre-audit indépendant du corpus V3.5 complet (7 fichiers, 4748 lignes) : **0
 | CWD | COSM. | CWD Lock : ajout du répertoire `engines\` |
 
 **Le corpus V3.5 est clos : GO Phase 1 définitif.**
+
+
+---
+
+## 9. JOURNAL D'IMPLÉMENTATION (2026-08-21 — exécution autonome)
+
+| Commit | Contenu | Preuves |
+|---|---|---|
+| 5959a97 | Corpus documentaire V3.5 + skill motion-design | — |
+| 0010ba4 | Phase 0+1 socle : DDL extrait de tech_specs, connexion Option A/B, registre moteurs, orchestrateur, routes system | pytest 12/12 ; serveur live |
+| e59e7d9 | Sprint 1 : moteur sci-engine complet (couches 0→7 + 3bis), page_scans 300 DPI, SolutionLinker | pytest 21/21 ; e2e PDF réel 3 pages READY ; incident opencv résolu via tech_specs §8 |
+| 0f02c43 | Phase 2 : 6 routers (46 routes), Key Manager, purge scopée 7 niveaux, ask RAG, SSE | pytest 35/35 ; calibration bm25_score_threshold -0.3 mesurée sur corpus réel |
+| 8d2ce08 | Phases 3-4 : frontend 49 fichiers, 3 vues Mode Repli Générique | audit statique 48/48 ; npm 403 sandbox → frontend/VALIDATION.md |
+
+Déviations Règle 7 consignées au feedback_log : sandbox Linux/Python 3.9 (code 3.9-compatible,
+cible Windows/3.11), RAGDOM_OFFLINE=true (modèles non téléchargeables ici), llama-cpp-python différé.

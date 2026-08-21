@@ -1,35 +1,33 @@
 # État Actuel du Projet RAGDom
 
-**Phase :** Phase 2 TERMINÉE (API REST complète, 35/35 tests) → Phase 3/4 : Frontend (sous-agent en cours)
+**Phase :** Phases 0-3 TERMINÉES · Phase 4 : Mode Repli Générique LIVRÉ (parité pixel-perfect
+curriculum = sprint restant) · Phase 5 : backend validé (46 routes live), build frontend à rejouer sur machine cible
 **Date de mise à jour :** 2026-08-21
-**Sprint actuel :** Sprint 2 — Routes API (library, search, pipeline+SSE, llm, administration §7.6)
 
-## Ce qui est OPÉRATIONNEL (preuve : pytest 21/21 PASSED, 4.4s)
-- [x] Noyau : orchestrateur (queue stricte, recovery, skip READY, batchs, clôture + job_complete),
-      registre moteurs, connexion Option A/B, config DB, routes system live
-- [x] Moteur sci-engine COMPLET : couches 0→7 + 3bis dans /engines/sci-engine/pipeline/
-      · L0 : pixmap 300 DPI, blur Laplacien, deskew, Sauvola/CLAHE, checkpoint
-      · L1 : blocs natifs fitz / rapid-layout gardé, TOC outlines
-      · L2 : PyMuPDF4LLM + RapidOCR + rapid-latex-ocr/table gardés, artefacts LaTeX/images/tableaux
-      · L3 : qualification regex FR/AR/EN + pedagogical_index, chunking 512t/15%, embeddings fastembed gardés
-      · L3bis : SolutionLinker post-document (testé : exercice n°7 ↔ corrigé n°7)
-      · L4 : linters déterministes (mesuré < 5ms) · L5 : VLM conditionnel (Key Manager Phase 2)
-      · L6 : métrologie psutil/confiance · L7 : transaction ACID (page_scans WebP+thumb+dims,
-        ré-ingestion propre is_human_edited préservé, purge mémoire + checkpoints)
-- [x] E2E réel : PDF 3 pages → 3 READY, batch COMPLETED, FTS interrogeable, Base Autonome vérifiée
-      (copie .sqlite seule = 100% servie), INVALID_SOURCE sans arrêt
+## OPÉRATIONNEL (preuves : pytest 35/35, serveur live 46 routes, e2e PDF réel)
+- [x] Backend COMPLET : noyau agnostique (orchestrateur, registre moteurs, Option A/B),
+      moteur sci-engine 9 couches, 6 routers (46 routes dont purge scopée 7 niveaux,
+      ask RAG, SSE, corrections humaines, curriculum CRUD, sources/bases/settings),
+      Key Manager rotation/backoff/fallback Ollama
+- [x] Frontend (49 fichiers) : fondations verbatim + 3 vues fonctionnelles Mode Repli —
+      IndexView KPIs, LibraryView (TOC, side-by-side KaTeX/scans, Search+Ask),
+      AutomationView (SSE, ETA, PurgeStudio, Quarantine, Settings, KeyManager, Sources)
+- [x] Calibration réelle : bm25_score_threshold -0.3 (docs synchronisées)
 
-## Ce qui est EN COURS
-- [ ] Frontend React (sous-agent parallèle : fondations + 3 vues Mode Repli)
-- [x] Sprint 2 TERMINÉ : routes_library / routes_search (hybrid RRF + ask) / routes_pipeline (start/stop/purge/
-      quarantine + SSE) / routes_llm + llm/key_manager.py / routes administration §7.6
+## RESTE À FAIRE (backlog assumé, priorisé)
+1. Machine cible : npm install + npx tsc --noEmit + vite build (frontend/VALIDATION.md) ;
+   modèles rapid-*/fastembed au 1er run (RAGDOM_OFFLINE=false) ; llama-cpp-python si GGUF local.
+2. Phase 4 parité pixel-perfect : 6 onglets curriculum (library.php), Splash Screen, halo doré,
+   ponts relationnels — s'active via CurriculumStudio + bases 2G réelles.
+3. PARTIE 7/8 UI restants : ChunkEditor, CurriculumStudio, TelemetryExplorer, DatabaseLifecycle,
+   ArtifactImportModal, Command Palette, densité, virtualisation react-virtual (après npm).
+4. D.O.D restants : benchmarks RAM 3 paliers PDF 100 pages, Recovery SIGTERM processus réel,
+   Jest/Playwright (node_modules requis).
 
-## Blocages & Points d'Attention
-- Incident reproduit et résolu : rapid-* a tiré opencv-python complet (libGL) → procédure
-  post-install tech_specs §8 appliquée (notre propre documentation a servi de fix) ; numpy
-  repinné 1.26.4 après le force-reinstall.
-- RAGDOM_OFFLINE=true en sandbox : modèles rapid-layout/latex/table + fastembed non téléchargés
-  (HF inaccessible ici) — chemins de repli testés ; sur la machine cible : téléchargement au 1er run.
+## Blocages
+- Registre npm inaccessible dans le sandbox (403 pare-feu) — demande d'accès envoyée,
+  contournement documenté dans frontend/VALIDATION.md. Aucun autre blocage.
 
 ## Prochaine Action Prioritaire
-- Sprint 2 : llm/key_manager.py (rotation 429/401/backoff, fallback Ollama) puis les 5 routers.
+- Machine cible : cloner le dépôt, suivre README §0 + frontend/VALIDATION.md, lancer
+  backend+frontend, ingérer un premier manuel réel, puis sprint parité pixel-perfect.
