@@ -236,7 +236,7 @@
     "login_subtitle": "Access to the RAGDom administration workspace.",
     "setup_subtitle": "First launch: set the administrator credentials.",
     "username": "Username",
-    "username_hint": "3 to 64 characters: letters, digits, _ - .",
+    "username_hint": "3-64 characters: letters, digits, _ - . — no spaces or accents",
     "password": "Password",
     "password_hint": "8 characters minimum.",
     "confirm_password": "Confirm password",

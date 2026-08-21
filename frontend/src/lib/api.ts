@@ -49,6 +49,30 @@ async function handleUnauthorized(): Promise<void> {
   } catch { /* /auth/me injoignable : on n'interfère pas */ }
 }
 
+
+// Erreurs FastAPI : detail peut être un texte OU un tableau de validation Pydantic (422).
+const FIELD_LABELS: Record<string, string> = {
+  username: "Nom d'utilisateur", password: 'Mot de passe', provider: 'Fournisseur',
+}
+const RULE_HINTS: Record<string, string> = {
+  string_pattern_mismatch: 'lettres, chiffres, _ - . uniquement (ni espaces ni accents)',
+  string_too_short: 'trop court', string_too_long: 'trop long', missing: 'champ requis',
+}
+function humanizeApiError(detail: unknown, status: number): string {
+  if (typeof detail === 'string' && detail) return detail
+  if (Array.isArray(detail)) {
+    const parts = detail.map((d: { loc?: unknown[]; type?: string; msg?: string; ctx?: { min_length?: number } }) => {
+      const field = String(d.loc?.[(d.loc?.length ?? 1) - 1] ?? 'champ')
+      const label = FIELD_LABELS[field] ?? field
+      let rule = RULE_HINTS[d.type ?? ''] ?? d.msg ?? 'invalide'
+      if (d.type === 'string_too_short' && d.ctx?.min_length) rule = `${d.ctx.min_length} caractères minimum`
+      return `${label} : ${rule}`
+    })
+    if (parts.length) return parts.join(' · ')
+  }
+  return `HTTP ${status}`
+}
+
 async function request<T>(endpoint: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE_URL}${endpoint}`, {
     headers: { 'Content-Type': 'application/json', ...authHeaders(), ...options?.headers },
@@ -58,7 +82,7 @@ async function request<T>(endpoint: string, options?: RequestInit): Promise<T> {
     // /auth/* gère ses propres 401 (login/setup échoués) : ne pas intercepter.
     if (res.status === 401 && !endpoint.startsWith('/auth/')) { void handleUnauthorized() }
     const error = await res.json().catch(() => ({ detail: res.statusText }))
-    throw new Error(error.detail || `HTTP ${res.status}`)
+    throw new Error(humanizeApiError(error.detail, res.status))
   }
   return res.json()
 }
