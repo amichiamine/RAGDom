@@ -53,6 +53,10 @@ export default function ProvidersPanel() {
 
   // Détection de modèles par provider (chargée à la demande / au 1er dépliage).
   const [models, setModels] = useState<Record<string, ModelsState>>({})
+  // Détection de modèles PROPRE À CHAQUE CLÉ (clé = key.id), quotas/modèles par clé (V3.8).
+  const [keyModels, setKeyModels] = useState<Record<string, ModelsState>>({})
+  // Verrou de sauvegarde du modèle propre à une clé (clé = key.id).
+  const [savingKey, setSavingKey] = useState<string | null>(null)
   // Saisie inline « ajouter une clé » par provider + verrou d'action.
   const [draftKey, setDraftKey] = useState<Record<string, string>>({})
   const [busyProvider, setBusyProvider] = useState<string | null>(null)
@@ -87,11 +91,40 @@ export default function ProvidersPanel() {
       .catch(e => setModels(prev => ({ ...prev, [provider]: { models: [], error: e instanceof Error ? e.message : t('common.error_generic'), loading: false } })))
   }, [t])
 
+  // ── Détection LIVE des modèles avec UNE clé précise (quotas propres à la clé) ──
+  const detectKeyModels = useCallback((provider: LlmProvider, keyId: string) => {
+    if (NO_MODEL_PROVIDERS.includes(provider)) return
+    setKeyModels(prev => ({ ...prev, [keyId]: { models: prev[keyId]?.models ?? [], error: null, loading: true } }))
+    api.llm.getProviderModels(provider, keyId)
+      .then(res => setKeyModels(prev => ({ ...prev, [keyId]: { models: res.models ?? [], error: res.error, loading: false } })))
+      .catch(e => setKeyModels(prev => ({ ...prev, [keyId]: { models: [], error: e instanceof Error ? e.message : t('common.error_generic'), loading: false } })))
+  }, [t])
+
+  // ── Modèle PROPRE À LA CLÉ : PUT /keys/{id} ({active_model} — null = hérite du provider) ──
+  const saveKeyModel = async (keyId: string, activeModel: string | null) => {
+    setSavingKey(keyId)
+    // Optimiste : reflète le choix immédiatement (rechargé au load() en cas d'échec).
+    setKeys(prev => prev.map(k => (k.id === keyId ? { ...k, active_model: activeModel } : k)))
+    try {
+      await api.llm.updateKey(keyId, activeModel)
+      toast.success(t('providers.saved'))
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : t('common.error_generic'))
+      load()
+    } finally {
+      setSavingKey(null)
+    }
+  }
+
   const toggleSection = (provider: LlmProvider) => {
     const next = open === provider ? null : provider
     setOpen(next)
     // Premier dépliage d'un provider avec modèles : détection automatique si non encore chargée.
-    if (next === provider && !NO_MODEL_PROVIDERS.includes(provider) && !models[provider]) detectModels(provider)
+    if (next === provider && !NO_MODEL_PROVIDERS.includes(provider)) {
+      if (!models[provider]) detectModels(provider)
+      // Détection des modèles propres à chaque clé (une fois), pour peupler les SELECT par clé.
+      for (const k of keysOf(provider)) if (!keyModels[k.id]) detectKeyModels(provider, k.id)
+    }
   }
 
   // ── Enregistrement partiel d'un réglage ──
@@ -245,20 +278,46 @@ export default function ProvidersPanel() {
                         <p className="hint" style={{ margin: '4px 0 10px' }}>{t('providers.no_keys')}</p>
                       ) : (
                         <div className="provider-key-list">
-                          {pKeys.map(k => (
-                            <div key={k.id} className="provider-key-row">
-                              <span className="form-mono provider-key-mask">{k.masked_key}</span>
-                              <span className={`badge ${k.status === 'active' ? 'badge-success' : k.status === 'blocked' ? 'badge-danger' : 'badge-secondary'}`}>{k.status}</span>
-                              <div className="provider-key-actions">
-                                <button className="btn btn-sm btn-outline-primary" disabled={busy} onClick={() => testKey(p, k.id)}>
-                                  <i className="fa-solid fa-flask" /> {t('buttons.test')}
-                                </button>
-                                <button className="btn btn-sm btn-outline-danger" disabled={busy} onClick={() => deleteKey(p, k.id)}>
-                                  <i className="fa-solid fa-trash" /> {t('buttons.delete')}
-                                </button>
+                          {pKeys.map(k => {
+                            const km = keyModels[k.id]
+                            return (
+                              <div key={k.id} className="provider-key-row" style={{ flexWrap: 'wrap' }}>
+                                <span className="form-mono provider-key-mask">{k.masked_key}</span>
+                                <span className={`badge ${k.status === 'active' ? 'badge-success' : k.status === 'blocked' ? 'badge-danger' : 'badge-secondary'}`}>{k.status}</span>
+                                <div className="provider-key-actions">
+                                  <button className="btn btn-sm btn-outline-primary" disabled={busy} onClick={() => testKey(p, k.id)}>
+                                    <i className="fa-solid fa-flask" /> {t('buttons.test')}
+                                  </button>
+                                  <button className="btn btn-sm btn-outline-danger" disabled={busy} onClick={() => deleteKey(p, k.id)}>
+                                    <i className="fa-solid fa-trash" /> {t('buttons.delete')}
+                                  </button>
+                                </div>
+                                {/* Modèle PROPRE À CETTE CLÉ (prioritaire sur le modèle du fournisseur) — masqué pour 'make' */}
+                                {hasModelConcept && (
+                                  <div className="provider-key-model" style={{ flexBasis: '100%', display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, marginTop: 6 }}>
+                                    <span className="provider-mini-label">{t('providers.key_model')}</span>
+                                    <select
+                                      className="form-select" style={{ maxWidth: 260, flex: '1 1 200px' }}
+                                      value={k.active_model ?? ''}
+                                      disabled={savingKey === k.id}
+                                      onChange={e => saveKeyModel(k.id, e.target.value ? e.target.value : null)}
+                                    >
+                                      <option value="">{t('providers.key_model_inherit')}</option>
+                                      {/* Le modèle déjà enregistré reste sélectionnable même hors liste détectée. */}
+                                      {k.active_model && !(km?.models ?? []).includes(k.active_model) && (
+                                        <option value={k.active_model}>{k.active_model}</option>
+                                      )}
+                                      {(km?.models ?? []).map(m => <option key={m} value={m}>{m}</option>)}
+                                    </select>
+                                    <button className="btn btn-sm btn-outline-secondary" disabled={km?.loading} onClick={() => detectKeyModels(p, k.id)}>
+                                      {km?.loading ? <i className="fa-solid fa-spinner fa-spin" /> : '🔄'} {t('providers.detect_models')}
+                                    </button>
+                                    {km?.error && <span className="hint provider-models-empty" style={{ flexBasis: '100%', margin: 0 }}>{km.error}</span>}
+                                  </div>
+                                )}
                               </div>
-                            </div>
-                          ))}
+                            )
+                          })}
                         </div>
                       )}
                       <div className="provider-addkey">
@@ -280,11 +339,12 @@ export default function ProvidersPanel() {
                     {hasModelConcept && (
                       <div className="provider-section">
                         <div className="provider-section-title-row">
-                          <span className="provider-section-title">{t('providers.model_active')}</span>
+                          <span className="provider-section-title">{t('providers.model_provider_default')}</span>
                           <button className="btn btn-sm btn-outline-secondary" disabled={ms?.loading} onClick={() => detectModels(p)}>
                             {ms?.loading ? <i className="fa-solid fa-spinner fa-spin" /> : '🔄'} {t('providers.detect_models')}
                           </button>
                         </div>
+                        <p className="hint" style={{ margin: '2px 0 8px' }}>{t('providers.model_provider_default_hint')}</p>
                         {ms?.loading ? (
                           <Spinner />
                         ) : (ms?.models.length ?? 0) > 0 ? (

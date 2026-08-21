@@ -8,6 +8,7 @@ import type { SystemHealth, Document, PipelineSSEEvent, PipelineStatus } from '@
 import TopNav from '@/components/layout/TopNav'
 import VectorEngineAlert from '@/components/automation/VectorEngineAlert'
 import PipelineSteps from '@/components/automation/PipelineSteps'
+import PipelineLauncher from '@/components/automation/PipelineLauncher'
 import LiveConsole from '@/components/automation/LiveConsole'
 import ProvidersPanel from '@/components/automation/ProvidersPanel'
 import SettingsPanel from '@/components/automation/SettingsPanel'
@@ -170,6 +171,16 @@ export default function AutomationView() {
 
         {/* Bandeau moteur vectoriel */}
         <VectorEngineAlert health={health} onRefresh={loadHealth} />
+
+        {/* Lanceur du pipeline — ACTION PRINCIPALE (ingestion + ré-exécution scopée) */}
+        <PipelineLauncher
+          databases={databases}
+          activeDb={activeDb}
+          running={running}
+          onBatchStarted={total => { setPagesTotal(prev => prev + total); setRunning(true) }}
+          onStop={stop}
+          onChanged={() => { refresh(); loadDocs() }}
+        />
 
         {/* ETA & Débit (pendant un batch) */}
         {eta && (

@@ -269,3 +269,26 @@ cible Windows/3.11), RAGDOM_OFFLINE=true (modèles non téléchargeables ici), l
 Sous-agents déployés : 5 (fondations, onglets 1-3, onglets 4-6, admin/splash, audit croisé)
 + 1 analyste template. Total tests backend : 47/47. npm resté bloqué (403) : build final
 et recette visuelle transférés à la machine cible (frontend/VALIDATION.md).
+
+## 2026-08-21 — V3.8 : contrôle total du pipeline + modèle par clé + dossiers sources
+
+- **Modèle LLM PAR CLÉ** (et non par provider) : colonne `active_model` sur `llm_keys`
+  (+migration), `generate()` utilise le modèle de la clé (repli : modèle du provider),
+  `PUT /api/llm/keys/{id}`, détection live `GET /providers/{p}/models?key_id=`,
+  la même clé peut être enregistrée N fois avec N modèles (quotas distincts).
+  UI : SELECT « Modèle propre à cette clé (prioritaire) » sur chaque ligne de clé.
+- **Lanceur + contrôle du pipeline dans l'UI** : nouveau `PipelineLauncher.tsx`
+  (proéminent dans Automation) — ingestion par PDF/dossier/plage de pages depuis
+  l'arbre des sources, et RÉ-EXÉCUTION SCOPÉE via nouveau `POST /api/pipeline/reprocess`
+  (purge du périmètre document/plage/chapitre puis ré-ingestion complète, option
+  préservation des éditions humaines), stop, état de la file.
+  `POST /pipeline/start` accepte désormais les chemins RELATIFS à /sources/.
+- **Organisation en dossiers à l'upload** : SourcesManager avec arbre navigable,
+  sélection du dossier cible, création de dossiers imbriqués illimitée, upload
+  ciblé (rel_path), fil d'Ariane, aide sur le nommage des bases.
+- **Corrections d'audit Library** (43 exigences auditées, 40 conformes → 43) :
+  colonne repliable de rappel du scan original dans ChunkEditor (§7.3), filtre
+  trimestre appliqué aux pages de livre dans l'onglet Scans (résolution client
+  chapitre→programme→trimestre), galerie de scans générique en Mode Repli.
+- Tests backend : **53/53 verts** (dont test_reprocess_scoped_page,
+  test_key_model_per_key) ; tsc 0 erreur ; build OK.

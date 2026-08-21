@@ -4,7 +4,7 @@ import type {
   AskResponse, PurgePayload, PurgeResult, QuarantineJob, SourceNode,
   BenchmarkRow, BenchmarkAggregates, AppSettings, EngineManifest,
   Document, TocNode, Chunk, Artifact, PaginatedResponse,
-  PageScanManifestEntry, AuthState, AuthSession,
+  PageScanManifestEntry, AuthState, AuthSession, PipelineQueueState,
 } from '@/types'
 
 // Phase 7 : VITE_API_URL (origine du backend) pour l'UI hébergée (Cloudflare/tunnel) ;
@@ -170,6 +170,10 @@ export const api = {
       // normalise en exposant `pages` (nom consommé par CurriculumWorkspace).
       request<{ data: PageScanManifestEntry[] }>(withDb('/library/page-scans', db, documentId ? { document_id: documentId } : undefined))
         .then(r => ({ pages: r.data ?? [] })),
+    // Alias sémantique (galerie de scans générique du Mode Repli, §5.2) — même manifeste page_scans.
+    getPageScans: (db: string, documentId?: string) =>
+      request<{ data: PageScanManifestEntry[]; pagination: { total_pages: number } }>(withDb('/library/page-scans', db, documentId ? { document_id: documentId } : undefined))
+        .then(r => ({ pages: r.data ?? [], total_pages: r.pagination?.total_pages ?? 1 })),
     // Binaire d'un artefact (figure) — cible de asset://figures/… résolue par le pipeline KaTeX.
     getArtifactBinaryUrl: (db: string, artifactId: string) =>
       `${BASE_URL}${withDb('/library/artifact-binary', db, { artifact_id: artifactId })}`,
@@ -198,9 +202,15 @@ export const api = {
       request<AskResponse>('/search/ask', { method: 'POST', body: JSON.stringify({ query, databases, top_k: topK, ...(filters ? { filters } : {}) }) }),
   },
   pipeline: {
-    getQueue: () => request<{ jobs: unknown[]; queue_length: number }>('/pipeline/queue'),
-    start: (payload: { source_path: string; target_db: string; mode: 'document' | 'chapter' | 'page_range' | 'folder'; page_start?: number; page_end?: number; toc_id?: string }) =>
-      request<{ batch_id: string; status: BatchStatus; pages_total: number }>('/pipeline/start', {
+    // Backend /pipeline/queue exige ?db= et renvoie l'état réel de la file séquentielle.
+    getQueue: (db: string) => request<PipelineQueueState>(withDb('/pipeline/queue', db)),
+    start: (payload: { source_path: string; target_db?: string; mode: 'document' | 'chapter' | 'page_range' | 'folder'; page_start?: number; page_end?: number; toc_id?: string }) =>
+      request<{ batch_id: string; batch_ids?: string[]; status: BatchStatus; pages_total: number; target_db: string }>('/pipeline/start', {
+        method: 'POST', body: JSON.stringify(payload),
+      }),
+    // Ré-exécution SCOPÉE (§7.4) : purge du périmètre puis ré-ingestion complète (toutes couches).
+    reprocess: (payload: { db: string; scope: 'document' | 'page_range' | 'chapter'; document_id: string; page_start?: number; page_end?: number; toc_id?: string; preserve_human_edits?: boolean }) =>
+      request<{ reprocessed_scope: string; purged: unknown; batch_id: string; pages_total: number; page_start: number; page_end: number; status: BatchStatus }>('/pipeline/reprocess', {
         method: 'POST', body: JSON.stringify(payload),
       }),
     getStatus: (batchId: string) => request<BatchStatusResponse>(`/pipeline/status?batch_id=${batchId}`),
@@ -232,8 +242,16 @@ export const api = {
     testKey: (keyId: string) => request<{ success: boolean; status?: string; latency_ms?: number; message: string }>(`/llm/keys/${keyId}/test`, { method: 'POST' }),
     // V3.7 : détection LIVE des modèles chez le fournisseur (clé stockée + base_url).
     // Renvoie { models, error } — error non nul = pas de clé / URL injoignable / provider sans modèles.
-    getProviderModels: (provider: string) =>
-      request<{ models: string[]; error: string | null }>(`/llm/providers/${encodeURIComponent(provider)}/models`),
+    // key_id optionnel : détection avec CETTE clé précise (quotas/modèles propres à la clé) ;
+    // sans key_id, le back retombe sur une clé active quelconque du provider.
+    getProviderModels: (provider: string, keyId?: string) =>
+      request<{ models: string[]; error: string | null }>(
+        `/llm/providers/${encodeURIComponent(provider)}/models${keyId ? `?key_id=${encodeURIComponent(keyId)}` : ''}`),
+    // V3.8 : modèle PROPRE À LA CLÉ. active_model null → la clé hérite du modèle global du provider.
+    updateKey: (keyId: string, activeModel: string | null) =>
+      request<{ updated: boolean; key_id: string; active_model: string | null }>(`/llm/keys/${keyId}`, {
+        method: 'PUT', body: JSON.stringify({ active_model: activeModel }),
+      }),
   },
   curriculum: {
     list: (db: string, kind: 'terms' | 'programs' | 'assessments' | 'links') => request(withDb(`/curriculum/${kind}`, db)),

@@ -171,6 +171,7 @@ export interface LlmKey {
   blocked_until: string | null;
   last_error_code: number | null;
   created_at: string;
+  active_model: string | null; // V3.8 : modèle propre à la clé (null = hérite du modèle global du provider)
 }
 
 export type LlmProvider = 'gemini' | 'groq' | 'openai' | 'anthropic' | 'lmstudio' | 'make' | 'ollama';
@@ -213,6 +214,13 @@ export interface PipelineSSEEvent {
   success?: boolean;             // job_complete
   error?: string;                // error
   details?: string;              // error
+}
+
+// ── État de la file séquentielle (GET /pipeline/queue?db=) ──
+export interface PipelineQueueState {
+  current_job: { batch_id: string | null; job_id: string; status: PipelineStatus; page_number: number } | null;
+  queued_jobs: number;
+  completed_today: number;
 }
 
 export interface BatchStatusResponse { // V3.1.1

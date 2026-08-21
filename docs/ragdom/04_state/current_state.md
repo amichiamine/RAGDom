@@ -42,3 +42,6 @@ extensions post-v1 (Web-Ready + Parallélisme D4-B) livrées sur la branche `pos
 ## Prochaine Action Prioritaire
 Machine cible Windows : cloner, README §0, backend 47/47, npm install + build, ingérer un
 premier manuel réel, peupler le curriculum via CurriculumStudio → les 6 onglets s'activent.
+
+
+**MAJ 2026-08-21 (V3.8)** : modèle LLM par clé (active_model), POST /pipeline/reprocess (ré-exécution scopée), PipelineLauncher UI (lancer/ré-exécuter/stop/file), SourcesManager avec dossiers imbriqués + upload ciblé, 3 écarts d'audit Library corrigés. 53/53 tests, tsc/build verts.

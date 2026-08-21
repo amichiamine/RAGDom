@@ -86,10 +86,11 @@ def list_keys():
     conn = db.get_config_db()
     try:
         return {"keys": [{"id": r[0], "provider": r[1], "masked_key": _mask(r[2]), "status": r[3],
-                          "blocked_until": r[4], "last_error_code": r[5], "created_at": r[6]}
+                          "blocked_until": r[4], "last_error_code": r[5], "created_at": r[6],
+                          "active_model": r[7]}
                          for r in conn.execute(
-                "SELECT id, provider, api_key, status, blocked_until, last_error_code, created_at"
-                " FROM llm_keys ORDER BY created_at")]}
+                "SELECT id, provider, api_key, status, blocked_until, last_error_code, created_at,"
+                " active_model FROM llm_keys ORDER BY created_at")]}
     finally:
         conn.close()
 
@@ -108,9 +109,28 @@ def add_key(body: KeyBody):
 
 
 @router.get("/providers/{provider}/models")
-def provider_models(provider: str):
-    """Modèles AUTO-DÉTECTÉS en direct chez le provider (jamais de liste codée en dur)."""
-    return key_manager.list_models(provider)
+def provider_models(provider: str, key_id: Optional[str] = None):
+    """Modèles AUTO-DÉTECTÉS en direct (avec la clé key_id si fournie — quotas par clé)."""
+    return key_manager.list_models(provider, key_id=key_id)
+
+
+class KeyPatch(BaseModel):
+    active_model: Optional[str] = None
+
+
+@router.put("/keys/{key_id}")
+def update_key(key_id: str, patch: KeyPatch):
+    """Modèle PROPRE À LA CLÉ (une même clé peut exister en N exemplaires, un par modèle)."""
+    conn = db.get_config_db()
+    try:
+        if conn.execute("SELECT 1 FROM llm_keys WHERE id=?", (key_id,)).fetchone() is None:
+            raise HTTPException(404, "Clé introuvable")
+        conn.execute("UPDATE llm_keys SET active_model=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                     (patch.active_model or None, key_id))
+        conn.commit()
+        return {"updated": True, "key_id": key_id, "active_model": patch.active_model}
+    finally:
+        conn.close()
 
 
 @router.post("/keys/{key_id}/test")

@@ -105,7 +105,14 @@
     "human_edited": "Corrigé manuellement",
     "no_document_selected": "Sélectionnez un document pour afficher son contenu",
     "prev_page": "Page précédente",
-    "next_page": "Page suivante"
+    "next_page": "Page suivante",
+    "scans_gallery": "Scans",
+    "scans_gallery_title": "Galerie des scans",
+    "all_documents": "Tous les documents",
+    "no_scans": "Aucun scan disponible",
+    "editor_show_scan": "Afficher le scan",
+    "editor_hide_scan": "Masquer le scan",
+    "editor_original_scan": "Scan original (rappel)"
   },
   "search": {
     "placeholder": "Rechercher dans cette base...",
@@ -199,7 +206,16 @@
     "ingested": "Ingéré",
     "target_db": "Base cible",
     "empty": "Aucun fichier source",
-    "drop_hint": "Déposez des PDF ici ou cliquez pour téléverser"
+    "drop_hint": "Déposez des PDF ici ou cliquez pour téléverser",
+    "root": "Racine",
+    "target_folder": "Dossier cible",
+    "selected": "Sélectionné",
+    "select_folder_target": "Cliquer pour cibler ce dossier",
+    "upload_into": "Téléverser dans",
+    "new_folder_placeholder": "Nom du dossier (ex. Maths/Term ou ChapA)",
+    "folder_name_invalid": "Nom de dossier invalide (lettres, chiffres, espace, _ - . uniquement).",
+    "confirm_delete_file": "Supprimer ce fichier source ? Cette action est irréversible.",
+    "db_naming_hint": "Le nom de la base dépend du chemin : /sources/Maths/TestAPI/x.pdf → Maths_TestAPI.sqlite."
   },
   "onboarding": {
     "title": "Aucune base de données pour l'instant",
@@ -272,12 +288,49 @@
     "key_state_none": "Aucune clé",
     "key_state_active": "Clé active",
     "key_state_blocked": "Clé bloquée",
-    "key_state_invalid": "Clé invalide"
+    "key_state_invalid": "Clé invalide",
+    "model_provider_default": "Modèle par défaut du fournisseur",
+    "model_provider_default_hint": "Repli utilisé quand une clé n'a pas de modèle propre.",
+    "key_model": "Modèle propre à cette clé (prioritaire)",
+    "key_model_inherit": "(modèle du fournisseur)"
   },
   "engines": {
     "title": "Moteurs",
     "detected": "Moteurs détectés",
     "active": "Actif",
     "empty": "Aucun moteur détecté"
+  },
+  "launcher": {
+    "title": "Lanceur du pipeline",
+    "note": "Lancez une ingestion depuis l'arbre des sources ou ré-exécutez un périmètre déjà indexé.",
+    "tab_ingest": "Lancer une ingestion",
+    "tab_reprocess": "Ré-exécuter",
+    "stop_pipeline": "Arrêter le pipeline",
+    "pick_source": "Choisir la cible dans l'arbre des sources",
+    "selected": "Sélection",
+    "select_folder": "Sélectionner ce dossier (mode dossier)",
+    "folder_mode_hint": "Dossier sélectionné : tous les PDF du dossier seront enfilés (mode dossier).",
+    "mode_document": "Document entier",
+    "mode_page_range": "Plage de pages",
+    "page_start": "Début",
+    "page_end": "Fin",
+    "launch_button": "Lancer le pipeline",
+    "launched": "Ingestion lancée",
+    "database": "Base",
+    "document": "Document",
+    "scope_document": "Document entier",
+    "scope_page_range": "Plage de pages",
+    "scope_chapter": "Chapitre",
+    "select_chapter": "Choisir un chapitre",
+    "preserve_human": "Préserver les éditions humaines",
+    "reprocess_warning": "Purge le périmètre puis le ré-ingère entièrement (toutes couches).",
+    "all_layers_note": "La ré-exécution repasse TOUTES les couches sur le périmètre (l'exécution d'une couche isolée n'est pas prévue par le contrat moteur — unité d'exécution : la page).",
+    "reprocess_button": "Ré-exécuter",
+    "reprocessed": "Ré-exécution lancée",
+    "queue": "File",
+    "queue_current": "En cours",
+    "queue_idle": "File au repos",
+    "queue_queued": "En attente",
+    "queue_done_today": "Terminées aujourd'hui"
   }
 }

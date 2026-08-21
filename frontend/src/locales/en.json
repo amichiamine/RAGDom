@@ -105,7 +105,14 @@
     "human_edited": "Manually corrected",
     "no_document_selected": "Select a document to view its content",
     "prev_page": "Previous page",
-    "next_page": "Next page"
+    "next_page": "Next page",
+    "scans_gallery": "Scans",
+    "scans_gallery_title": "Scans gallery",
+    "all_documents": "All documents",
+    "no_scans": "No scans available",
+    "editor_show_scan": "Show scan",
+    "editor_hide_scan": "Hide scan",
+    "editor_original_scan": "Original scan (reference)"
   },
   "search": {
     "placeholder": "Search this database...",
@@ -199,7 +206,16 @@
     "ingested": "Ingested",
     "target_db": "Target database",
     "empty": "No source files",
-    "drop_hint": "Drop PDFs here or click to upload"
+    "drop_hint": "Drop PDFs here or click to upload",
+    "root": "Root",
+    "target_folder": "Target folder",
+    "selected": "Selected",
+    "select_folder_target": "Click to target this folder",
+    "upload_into": "Upload into",
+    "new_folder_placeholder": "Folder name (e.g. Maths/Term or ChapA)",
+    "folder_name_invalid": "Invalid folder name (letters, digits, space, _ - . only).",
+    "confirm_delete_file": "Delete this source file? This action is irreversible.",
+    "db_naming_hint": "The database name derives from the path: /sources/Maths/TestAPI/x.pdf → Maths_TestAPI.sqlite."
   },
   "onboarding": {
     "title": "No databases yet",
@@ -272,12 +288,49 @@
     "key_state_none": "No key",
     "key_state_active": "Active key",
     "key_state_blocked": "Blocked key",
-    "key_state_invalid": "Invalid key"
+    "key_state_invalid": "Invalid key",
+    "model_provider_default": "Provider default model",
+    "model_provider_default_hint": "Fallback used when a key has no model of its own.",
+    "key_model": "This key's own model (takes priority)",
+    "key_model_inherit": "(provider model)"
   },
   "engines": {
     "title": "Engines",
     "detected": "Detected engines",
     "active": "Active",
     "empty": "No engine detected"
+  },
+  "launcher": {
+    "title": "Pipeline launcher",
+    "note": "Start an ingestion from the sources tree or re-run an already-indexed scope.",
+    "tab_ingest": "Start an ingestion",
+    "tab_reprocess": "Re-run",
+    "stop_pipeline": "Stop the pipeline",
+    "pick_source": "Pick the target in the sources tree",
+    "selected": "Selection",
+    "select_folder": "Select this folder (folder mode)",
+    "folder_mode_hint": "Folder selected: every PDF in the folder will be queued (folder mode).",
+    "mode_document": "Whole document",
+    "mode_page_range": "Page range",
+    "page_start": "Start",
+    "page_end": "End",
+    "launch_button": "Launch the pipeline",
+    "launched": "Ingestion started",
+    "database": "Database",
+    "document": "Document",
+    "scope_document": "Whole document",
+    "scope_page_range": "Page range",
+    "scope_chapter": "Chapter",
+    "select_chapter": "Choose a chapter",
+    "preserve_human": "Preserve human edits",
+    "reprocess_warning": "Purges the scope then fully re-ingests it (all layers).",
+    "all_layers_note": "Re-running replays ALL layers over the scope (running a single isolated layer is not provided by the engine contract — execution unit: the page).",
+    "reprocess_button": "Re-run",
+    "reprocessed": "Re-run started",
+    "queue": "Queue",
+    "queue_current": "Running",
+    "queue_idle": "Queue idle",
+    "queue_queued": "Queued",
+    "queue_done_today": "Done today"
   }
 }
