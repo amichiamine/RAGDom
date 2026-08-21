@@ -870,7 +870,7 @@ music21==9.3.0
 scikit-learn==1.5.2
 
 # ── LLM Clients Cloud ─────────────────────────────────────────
-google-genai==0.8.3
+google-genai==0.8.0             # ✔ CORRIGÉ 2026-08-21 : 0.8.3 inexistant sur PyPI (constaté en build réel Render)
 groq==0.11.0
 openai==1.47.1
 anthropic==0.34.2            # V3.1 : CORRIGÉ (le paquet 'anthropics' n'existe pas)

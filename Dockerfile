@@ -21,17 +21,19 @@ RUN npm run build
 # ── Étage 2 : backend + UI ──────────────────────────────────────────────────
 FROM python:3.11-slim AS runtime
 ENV PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1
-# Outils de compilation : uniquement pour llama-cpp-python (LLM local optionnel).
-RUN apt-get update && apt-get install -y --no-install-recommends \
-        build-essential cmake git \
+# git requis par certaines résolutions pip ; pas de toolchain lourd (llama-cpp exclu du web).
+RUN apt-get update && apt-get install -y --no-install-recommends git \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 COPY backend/requirements.txt backend/requirements.txt
-RUN pip install -r backend/requirements.txt \
-    # Procédure post-install obligatoire tech_specs §8 : garantir le headless.
-    && pip uninstall -y opencv-python || true \
-    && pip install opencv-python-headless==4.10.0.84 numpy==1.26.4
+# llama-cpp-python (LLM GGUF local, optionnel) est exclu de l'image web : compile
+# longue et inutile en ligne — le fallback LLM web est Ollama/API (déviation documentée).
+RUN grep -v "^llama-cpp-python" backend/requirements.txt > /tmp/requirements.web.txt \
+    && pip install -r /tmp/requirements.web.txt
+# Procédure post-install OBLIGATOIRE tech_specs §8 (étapes séparées : un échec = build rouge).
+RUN pip uninstall -y opencv-python || true
+RUN pip install opencv-python-headless==4.10.0.84 numpy==1.26.4
 
 COPY backend/ backend/
 COPY engines/ engines/
