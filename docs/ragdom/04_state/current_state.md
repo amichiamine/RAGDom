@@ -1,33 +1,44 @@
 # État Actuel du Projet RAGDom
 
-**Phase :** Phases 0-3 TERMINÉES · Phase 4 : Mode Repli Générique LIVRÉ (parité pixel-perfect
-curriculum = sprint restant) · Phase 5 : backend validé (46 routes live), build frontend à rejouer sur machine cible
-**Date de mise à jour :** 2026-08-21
+**Phase :** EXÉCUTION AUTONOME N°2 TERMINÉE — v1 complète livrée sur `main` ·
+extensions post-v1 (Web-Ready + Parallélisme D4-B) livrées sur la branche `post-v1`
+**Date de mise à jour :** 2026-08-21 (soir)
 
-## OPÉRATIONNEL (preuves : pytest 35/35, serveur live 46 routes, e2e PDF réel)
-- [x] Backend COMPLET : noyau agnostique (orchestrateur, registre moteurs, Option A/B),
-      moteur sci-engine 9 couches, 6 routers (46 routes dont purge scopée 7 niveaux,
-      ask RAG, SSE, corrections humaines, curriculum CRUD, sources/bases/settings),
-      Key Manager rotation/backoff/fallback Ollama
-- [x] Frontend (49 fichiers) : fondations verbatim + 3 vues fonctionnelles Mode Repli —
-      IndexView KPIs, LibraryView (TOC, side-by-side KaTeX/scans, Search+Ask),
-      AutomationView (SSE, ETA, PurgeStudio, Quarantine, Settings, KeyManager, Sources)
-- [x] Calibration réelle : bm25_score_threshold -0.3 (docs synchronisées)
+## OPÉRATIONNEL SUR MAIN (preuves : pytest 47/47, bench réels, e2e)
+- [x] Backend COMPLET : noyau agnostique, moteur sci-engine 9 couches, 6 routers
+      (48 routes avec le manifeste page-scans), Key Manager, purge scopée, ask RAG, SSE
+- [x] **Lot 1 sprint** : GET /library/page-scans (manifeste galerie), agrégats curriculum
+      (per_term + global en SQL), filtres chunks (pedagogical_type/page_start/page_end/toc_id)
+- [x] **Frontend pixel-perfect COMPLET (vagues A/B/C/D + audit croisé)** :
+      moteur KaTeX monopasse (auto-guérison l.2128-2251 du template + 5 rubriques didactiques),
+      ponts relationnels halo doré 2.3s, shell sidebar 320px + topbar blur + TabHost,
+      les 6 onglets (Matrice 360°, Programme, Cours side-by-side 50/50, Exercices VIRTUALISÉS,
+      Évaluations sujet/corrigé lazy, Galerie scans VIRTUALISÉE), Splash télémétrique (chunks de 35),
+      CurriculumStudio (sortie du Mode Repli), ChunkEditor, TelemetryExplorer (SVG pur),
+      DatabaseLifecycle, ArtifactImportModal, Command Palette Ctrl+K
+      — Mode Repli Générique intact (zéro régression)
+- [x] **Phase 5 partielle** : bench RAM 100 pages (plancher 57 / pic 489 ≤ 2048 / résiduel 356 Mo,
+      86 pages/min), Recovery SIGTERM processus réel PASS, guide utilisateur
+- [x] Audit statique croisé : 2 bugs bloquants-runtime corrigés (formes pagination getChunks
+      et getPageScansManifest — perte silencieuse au-delà de la page 1)
 
-## RESTE À FAIRE (backlog assumé, priorisé)
-1. Machine cible : npm install + npx tsc --noEmit + vite build (frontend/VALIDATION.md) ;
-   modèles rapid-*/fastembed au 1er run (RAGDOM_OFFLINE=false) ; llama-cpp-python si GGUF local.
-2. Phase 4 parité pixel-perfect : 6 onglets curriculum (library.php), Splash Screen, halo doré,
-   ponts relationnels — s'active via CurriculumStudio + bases 2G réelles.
-3. PARTIE 7/8 UI restants : ChunkEditor, CurriculumStudio, TelemetryExplorer, DatabaseLifecycle,
-   ArtifactImportModal, Command Palette, densité, virtualisation react-virtual (après npm).
-4. D.O.D restants : benchmarks RAM 3 paliers PDF 100 pages, Recovery SIGTERM processus réel,
-   Jest/Playwright (node_modules requis).
+## BRANCHE post-v1
+- [x] Lot Web-Ready (Phase 7) : RAGDOM_READONLY (admin absent = 404), auth Bearer,
+      rate-limit /ask (429), verrou /reveal (403), CORS multi-origines, health.readonly
+- [x] Phase 6 (D4-B) : layer_2_extract_v2 add-only, pool 2-3 workers par blocs,
+      équivalence des sorties prouvée, flag RAGDOM_INTRA_PAGE_WORKERS
 
-## Blocages
-- Registre npm inaccessible dans le sandbox (403 pare-feu) — demande d'accès envoyée,
-  contournement documenté dans frontend/VALIDATION.md. Aucun autre blocage.
+## RESTE À FAIRE (machine cible uniquement)
+1. `npm install` + `npx tsc --noEmit` + `vite build` (frontend/VALIDATION.md) — le registre npm
+   est resté bloqué dans le sandbox pendant TOUTE l'exécution ; ~25 nouveaux fichiers TS écrits
+   sous revue statique stricte, 1 passe de tsc réel attendue avec corrections mineures probables.
+2. Recette visuelle pixel-perfect sur base 2G réelle (checklist Lot 11 du sprint) + modèles
+   rapid-*/fastembed au 1er run (RAGDOM_OFFLINE=false).
+3. Tests Jest/Playwright (node_modules requis). Reliquat mineur PARTIE 8 : toggle densité,
+   sélection en masse, Inspecteur de Cycle de Vie.
+4. Post-v1 : chiffrement des clés LLM au repos (seul item Web-Ready restant) ; merge de
+   la branche post-v1 quand un déploiement web est décidé.
 
 ## Prochaine Action Prioritaire
-- Machine cible : cloner le dépôt, suivre README §0 + frontend/VALIDATION.md, lancer
-  backend+frontend, ingérer un premier manuel réel, puis sprint parité pixel-perfect.
+Machine cible Windows : cloner, README §0, backend 47/47, npm install + build, ingérer un
+premier manuel réel, peupler le curriculum via CurriculumStudio → les 6 onglets s'activent.

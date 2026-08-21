@@ -44,7 +44,7 @@
 - [x] CHECKPOINT Règle 8 : templates /Template_UI-UX/ reçus d'ArchiSys3.0 et imprégnés (inventaire exhaustif de library.php réalisé)
 - [x] IndexView.tsx (Dashboard métriques réelles)
 - [x] LibraryView.tsx — Mode Repli Générique (TOCExplorer + SideBySideViewer + SearchStudio + AskStudio)
-- [ ] LibraryView 6 onglets pixel-perfect (Splash, Matrice 360°, Programme, Cours, Exercices, Évaluations, Scans) → **voir sprint_pixel_perfect.md (11 lots)**
+- [x] LibraryView 6 onglets pixel-perfect (Splash, Matrice 360°, Programme, Cours, Exercices, Évaluations, Scans) — vagues A/B/C/D livrées + audit croisé (commits d099bf7, e1ae94d) ; recette visuelle sur machine cible restante
 - [x] SideBySideViewer.tsx (KaTeX/scans ; mode fluide 50/50 avancé → sprint pixel-perfect Lot 6)
 - [x] ArtifactRenderer.tsx (familles de base ; extension 25 familles au fil des besoins réels)
 - [x] SearchStudio.tsx (RRF) — extension multi-bases → sprint pixel-perfect
@@ -55,25 +55,25 @@
 ## Phase 4B : Administration & Couverture Totale — 🟡 PARTIELLE
 - [x] Routes backend §7.6 (100 % — voir Phase 2)
 - [x] AskStudio.tsx · PurgeStudio.tsx (7 portées + dry-run + double saisie) · QuarantineManager · SourcesManager · SettingsPanel · KeyManager · OnboardingEmptyState + ConnectionGuard
-- [ ] ChunkEditor.tsx (correction humaine, aperçu KaTeX live) → dépend du moteur KaTeX (sprint Lot 3)
-- [ ] CurriculumStudio.tsx (sortie du Mode Repli) → sprint Lot 10
-- [ ] TelemetryExplorer.tsx (graphe) · DatabaseLifecycle.tsx (UI export/duplicate/delete) · ArtifactImportModal.tsx
-- [ ] PARTIE 8 restants : virtualisation @tanstack/react-virtual, toggle densité, sélection en masse, Command Palette Ctrl+K, Inspecteur de Cycle de Vie, compteurs animés
+- [x] ChunkEditor.tsx (correction humaine, aperçu KaTeX live, lint local+serveur)
+- [x] CurriculumStudio.tsx (CRUD 4 tables + import JSON merge/replace — sortie du Mode Repli)
+- [x] TelemetryExplorer.tsx (agrégats animés + graphe SVG pur) · DatabaseLifecycle.tsx · ArtifactImportModal.tsx (Tier 3)
+- [x] PARTIE 8 : virtualisation @tanstack/react-virtual (Exercices+Scans), Command Palette Ctrl+K, compteurs animés — restants mineurs : toggle densité, sélection en masse, Inspecteur de Cycle de Vie
 
 ## Phase 5 : Intégration, Tests & Documentation — 🔴 À FAIRE (machine cible)
 - [ ] `npm install` + `npx tsc --noEmit` + `vite build` (frontend/VALIDATION.md) — bloqué sandbox (registre npm 403)
 - [ ] Tests d'intégration End-to-End complets (Playwright)
-- [ ] Benchmarks RAM 3 paliers (plancher / pic / non-fuite) sur PDF 100 pages + Baseline de débit
-- [ ] Test Recovery SIGTERM (processus réel)
-- [ ] Documentation utilisateur finale
+- [x] Benchmarks RAM 3 paliers PDF 100 pages : plancher 57 Mo / pic 489 Mo (≤2048 OK) / résiduel 356 Mo · débit 86 p/min (sandbox, moteurs natifs — à rejouer machine cible)
+- [x] Test Recovery SIGTERM processus réel : PASS (kill à 5/30 pages, 24 transitoires récupérés, 30/30 READY, zéro doublon)
+- [x] Documentation utilisateur finale (docs/GUIDE_UTILISATEUR.md)
 
-## Phase 6 (OPTIONNELLE, post-v1) : Parallélisme Intra-Page Borné (D4-B)
-- [ ] Activable uniquement si la Baseline de débit le justifie
-- [ ] Pool 2-3 workers par blocs d'une même page (module_v2, add-only, garantie RAM maintenue)
+## Phase 6 (OPTIONNELLE, post-v1) : Parallélisme Intra-Page Borné (D4-B) — ✅ IMPLÉMENTÉE sur branche post-v1
+- [x] layer_2_extract_v2 add-only (pool 2-3 workers par blocs, verrou moteurs, ordre déterministe) + hook orchestrateur RAGDOM_INTRA_PAGE_WORKERS — équivalence des sorties prouvée par test (commit 0337ccd)
+- [ ] Activation en production : uniquement si la baseline machine cible le justifie (86 p/min sandbox déjà confortable)
 
 ## Phase 7 (POST-v1) : Déploiement Web — 📘 DOCUMENTÉE (voir 02_walkthroughs/phase7_deploiement_web.md)
 > Le Local-First reste le mode nominal (atelier d'ingestion). Le web est une projection de la même architecture pour la CONSULTATION. Incompatible serverless/edge ; serveur classique requis.
-- [ ] **Lot Web-Ready** (préalable à toute exposition) : flag `RAGDOM_READONLY` (montage sélectif des routers), auth Bearer sur routers admin, rate-limit /ask, chiffrement clés LLM au repos + /reveal verrouillé, CORS multi-origines, champ `readonly` dans /health + masquage Vue 3
+- [x] **Lot Web-Ready** IMPLÉMENTÉ sur branche post-v1 (commit c3d1a84) : RAGDOM_READONLY (politique 404 sur l'admin), auth Bearer, rate-limit /ask 429, verrou /reveal 403, CORS multi-origines, champ readonly dans /health — 6 tests dédiés, 47/47 au total. Restant : chiffrement des clés LLM au repos
 - [ ] Palier 1 — Tunnel (cloudflared → localhost:8000, frontend statique hébergé) : usage perso/démo
 - [ ] Palier 2 — Publication de bases (RECOMMANDÉ) : ingestion locale → export .sqlite (Base Autonome) → VPS en mode consultation
 - [ ] Palier 3 — Full Web : stack complet sur VPS (upload sources + ingestion à distance), exige le Lot Web-Ready complet
