@@ -26,7 +26,7 @@ Premier accès : démarrage à froid 1-3 s + téléchargement des modèles OCR/e
 - **Atelier complet** : passer `RAGDOM_READONLY` à `"false"` et définir le jeton :
   `npx wrangler secret put RAGDOM_AUTH_TOKEN` puis l'injecter dans `envVars` via
   `this.env` (cf. doc @cloudflare/containers).
-- **Gabarit d'instance** : `standard` (4 GiB / ½ vCPU / 4 GB disque). `basic` (1 GiB)
+- **Gabarit d'instance** : `standard-1` (4 GiB / ½ vCPU / 8 GB disque — gamme jusqu à standard-4 : 4 vCPU/12 GiB). `basic` (1 GiB)
   suffit en consultation pure (pic RAM mesuré : 489 Mo).
 
 ## ⚠️ La limite à connaître : disque ÉPHÉMÈRE
