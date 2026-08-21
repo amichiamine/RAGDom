@@ -1,0 +1,16 @@
+{
+  "date": "2026-08-21 17:25",
+  "environment": "sandbox Linux (Python 3.9, RAGDOM_OFFLINE — moteurs natifs fitz, sans modèles rapid-*/fastembed : à rejouer machine cible pour valeurs finales)",
+  "pages": 100,
+  "pages_ready": 100,
+  "page_scans": 100,
+  "chunks": 100,
+  "palier_1_plancher_mb": 57.4,
+  "palier_2_pic_mb": 488.9,
+  "palier_3_residuel_mb": 356.4,
+  "non_fuite_delta_mb": 299.0,
+  "duree_s": 69.7,
+  "debit_pages_par_minute": 86.1,
+  "max_ram_mb_limite": 2048,
+  "verdict_ram": "OK"
+}

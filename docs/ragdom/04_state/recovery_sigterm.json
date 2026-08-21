@@ -1,0 +1,9 @@
+{
+  "ready": 30,
+  "quarantined": 0,
+  "duplicate_scans": 0,
+  "page_scans": 30,
+  "ready_before_kill": 5,
+  "transient_after_kill": 24,
+  "verdict": "PASS"
+}
