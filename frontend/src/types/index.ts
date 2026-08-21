@@ -186,7 +186,8 @@ export interface LlmSetting {
 // ── Authentification session (V3.6 — atelier web, canal Bearer réutilisé) ──
 export interface AuthState {
   auth_required: boolean;
-  setup_required: boolean;
+  setup_required: boolean
+  init_token_required?: boolean;
   authenticated: boolean;
   username: string | null;
   readonly: boolean;

@@ -37,6 +37,8 @@ export default function LoginView() {
         // Déjà connecté : pas de raison de rester sur /login.
         if (me.authenticated) { navigate('/automation', { replace: true }); return }
         setSetupMode(me.setup_required)
+        // Le serveur annonce d'AVANCE si le jeton d'initialisation est exigé (web).
+        if ((me as { init_token_required?: boolean }).init_token_required) setNeedsInitToken(true)
       })
       .catch(() => { if (!cancelled) setSetupMode(false) })
       .finally(() => { if (!cancelled) setChecking(false) })
@@ -69,7 +71,7 @@ export default function LoginView() {
     setBusy(true)
     try {
       if (setupMode) {
-        await api.auth.setup(u, password, needsInitToken ? initToken : undefined)
+        await api.auth.setup(u, password, initToken.trim() ? initToken : undefined)
       } else {
         await api.auth.login(u, password)
       }

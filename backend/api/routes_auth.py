@@ -103,6 +103,7 @@ def me(request: Request):
     if not username and config.RAGDOM_AUTH_TOKEN and token == config.RAGDOM_AUTH_TOKEN:
         username = "__jeton_env__"
     return {"auth_required": auth_required, "setup_required": not has_users,
+            "init_token_required": (not has_users) and bool(config.RAGDOM_AUTH_TOKEN),
             "authenticated": username is not None,
             "username": None if username in (None, "__jeton_env__") else username,
             "readonly": config.RAGDOM_READONLY}
