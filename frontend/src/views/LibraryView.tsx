@@ -3,7 +3,8 @@ import { Link, useSearchParams } from 'react-router-dom'
 import { api } from '@/lib/api'
 import { useDatabase } from '@/contexts/DatabaseContext'
 import { useLanguage } from '@/contexts/LanguageContext'
-import type { Document, TocNode, Chunk, Facets, SearchResult, AskSource } from '@/types'
+import type { Document, TocNode, Chunk, Facets, SearchResult, AskSource, CurriculumPayload } from '@/types'
+import CurriculumWorkspace from '@/components/library/curriculum/CurriculumWorkspace'
 import ThemeToggle from '@/components/layout/ThemeToggle'
 import LanguageSelector from '@/components/layout/LanguageSelector'
 import EngineBadge from '@/components/layout/EngineBadge'
@@ -42,6 +43,10 @@ export default function LibraryView() {
 
   const [facets, setFacets] = useState<Facets | null>(null)
 
+  // ── Curriculum (V3.1 D1-B) : décide Mode Repli vs 6 onglets pixel-perfect ──
+  const [curriculum, setCurriculum] = useState<CurriculumPayload | null>(null)
+  const [curriculumLoading, setCurriculumLoading] = useState(false)
+
   // ── Deep-link ?db= et ?q= depuis le hero ──
   useEffect(() => {
     const qDb = params.get('db')
@@ -74,6 +79,18 @@ export default function LibraryView() {
       .catch(e => setDocsError(e instanceof Error ? e.message : t('common.error_generic')))
       .finally(() => setDocsLoading(false))
   }, [activeDb, t])
+
+  // ── Charge le curriculum (aggregates) à chaque changement de base ──
+  useEffect(() => {
+    if (!activeDb) { setCurriculum(null); return }
+    setCurriculumLoading(true)
+    let alive = true
+    api.library.getCurriculum(activeDb)
+      .then(res => { if (alive) setCurriculum(res) })
+      .catch(() => { if (alive) setCurriculum(null) })
+      .finally(() => { if (alive) setCurriculumLoading(false) })
+    return () => { alive = false }
+  }, [activeDb])
 
   const loadDocument = useCallback(async (doc: Document) => {
     if (!activeDb) return
@@ -138,6 +155,29 @@ export default function LibraryView() {
     )
   }
 
+  // ── Anti-flash : attend la décision curriculum avant de choisir la vue ──
+  if (activeDb && curriculumLoading && curriculum === null) {
+    return (
+      <div className="container-app" style={{ paddingTop: 24 }}>
+        <TopbarLite />
+        <Spinner label={t('common.loading')} />
+      </div>
+    )
+  }
+
+  // ── Bascule Vue 2 pixel-perfect : base dont les tables curriculum sont peuplées ──
+  if (activeDb && curriculum?.curriculum_available === true) {
+    return (
+      <CurriculumWorkspace
+        activeDb={activeDb}
+        databases={databases}
+        onSelectDb={setActiveDb}
+        curriculum={curriculum}
+      />
+    )
+  }
+
+  // ── Mode Repli Générique (INCHANGÉ) — affiché tant que le curriculum n'est pas peuplé ──
   return (
     <div className="app-layout">
       {/* Sidebar (Mode Repli Générique : sélecteur de base + navigation) */}

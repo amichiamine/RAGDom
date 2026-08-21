@@ -92,7 +92,42 @@ export interface CurriculumTerm { id: string; term_index: number; label: string;
 export interface CurriculumProgram { id: string; term_id: string | null; seq_index: number | null; title: string; source: string | null; competencies_json: string | null; }
 export interface Assessment { id: string; document_id: string | null; term_id: string | null; kind: 'devoir' | 'composition' | 'examen' | 'autre'; title: string; subject_chunk_id: string | null; correction_chunk_id: string | null; scale_json: string | null; }
 export interface ContentLink { id: string; link_type: 'course_exercise' | 'course_program' | 'course_scan' | 'exercise_scan' | 'assessment_scan' | 'program_term'; from_id: string; to_id: string; page_number: number | null; }
-export interface CurriculumPayload { curriculum_available: boolean; terms: CurriculumTerm[]; programs: CurriculumProgram[]; assessments: Assessment[]; links: ContentLink[]; }
+// ── Manifeste des scans de pages (Vue 2 — galerie & side-by-side, Lot 1 API) ──
+export interface PageScanManifestEntry {
+  document_id: string;
+  page_number: number;
+  width: number;
+  height: number;
+  has_thumb: boolean;
+  chapter_toc_id: string | null;
+  chapter_title: string | null;
+  exercises_count: number;
+}
+
+// ── Agrégats curriculum (calculés en SQL — jamais côté client, préambule §5.2) ──
+export interface CurriculumTermAggregate {
+  term_id: string;
+  term_index: number;
+  programs: number;
+  assessments: number;
+  courses: number;
+  exercises: number;
+}
+export interface CurriculumGlobalAggregate {
+  programs: number;
+  assessments: number;
+  courses: number;
+  exercises: number;
+  solutions: number;
+  page_scans: number;
+  chapters: number;
+}
+export interface CurriculumAggregates {
+  per_term: CurriculumTermAggregate[];
+  global: CurriculumGlobalAggregate;
+}
+
+export interface CurriculumPayload { curriculum_available: boolean; terms: CurriculumTerm[]; programs: CurriculumProgram[]; assessments: Assessment[]; links: ContentLink[]; aggregates: CurriculumAggregates; }
 
 export interface PipelineJob {
   id: string;

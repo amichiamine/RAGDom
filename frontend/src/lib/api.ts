@@ -4,6 +4,7 @@ import type {
   AskResponse, PurgePayload, PurgeResult, QuarantineJob, SourceNode,
   BenchmarkRow, BenchmarkAggregates, AppSettings, EngineManifest,
   Document, TocNode, Chunk, Artifact, PaginatedResponse,
+  PageScanManifestEntry,
 } from '@/types'
 
 const BASE_URL = '/api'
@@ -55,13 +56,27 @@ export const api = {
       request<Facets>(withDb('/library/facets', db)),
     getCurriculum: (db: string) =>
       request<CurriculumPayload>(withDb('/library/curriculum', db)), // V3.1 — D1-B
-    getChunks: (db: string, documentId: string, page = 1) =>
-      request<{ chunks: Chunk[]; total_pages: number }>(withDb('/library/chunks', db, { document_id: documentId, page: String(page) })),
+    getChunks: (db: string, documentId: string, page = 1, filters?: { pedagogical_type?: string; page_start?: number; page_end?: number; toc_id?: string; term_index?: number }) =>
+      request<{ chunks: Chunk[]; total_pages: number }>(withDb('/library/chunks', db, {
+        document_id: documentId,
+        page: String(page),
+        ...(filters?.pedagogical_type ? { pedagogical_type: filters.pedagogical_type } : {}),
+        ...(filters?.page_start != null ? { page_start: String(filters.page_start) } : {}),
+        ...(filters?.page_end != null ? { page_end: String(filters.page_end) } : {}),
+        ...(filters?.toc_id ? { toc_id: filters.toc_id } : {}),
+        ...(filters?.term_index != null ? { term_index: String(filters.term_index) } : {}),
+      })),
     getArtifacts: (db: string, chunkId: string) =>
       request<{ artifacts: Artifact[] }>(withDb('/library/artifacts', db, { chunk_id: chunkId })),
     getPageScanUrl: (db: string, documentId: string, pageNumber: number, thumb = false) =>
       // V3.5 : servi depuis la table page_scans (base autonome). thumb=true → vignette pour galeries virtualisées.
       `${BASE_URL}${withDb('/library/page-scan', db, { document_id: documentId, page: String(pageNumber), ...(thumb ? { thumb: 'true' } : {}) })}`,
+    // V3.5 (Lot 1) : manifeste des scans de pages (jointure page_scans × toc × chunks) — jamais de glob fichiers.
+    getPageScansManifest: (db: string, documentId?: string) =>
+      request<{ pages: PageScanManifestEntry[] }>(withDb('/library/page-scans', db, documentId ? { document_id: documentId } : undefined)),
+    // Binaire d'un artefact (figure) — cible de asset://figures/… résolue par le pipeline KaTeX.
+    getArtifactBinaryUrl: (db: string, artifactId: string) =>
+      `${BASE_URL}${withDb('/library/artifact-binary', db, { artifact_id: artifactId })}`,
     // ── AJOUTS V3.2 (§7.14) ──
     updateChunk: (db: string, id: string, patch: { content_markdown?: string; section_title?: string; pedagogical_type?: string }) =>
       request(withDb(`/library/chunks/${id}`, db), { method: 'PUT', body: JSON.stringify(patch) }),

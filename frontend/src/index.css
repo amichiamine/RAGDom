@@ -49,6 +49,12 @@
   --scale-entrance: 0.96;
   /* Identité multi-moteurs (PARTIE 8.4) — sci-engine = Bleu Cobalt (défaut) */
   --engine-accent: #2563eb;
+
+  /* Sémantique d'état (PARTIE 8.4) — consommée par .btn-success/.badge-* etc. */
+  --success: #10b981;
+  --warning: #f59e0b;
+  --danger:  #ef4444;
+  --info:    #06b6d4;
 }
 
 [data-theme="dark"] {
@@ -260,6 +266,7 @@ h1,h2,h3,h4,h5,h6 { font-family: var(--font-heading); font-weight:700; color: va
 /* ── KaTeX LTR Isolation & BiDi Textes Mixtes (Arabe + FR/EN) ── */
 .katex { direction: ltr !important; unicode-bidi: isolate !important; text-align: left !important; display: inline-block; font-family: KaTeX_Main, 'Times New Roman', serif !important; }
 .katex-display { direction: ltr !important; unicode-bidi: isolate !important; text-align: center !important; margin: 1.2em 0 !important; overflow-x: auto; overflow-y: hidden; padding: 8px 0; }
+.katex-mathml { display: none !important; user-select: none !important; -webkit-user-select: none !important; }
 .bidi-isolate, .latin-term, .code-snippet, .chem-formula, .shiki-container, [dir="ltr"] {
   direction: ltr !important; unicode-bidi: isolate !important; text-align: left;
 }
@@ -298,6 +305,38 @@ h1,h2,h3,h4,h5,h6 { font-family: var(--font-heading); font-weight:700; color: va
 /* ── Scans Side Rail ── */
 .scans-side-rail { position: sticky; top: 70px; max-height: calc(100vh - 100px); overflow-y: auto; background: var(--bg-surface-secondary); border-radius: 14px; padding: 14px; border: 1px solid var(--border-color); }
 
+/* ── Fluid Pane (side-by-side 100% ⇄ 50/50) — easing signature ── */
+.fluid-pane { transition: all 0.35s cubic-bezier(0.16,1,0.3,1); }
+
+/* ── Bannière de page (rendue par le pipeline KaTeX : ### 📄 الصفحة N) ── */
+.page-banner {
+  display: flex; justify-content: space-between; align-items: center; gap: 16px;
+  background: linear-gradient(135deg, #1e3a8a, #2563eb); color: #fff;
+  border-radius: 14px; padding: 14px 18px; margin: 18px 0; box-shadow: var(--card-shadow);
+}
+.page-banner h6 { color: #fff; margin: 0; font-weight: 800; font-size: 1rem; }
+.page-banner small { opacity: 0.78; }
+.page-banner-preview {
+  display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0;
+  background: var(--warning); color: #1e293b; font-weight: 800; font-size: 0.85rem;
+  padding: 6px 16px; border-radius: 30px; border: none; cursor: pointer;
+  box-shadow: 0 2px 8px rgba(245,158,11,0.35); transition: all 0.2s cubic-bezier(0.16,1,0.3,1);
+}
+.page-banner-preview:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(245,158,11,0.5); }
+
+/* ── Carte de géométrie (#### 📐 الرسم والشكل الهندسي) ── */
+.visual-math-card {
+  border: 1px solid var(--info); border-radius: 14px; overflow: hidden;
+  margin: 18px 0; box-shadow: var(--card-shadow); background: var(--bg-surface);
+}
+.visual-math-card .visual-math-head {
+  display: flex; justify-content: space-between; align-items: center; gap: 10px;
+  background: var(--info); color: #0f172a; font-weight: 800; font-size: 0.85rem; padding: 8px 16px;
+}
+.visual-math-card .visual-math-body { padding: 16px; background: var(--bg-surface); color: var(--text-main); }
+.svg-figure-wrapper { text-align: center; margin: 24px 0; }
+.svg-figure-wrapper img { max-height: 420px; max-width: 100%; border-radius: 12px; }
+
 /* ── Footer ── */
 footer { border-top: 1px solid var(--border-color); padding: 30px 0; margin-top: 60px; text-align: center; color: var(--text-muted); font-size: 0.9rem; }
 
@@ -315,12 +354,27 @@ footer { border-top: 1px solid var(--border-color); padding: 30px 0; margin-top:
 .col-4  { flex: 0 0 33.3333%; max-width: 33.3333%; }
 .col-3  { flex: 0 0 25%;  max-width: 25%; }
 .col-2  { flex: 0 0 16.6667%; max-width: 16.6667%; }
+/* Colonnes responsives (transposition Bootstrap → CSS, Règle 12 §6) : base = pleine largeur, élargies au breakpoint */
+.col-lg-8, .col-lg-6, .col-lg-4, .col-lg-3, .col-xl-6, .col-xl-4, .col-xl-3, .col-xl-2, .col-md-6, .col-md-4 { flex: 0 0 100%; max-width: 100%; }
 .grid-kpi { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; }
 .grid-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 20px; }
 .grid-scans { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 14px; }
-@media (max-width: 992px) {
-  .col-lg-6 { flex: 0 0 100%; max-width: 100%; }
-  .col-xl-6 { flex: 0 0 100%; max-width: 100%; }
+/* Breakpoint 992px (sidebar/mobile — spec critique) : expansion mobile-first des colonnes */
+@media (min-width: 768px) {
+  .col-md-6 { flex: 0 0 50%; max-width: 50%; }
+  .col-md-4 { flex: 0 0 33.3333%; max-width: 33.3333%; }
+}
+@media (min-width: 992px) {
+  .col-lg-8 { flex: 0 0 66.6667%; max-width: 66.6667%; }
+  .col-lg-6 { flex: 0 0 50%; max-width: 50%; }
+  .col-lg-4 { flex: 0 0 33.3333%; max-width: 33.3333%; }
+  .col-lg-3 { flex: 0 0 25%; max-width: 25%; }
+}
+@media (min-width: 1200px) {
+  .col-xl-6 { flex: 0 0 50%; max-width: 50%; }
+  .col-xl-4 { flex: 0 0 33.3333%; max-width: 33.3333%; }
+  .col-xl-3 { flex: 0 0 25%; max-width: 25%; }
+  .col-xl-2 { flex: 0 0 16.6667%; max-width: 16.6667%; }
 }
 
 /* ── Boutons custom (pills) ── */
