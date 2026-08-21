@@ -85,14 +85,14 @@ a{color:#60a5fa;text-decoration:none}a:hover{text-decoration:underline}
   <text x="55" y="243" fill="#fbbf24" font-size="14" font-weight="700">Moteur sci-engine + données</text>
   <text x="55" y="265" fill="#e6eaf6" font-size="12">OCR (ONNX) · OpenCV · sqlite-vec · PyMuPDF — binaires natifs, batchs de plusieurs minutes</text>
   <text x="55" y="285" fill="#e6eaf6" font-size="12">bases .sqlite sur disque (/data) · 2 Go RAM max</text>
-  <text x="55" y="307" fill="#f87171" font-size="12" font-weight="600">⛔ INEXÉCUTABLE en serverless JS (Workers/Vercel Functions)</text>
+  <text x="55" y="307" fill="#f87171" font-size="12" font-weight="600">⛔ Serverless JS (Workers/Vercel) — ✅ mais OK via Cloudflare CONTAINERS (payant, §4bis)</text>
   <!-- Hébergeurs -->
   <text x="600" y="52" fill="#e6eaf6" font-size="15" font-weight="700">Qui exécute cette image ?</text>
   <rect x="590" y="70" width="290" height="120" rx="12" fill="rgba(16,185,129,.08)" stroke="#10b981" stroke-width="1.5"/>
   <text x="606" y="97" fill="#34d399" font-size="13.5" font-weight="700">✅ Hébergeurs de CONTENEURS</text>
   <text x="606" y="121" fill="#e6eaf6" font-size="12.5">Hugging Face Spaces (gratuit)</text>
   <text x="606" y="141" fill="#e6eaf6" font-size="12.5">Render (gratuit) · Koyeb (gratuit)</text>
-  <text x="606" y="161" fill="#e6eaf6" font-size="12.5">Railway · Fly.io · tout VPS</text>
+  <text x="606" y="161" fill="#e6eaf6" font-size="12.5">Railway · Fly.io · VPS · CF Containers ($)</text>
   <rect x="590" y="210" width="290" height="110" rx="12" fill="rgba(245,158,11,.07)" stroke="#f59e0b" stroke-width="1.5"/>
   <text x="606" y="237" fill="#fbbf24" font-size="13.5" font-weight="700">🖼️ UI seule (vitrine statique)</text>
   <text x="606" y="261" fill="#e6eaf6" font-size="12.5">Cloudflare · Vercel · Netlify…</text>
@@ -107,6 +107,7 @@ a{color:#60a5fa;text-decoration:none}a:hover{text-decoration:underline}
 <tr><td>Alternative gratuite avec domaine .onrender.com</td><td>Render (Docker)</td><td>0 € (veille après 15 min d'inactivité)</td><td>§2</td></tr>
 <tr><td>Confort maximal + disque persistant</td><td>Railway (Docker)</td><td>essai 5 $ puis ~5 $/mois</td><td>§3</td></tr>
 <tr><td>Vitrine UI ultra-rapide sur ton pipeline actuel</td><td>Cloudflare (assets)</td><td>0 €</td><td>§4</td></tr>
+<tr><td><strong>Tout via Cloudflare</strong> (GA avril 2026)</td><td>Cloudflare <strong>Containers</strong></td><td>Workers Paid 5 $/mois + CPU actif</td><td>§4bis</td></tr>
 </table>
 
 <div class="callout"><strong>⚠️ La seule vraie limite du 100 % gratuit :</strong> les offres gratuites (HF Spaces, Render, Koyeb) ont un <strong>stockage éphémère</strong> — au redémarrage du conteneur, les bases <code>.sqlite</code> uploadées sont perdues. Deux parades : ① ingérer localement puis <em>ré-uploader la base finie</em> (fichier unique, grâce à la Base Autonome V3.5) après chaque redémarrage — parfait pour démo/consultation ; ② passer à un plan avec volume (Railway/Fly/HF persistent ~5 $/mois) pour la persistance réelle.</div>
@@ -171,6 +172,18 @@ app_port: 8000
 <div class="step"><div class="n">2</div><div class="body"><p>Variable de build <code>VITE_API_URL=https://&lt;ton-backend&gt;</code> (l'URL HF/Render/Railway du §1-3) — et côté backend, ajoute ton domaine Cloudflare dans <code>FRONTEND_URL</code> (liste CORS). Sans backend : l'UI s'affiche avec l'écran « aucun backend joignable » (normal).</p></div></div>
 <div class="callout ok"><strong>Astuce :</strong> si tu déploies via §1-3, Cloudflare devient optionnel — l'image Docker sert déjà l'UI. Garde Cloudflare seulement si tu veux son CDN devant l'UI.</div>
 
+<h2><span class="num">4bis</span>Cloudflare Containers — le déploiement COMPLET via Cloudflare (GA avril 2026)</h2>
+<p>Vérifié sur la documentation officielle : <strong>Cloudflare Containers est en disponibilité générale depuis le 13/04/2026</strong> — on peut désormais exécuter l'image Docker RAGDom entière (UI + API + moteur) sur le réseau Cloudflare. <strong>Condition : plan Workers Paid (5 $/mois)</strong> — les Containers ne sont pas dans le plan Free — + facturation à l'usage CPU actif (scale-to-zero : un site peu visité coûte quelques centimes).</p>
+<div class="step"><div class="n">1</div><div class="body"><p>Sur ta machine (Docker requis) :</p>
+<pre><code>git clone -b post-v1 https://github.com/amichiamine/RAGDom.git
+cd RAGDom/deploy/cloudflare
+npm install
+npx wrangler deploy</code></pre>
+<p class="sub">Le dossier <code>deploy/cloudflare/</code> du dépôt contient tout : le Worker de routage, la config <code>wrangler.jsonc</code> (containers + Durable Object) et le README détaillé. Wrangler builde l'image, la pousse au registre Cloudflare et publie <code>https://ragdom-web.&lt;compte&gt;.workers.dev</code>.</p></div></div>
+<div class="step"><div class="n">2</div><div class="body"><p>Gabarit : <code>standard</code> (4 GiB / ½ vCPU / 4 GB disque) — confortable pour RAGDom (pic mesuré : 489 Mo). Démarrage à froid : 1-3 s, veille automatique après 2 h sans trafic.</p></div></div>
+<div class="callout danger"><strong>⚠️ Disque éphémère (limite plateforme) :</strong> à chaque mise en veille, le disque du conteneur repart de l'image — les .sqlite uploadés à chaud sont perdus. Parade recommandée : <strong>embarquer les bases dans l'image</strong> (une ligne <code>COPY databases_publiees/*.sqlite /data/databases/</code> dans le Dockerfile — détaillé dans deploy/cloudflare/README.md). La bibliothèque de consultation renaît alors identique à chaque réveil. Cloudflare annonce des « snapshots » pour la persistance native.</div>
+<div class="callout ok"><strong>Verdict :</strong> tu avais raison — Cloudflare peut tout héberger désormais. Choisis-le si tu es déjà dans son écosystème et que le trafic est en rafales (facturation CPU actif imbattable). Reste sur HF Spaces si tu veux du 100 % gratuit, ou Railway si tu veux un disque réellement persistant.</div>
+
 <h2><span class="num">05</span>Sécurité web — les 4 réglages à ne jamais oublier</h2>
 <table>
 <tr><th>Variable</th><th>Consultation publique</th><th>Atelier privé</th><th>Effet</th></tr>
@@ -208,7 +221,7 @@ app_port: 8000
 </ul>
 </div>
 
-<footer>RAGDom V3.5 · Guide de déploiement web · 2026-08-21 · dépôt : github.com/amichiamine/RAGDom (branche post-v1) · réf. technique : docs/ragdom/02_walkthroughs/phase7_deploiement_web.md</footer>
+<footer>RAGDom V3.5 · Guide de déploiement web · 2026-08-21 (rév. Containers GA) · dépôt : github.com/amichiamine/RAGDom (branche post-v1) · réf. technique : docs/ragdom/02_walkthroughs/phase7_deploiement_web.md</footer>
 
 </div>
 </body>

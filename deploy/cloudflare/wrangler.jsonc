@@ -1,0 +1,25 @@
+// RAGDom — Déploiement COMPLET via Cloudflare Containers (GA 13/04/2026).
+// Prérequis : plan Workers Paid (5 $/mois) + Docker qui tourne localement.
+//   cd deploy/cloudflare && npm install && npx wrangler deploy
+// Le Worker route tout le trafic vers UN conteneur RAGDom (image racine du dépôt :
+// UI + API + moteur sci-engine, single-origin sur le port 8000).
+{
+  "name": "ragdom-web",
+  "main": "src/worker.ts",
+  "compatibility_date": "2026-08-01",
+  "containers": [
+    {
+      "class_name": "RagdomContainer",
+      // Dockerfile à la racine du dépôt (contexte de build = racine : backend/ frontend/ engines/)
+      "image": "../../Dockerfile",
+      "max_instances": 1,
+      // "basic" (1 GiB) suffit pour la CONSULTATION (pic mesuré 489 Mo en ingestion légère) ;
+      // "standard" (4 GiB, 1/2 vCPU, 4 GB disque) recommandé si atelier d'ingestion actif.
+      "instance_type": "standard"
+    }
+  ],
+  "durable_objects": {
+    "bindings": [{ "name": "RAGDOM", "class_name": "RagdomContainer" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["RagdomContainer"] }]
+}
