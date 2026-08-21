@@ -1,0 +1,233 @@
+{
+  "app": {
+    "title": "RAGDom Library",
+    "subtitle": "La plateforme numérique des programmes scientifiques",
+    "hub": "RAGDom Hub"
+  },
+  "nav": {
+    "dashboard": "Tableau de bord",
+    "library": "Bibliothèque",
+    "automation": "Automation Hub",
+    "viewer": "Visionneuse classique",
+    "back_portal": "Retour au portail"
+  },
+  "lang": {
+    "label": "Langue",
+    "ar": "Arabe",
+    "fr": "Français",
+    "en": "Anglais"
+  },
+  "theme": {
+    "dark": "Sombre",
+    "light": "Clair",
+    "toggle": "Basculer le thème"
+  },
+  "density": {
+    "comfortable": "Confortable",
+    "compact": "Compact"
+  },
+  "hero": {
+    "badge": "Plateforme certifiée",
+    "title": "La plateforme centrale des programmes et manuels scolaires",
+    "desc": "Bases SQLite portables avec recherche hybride (BM25 + vectorielle) pour explorer l'intégralité du contenu scientifique.",
+    "search_placeholder": "Rechercher dans tout le programme : nombres, symétrie, angles, exercices...",
+    "launch": "Ouvrir la bibliothèque",
+    "view_dbs": "Voir les bases"
+  },
+  "kpi": {
+    "documents": "Documents totaux",
+    "chunks": "Chunks indexés",
+    "artifacts": "Artefacts",
+    "pages": "Pages traitées",
+    "indexed_pages": "Pages indexées",
+    "databases": "Bases actives"
+  },
+  "sections": {
+    "databases": "Bases disponibles",
+    "telemetry": "Télémétrie des bases",
+    "sources": "Sources",
+    "quarantine": "Quarantaine",
+    "settings": "Seuils & Réglages"
+  },
+  "db": {
+    "size": "Taille",
+    "rows": "Lignes",
+    "tables": "Tables",
+    "open": "Explorer",
+    "select": "Sélectionner une base",
+    "active": "Base de données approuvée",
+    "not_built": "Base non construite",
+    "reset": "Réinitialiser"
+  },
+  "status": {
+    "operational": "Opérationnelle",
+    "not_indexed": "Non indexée",
+    "loading": "Chargement...",
+    "waiting": "Attente",
+    "processing": "En cours",
+    "done": "Terminé",
+    "error": "Erreur",
+    "queued": "En file",
+    "quarantine": "Quarantaine",
+    "invalid_source": "Source invalide"
+  },
+  "buttons": {
+    "retry": "Réessayer",
+    "stop": "Stop",
+    "copy": "Copier",
+    "close": "Fermer",
+    "cancel": "Annuler",
+    "confirm": "Confirmer",
+    "save": "Enregistrer",
+    "add": "Ajouter",
+    "delete": "Supprimer",
+    "test": "Tester",
+    "reveal": "Révéler",
+    "ingest": "Ingérer",
+    "preview_impact": "Prévisualiser l'impact",
+    "execute_purge": "Exécuter la purge",
+    "restore_defaults": "Rétablir les défauts",
+    "reconnect": "Réessayer",
+    "upload": "Téléverser",
+    "new_folder": "Nouveau dossier",
+    "send": "Envoyer"
+  },
+  "library": {
+    "select_document": "Choisir un document",
+    "documents": "Documents",
+    "toc": "Table des matières",
+    "page": "Page",
+    "chunks": "Chunks",
+    "scan": "Scan",
+    "facets": "Facettes",
+    "search_studio": "Studio de recherche",
+    "ask_studio": "Chat de la bibliothèque",
+    "human_edited": "Corrigé manuellement",
+    "no_document_selected": "Sélectionnez un document pour afficher son contenu",
+    "prev_page": "Page précédente",
+    "next_page": "Page suivante"
+  },
+  "search": {
+    "placeholder": "Rechercher dans cette base...",
+    "run": "Rechercher",
+    "results": "Résultats",
+    "no_results": "Aucun résultat",
+    "select_bases": "Bases de données",
+    "score": "Score"
+  },
+  "ask": {
+    "placeholder": "Posez une question à la bibliothèque...",
+    "sources": "Sources",
+    "provider": "Fournisseur",
+    "fallback": "Mode fallback",
+    "no_context": "Aucun contexte suffisant dans la base pour répondre à cette question. Aucune information ne sera inventée.",
+    "thinking": "Génération en cours..."
+  },
+  "automation": {
+    "title": "RAGDom Automation Hub",
+    "live_status": "Statut live",
+    "vector_alert": "Moteur vectoriel",
+    "engine_hybrid_active": "Moteur Hybride Actif (FTS5 BM25 + sqlite-vec 384d)",
+    "engine_hybrid_msg": "Recherche sémantique vectorielle opérationnelle.",
+    "engine_fallback": "Attention : Mode dégradé FTS5 BM25 actif (sqlite-vec non chargé). La recherche sémantique vectorielle est désactivée ; seule la recherche plein-texte FTS5 est active.",
+    "test_vec": "Tester le chargement sqlite-vec",
+    "force_strict": "Forcer le mode strict sqlite-vec",
+    "force_strict_hint": "Si activé, l'échec de sqlite-vec bloque l'ingestion au lieu d'autoriser le fallback FTS5.",
+    "steps": "Couches de traitement",
+    "console": "Console live",
+    "eta": "ETA & Débit",
+    "throughput": "Débit",
+    "pages_remaining": "Pages restantes",
+    "eta_finish": "Heure de fin estimée",
+    "resident_engine": "Moteur résident",
+    "source_documents": "Documents sources",
+    "key_manager": "Gestionnaire de clés",
+    "purge_studio": "Studio de purge",
+    "settings_panel": "Seuils & Réglages"
+  },
+  "pipeline": {
+    "doc": "Document",
+    "pages": "Pages",
+    "indexed": "Indexées",
+    "size": "Taille",
+    "actions": "Actions",
+    "pages_per_hour": "pages/h"
+  },
+  "purge": {
+    "title": "Purge scopée",
+    "scope": "Portée",
+    "scope_page": "Page",
+    "scope_page_range": "Plage",
+    "scope_chapter": "Chapitre",
+    "scope_document": "Document",
+    "scope_database": "Base entière",
+    "scope_artifacts_only": "Artefacts seuls",
+    "scope_curriculum_only": "Curriculum seul",
+    "preserve_human": "Préserver les corrections manuelles",
+    "impact_title": "Impact de la purge",
+    "type_db_name": "Ressaisissez le nom exact de la base pour confirmer",
+    "deleted": "Supprimés",
+    "preserved": "Protégés (corrigés manuellement)"
+  },
+  "quarantine": {
+    "page": "Page",
+    "document": "Document",
+    "status": "Statut",
+    "retries": "Tentatives",
+    "date": "Date",
+    "error_log": "Journal d'erreurs",
+    "retry_selected": "Réessayer la sélection",
+    "not_retryable": "Non retryable (source inchangée)",
+    "empty": "Aucun élément en quarantaine"
+  },
+  "settings": {
+    "vec_threshold": "Seuil de distance vectorielle",
+    "vec_threshold_hint": "Contrôle la sévérité du filtrage des résultats vectoriels (anti-hallucination).",
+    "bm25_threshold": "Seuil de score BM25",
+    "bm25_threshold_hint": "Contrôle le score plein-texte minimal accepté."
+  },
+  "keys": {
+    "provider": "Fournisseur",
+    "key": "Clé",
+    "model": "Modèle actif",
+    "status": "Statut",
+    "add_key": "Ajouter une clé",
+    "select_provider": "Choisir un fournisseur"
+  },
+  "sources": {
+    "title": "Sources",
+    "ingested": "Ingéré",
+    "target_db": "Base cible",
+    "empty": "Aucun fichier source",
+    "drop_hint": "Déposez des PDF ici ou cliquez pour téléverser"
+  },
+  "onboarding": {
+    "title": "Aucune base de données pour l'instant",
+    "step1_title": "1. Déposer des PDF",
+    "step1_desc": "Utilisez le gestionnaire de sources dans l'Automation Hub pour téléverser vos manuels.",
+    "step2_title": "2. Lancer l'ingestion",
+    "step2_desc": "Exécutez le pipeline pour indexer les pages et extraire chunks et artefacts.",
+    "step3_title": "3. Explorer",
+    "step3_desc": "Ouvrez la bibliothèque pour chercher, lire et discuter avec votre contenu.",
+    "cta": "Aller à l'Automation Hub"
+  },
+  "connection": {
+    "title": "Backend RAGDom non démarré",
+    "desc": "Impossible de joindre le backend. Vérifiez que le serveur tourne puis réessayez.",
+    "command": "Commande de lancement",
+    "polling": "Nouvelle tentative automatique toutes les 5 s..."
+  },
+  "footer": {
+    "line1": "RAGDom Library — Bibliothèque Numérique Scientifique Locale",
+    "line2": "Supervision : ArchiSys3.0 • Architecture : AImi"
+  },
+  "artifact": {
+    "viewer_not_installed": "Visionneuse non installée (Tier add-on)"
+  },
+  "common": {
+    "loading": "Chargement...",
+    "error_generic": "Une erreur est survenue. Veuillez réessayer.",
+    "empty": "Aucune donnée",
+    "engine": "Moteur"
+  }
+}

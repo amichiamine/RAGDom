@@ -1,0 +1,46 @@
+{
+  "name": "ragdom-frontend",
+  "version": "3.5.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "react-router-dom": "^6.26.2",
+    "lucide-react": "^0.446.0",
+    "katex": "^0.16.11",
+    "dompurify": "^3.1.6",
+    "marked": "^14.1.2",
+    "@tanstack/react-table": "^8.20.5",
+    "@tanstack/react-virtual": "^3.10.8",
+    "class-variance-authority": "^0.7.0",
+    "clsx": "^2.1.1",
+    "tailwind-merge": "^2.5.3"
+  },
+  "//_tier_addons": "Tier add-on (tech_specs §9 Note Tiering) — installés à l'activation de leur famille (D3-B), pas en v1. ArtifactRenderer sert un fallback « visionneuse non installée » d'ici là.",
+  "//_mermaid": "Tier add-on (tech_specs §9 Note Tiering): mermaid ^11.3.0",
+  "//_shiki": "Tier add-on (tech_specs §9 Note Tiering): shiki ^1.21.0",
+  "//_three": "Tier add-on (tech_specs §9 Note Tiering): three ^0.169.0",
+  "//_plotly": "Tier add-on (tech_specs §9 Note Tiering): plotly.js-dist-min ^2.35.2",
+  "//_maplibre": "Tier add-on (tech_specs §9 Note Tiering): maplibre-gl ^4.7.1",
+  "//_3dmol": "Tier add-on (tech_specs §9 Note Tiering): 3dmol ^2.4.2",
+  "//_openseadragon": "Tier add-on (tech_specs §9 Note Tiering): openseadragon ^5.0.1",
+  "//_vexflow": "Tier add-on (tech_specs §9 Note Tiering): vexflow ^4.2.6",
+  "//_abcjs": "Tier add-on (tech_specs §9 Note Tiering): abcjs ^6.4.3",
+  "devDependencies": {
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@types/katex": "^0.16.7",
+    "@vitejs/plugin-react": "^4.3.2",
+    "typescript": "~5.6.2",
+    "vite": "^5.4.8",
+    "tailwindcss": "^3.4.13",
+    "autoprefixer": "^10.4.20",
+    "postcss": "^8.4.47"
+  }
+}

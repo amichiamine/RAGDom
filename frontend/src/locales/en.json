@@ -1,0 +1,233 @@
+{
+  "app": {
+    "title": "RAGDom Library",
+    "subtitle": "The digital platform for scientific curricula",
+    "hub": "RAGDom Hub"
+  },
+  "nav": {
+    "dashboard": "Dashboard",
+    "library": "Library",
+    "automation": "Automation Hub",
+    "viewer": "Classic viewer",
+    "back_portal": "Back to portal"
+  },
+  "lang": {
+    "label": "Language",
+    "ar": "Arabic",
+    "fr": "French",
+    "en": "English"
+  },
+  "theme": {
+    "dark": "Dark",
+    "light": "Light",
+    "toggle": "Toggle theme"
+  },
+  "density": {
+    "comfortable": "Comfortable",
+    "compact": "Compact"
+  },
+  "hero": {
+    "badge": "Certified platform",
+    "title": "The central platform for curricula and textbooks",
+    "desc": "Portable SQLite databases with hybrid search (BM25 + vector) to explore the entire scientific corpus.",
+    "search_placeholder": "Search the whole curriculum: numbers, symmetry, angles, exercises...",
+    "launch": "Open the library",
+    "view_dbs": "View databases"
+  },
+  "kpi": {
+    "documents": "Total documents",
+    "chunks": "Indexed chunks",
+    "artifacts": "Artifacts",
+    "pages": "Processed pages",
+    "indexed_pages": "Indexed pages",
+    "databases": "Active databases"
+  },
+  "sections": {
+    "databases": "Available databases",
+    "telemetry": "Database telemetry",
+    "sources": "Sources",
+    "quarantine": "Quarantine",
+    "settings": "Thresholds & Settings"
+  },
+  "db": {
+    "size": "Size",
+    "rows": "Rows",
+    "tables": "Tables",
+    "open": "Explore",
+    "select": "Select a database",
+    "active": "Approved database",
+    "not_built": "Database not built",
+    "reset": "Reset"
+  },
+  "status": {
+    "operational": "Operational",
+    "not_indexed": "Not indexed",
+    "loading": "Loading...",
+    "waiting": "Waiting",
+    "processing": "Processing",
+    "done": "Done",
+    "error": "Error",
+    "queued": "Queued",
+    "quarantine": "Quarantine",
+    "invalid_source": "Invalid source"
+  },
+  "buttons": {
+    "retry": "Retry",
+    "stop": "Stop",
+    "copy": "Copy",
+    "close": "Close",
+    "cancel": "Cancel",
+    "confirm": "Confirm",
+    "save": "Save",
+    "add": "Add",
+    "delete": "Delete",
+    "test": "Test",
+    "reveal": "Reveal",
+    "ingest": "Ingest",
+    "preview_impact": "Preview impact",
+    "execute_purge": "Execute purge",
+    "restore_defaults": "Restore defaults",
+    "reconnect": "Retry",
+    "upload": "Upload",
+    "new_folder": "New folder",
+    "send": "Send"
+  },
+  "library": {
+    "select_document": "Choose a document",
+    "documents": "Documents",
+    "toc": "Table of contents",
+    "page": "Page",
+    "chunks": "Chunks",
+    "scan": "Scan",
+    "facets": "Facets",
+    "search_studio": "Search Studio",
+    "ask_studio": "Library chat",
+    "human_edited": "Manually corrected",
+    "no_document_selected": "Select a document to view its content",
+    "prev_page": "Previous page",
+    "next_page": "Next page"
+  },
+  "search": {
+    "placeholder": "Search this database...",
+    "run": "Search",
+    "results": "Results",
+    "no_results": "No results",
+    "select_bases": "Databases",
+    "score": "Score"
+  },
+  "ask": {
+    "placeholder": "Ask the library a question...",
+    "sources": "Sources",
+    "provider": "Provider",
+    "fallback": "Fallback mode",
+    "no_context": "There is not enough context in the database to answer this question. No information will be fabricated.",
+    "thinking": "Generating..."
+  },
+  "automation": {
+    "title": "RAGDom Automation Hub",
+    "live_status": "Live status",
+    "vector_alert": "Vector engine",
+    "engine_hybrid_active": "Hybrid Engine Active (FTS5 BM25 + sqlite-vec 384d)",
+    "engine_hybrid_msg": "Vector semantic search operational.",
+    "engine_fallback": "Warning: FTS5 BM25 degraded mode active (sqlite-vec not loaded). Vector semantic search is disabled; only FTS5 full-text search is active.",
+    "test_vec": "Test sqlite-vec loading",
+    "force_strict": "Force strict sqlite-vec mode",
+    "force_strict_hint": "If enabled, sqlite-vec failure blocks ingestion instead of allowing the FTS5 fallback.",
+    "steps": "Processing layers",
+    "console": "Live console",
+    "eta": "ETA & Throughput",
+    "throughput": "Throughput",
+    "pages_remaining": "Remaining pages",
+    "eta_finish": "Estimated finish time",
+    "resident_engine": "Resident engine",
+    "source_documents": "Source documents",
+    "key_manager": "Key manager",
+    "purge_studio": "Purge Studio",
+    "settings_panel": "Thresholds & Settings"
+  },
+  "pipeline": {
+    "doc": "Document",
+    "pages": "Pages",
+    "indexed": "Indexed",
+    "size": "Size",
+    "actions": "Actions",
+    "pages_per_hour": "pages/h"
+  },
+  "purge": {
+    "title": "Scoped purge",
+    "scope": "Scope",
+    "scope_page": "Page",
+    "scope_page_range": "Range",
+    "scope_chapter": "Chapter",
+    "scope_document": "Document",
+    "scope_database": "Whole database",
+    "scope_artifacts_only": "Artifacts only",
+    "scope_curriculum_only": "Curriculum only",
+    "preserve_human": "Preserve manual corrections",
+    "impact_title": "Purge impact",
+    "type_db_name": "Retype the exact database name to confirm",
+    "deleted": "Deleted",
+    "preserved": "Protected (manually corrected)"
+  },
+  "quarantine": {
+    "page": "Page",
+    "document": "Document",
+    "status": "Status",
+    "retries": "Retries",
+    "date": "Date",
+    "error_log": "Error log",
+    "retry_selected": "Retry selection",
+    "not_retryable": "Not retryable (source unchanged)",
+    "empty": "No items in quarantine"
+  },
+  "settings": {
+    "vec_threshold": "Vector distance threshold",
+    "vec_threshold_hint": "Controls the strictness of vector result filtering (anti-hallucination).",
+    "bm25_threshold": "BM25 score threshold",
+    "bm25_threshold_hint": "Controls the minimum accepted full-text score."
+  },
+  "keys": {
+    "provider": "Provider",
+    "key": "Key",
+    "model": "Active model",
+    "status": "Status",
+    "add_key": "Add a key",
+    "select_provider": "Choose a provider"
+  },
+  "sources": {
+    "title": "Sources",
+    "ingested": "Ingested",
+    "target_db": "Target database",
+    "empty": "No source files",
+    "drop_hint": "Drop PDFs here or click to upload"
+  },
+  "onboarding": {
+    "title": "No databases yet",
+    "step1_title": "1. Drop PDFs",
+    "step1_desc": "Use the source manager in the Automation Hub to upload your textbooks.",
+    "step2_title": "2. Launch ingestion",
+    "step2_desc": "Run the pipeline to index pages and extract chunks and artifacts.",
+    "step3_title": "3. Explore",
+    "step3_desc": "Open the library to search, read, and chat with your content.",
+    "cta": "Go to the Automation Hub"
+  },
+  "connection": {
+    "title": "RAGDom backend not started",
+    "desc": "Could not reach the backend. Make sure the server is running then retry.",
+    "command": "Launch command",
+    "polling": "Auto-retrying every 5 s..."
+  },
+  "footer": {
+    "line1": "RAGDom Library — Local Scientific Digital Library",
+    "line2": "Supervision: ArchiSys3.0 • Architecture: AImi"
+  },
+  "artifact": {
+    "viewer_not_installed": "Viewer not installed (Tier add-on)"
+  },
+  "common": {
+    "loading": "Loading...",
+    "error_generic": "An error occurred. Please retry.",
+    "empty": "No data",
+    "engine": "Engine"
+  }
+}
