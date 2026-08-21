@@ -35,6 +35,15 @@ Tout le stack sur VPS : upload des PDF sources via `/api/system/sources/upload`,
 - ⚠️ EXIGE le Lot Auth complet (§4) : les routes d'administration deviennent accessibles au réseau.
 - Dimensionnement : 4 vCPU / 4-8 Go recommandés pour l'ingestion (pics OCR) ; file séquentielle D4-A inchangée.
 
+## 2bis. Exécution des moteurs sur le web (sci-engine et moteurs futurs)
+
+Le Palier 3 exécute le pipeline COMPLET à distance — ce n'est pas une consultation augmentée :
+- **sci-engine tourne tel quel sur VPS** : la whitelist a été gelée CPU-first précisément pour être exécutable partout (zéro CUDA/torch). Le cycle est identique au local : upload PDF (`/api/system/sources/upload`, ≤1 Go) → `/api/pipeline/start` → suivi SSE temps réel dans l'AutomationView → base .sqlite produite sur le serveur.
+- **Les moteurs futurs (legal-engine, medical-engine…) sont couverts par construction** : le registre scanne `ENGINES_DIR` au démarrage et charge les couches par importlib (V3.4). Déployer un nouveau moteur sur le web = déposer son dossier dans `/engines/` du serveur et redémarrer — aucune modification du noyau, exactement comme en local. Contrainte : ses dépendances doivent respecter le même contrat CPU-first (un moteur exigeant un GPU imposerait un VPS GPU, hors dimensionnement nominal).
+- **Modèles** : au premier démarrage du serveur, `RAGDOM_OFFLINE=false` pour télécharger rapid-*/fastembed dans `MODELS_DIR`, puis repasser à `true` (serveur hermétique). Les modèles se téléchargent une fois PAR SERVEUR, pas par base.
+- **Invariants préservés à distance** : file séquentielle stricte D4-A (un job à la fois — plusieurs utilisateurs qui lancent des ingestions sont sérialisés, l'ETA reste honnête), MAX_RAM_MB=2048 respecté, Recovery au redémarrage, quarantaine et purge scopée opérables depuis l'AutomationView web.
+- **Ce que le web ne change PAS** : pas de parallélisme nouveau (la Phase 6 reste conditionnée à la baseline), pas de multi-tenancy (un déploiement = une bibliothèque, un administrateur).
+
 ## 3. Matrice route × palier
 
 | Router | Palier 1-2 (consultation) | Palier 3 (full web) |
