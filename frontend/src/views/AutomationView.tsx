@@ -17,15 +17,16 @@ import QuarantineManager from '@/components/automation/QuarantineManager'
 import PurgeStudio from '@/components/automation/PurgeStudio'
 import SourcesManager from '@/components/automation/SourcesManager'
 import SourceDocumentsTable from '@/components/automation/SourceDocumentsTable'
+import ContentsExplorer from '@/components/automation/ContentsExplorer'
 import CurriculumStudio from '@/components/admin/CurriculumStudio'
 import TelemetryExplorer from '@/components/admin/TelemetryExplorer'
 import DatabaseLifecycle from '@/components/admin/DatabaseLifecycle'
 import ArtifactImportModal from '@/components/admin/ArtifactImportModal'
-import { FilePlus2, Rocket, Activity, FolderOpen, BrainCircuit, SlidersHorizontal } from 'lucide-react'
+import { FilePlus2, Rocket, Activity, FolderOpen, BrainCircuit, SlidersHorizontal, Layers } from 'lucide-react'
 import { formatBytes, formatNumber } from '@/lib/utils'
 
-type TabKey = 'ingestion' | 'monitoring' | 'documents' | 'providers' | 'settings'
-const TAB_ORDER: TabKey[] = ['ingestion', 'monitoring', 'documents', 'providers', 'settings']
+type TabKey = 'ingestion' | 'monitoring' | 'contents' | 'documents' | 'providers' | 'settings'
+const TAB_ORDER: TabKey[] = ['ingestion', 'monitoring', 'contents', 'documents', 'providers', 'settings']
 
 export default function AutomationView() {
   const { databases, activeDb, setActiveDb, isLoading: dbLoading, refresh } = useDatabase()
@@ -59,6 +60,8 @@ export default function AutomationView() {
   const [documents, setDocuments] = useState<Document[]>([])
   const [quarantineCount, setQuarantineCount] = useState(0)
   const [artifactModalOpen, setArtifactModalOpen] = useState(false)
+  // Onglet Contenus : une édition de chunk ouverte non sauvée → pastille de l'onglet.
+  const [contentsDirty, setContentsDirty] = useState(false)
 
   const [lines, setLines] = useState<string[]>([])
   const [running, setRunning] = useState(false)
@@ -172,6 +175,7 @@ export default function AutomationView() {
   const TABS: { key: TabKey; label: string; sub: string; icon: ReactNode; dot?: 'run' | 'warn' }[] = [
     { key: 'ingestion', label: t('automation.tabs.ingestion'), sub: t('automation.tabs.ingestion_sub'), icon: <Rocket size={16} /> },
     { key: 'monitoring', label: t('automation.tabs.monitoring'), sub: t('automation.tabs.monitoring_sub'), icon: <Activity size={16} />, dot: running ? 'run' : undefined },
+    { key: 'contents', label: t('automation.tabs.contents'), sub: t('automation.tabs.contents_sub'), icon: <Layers size={16} />, dot: contentsDirty ? 'warn' : undefined },
     { key: 'documents', label: t('automation.tabs.documents'), sub: t('automation.tabs.documents_sub'), icon: <FolderOpen size={16} />, dot: quarantineCount > 0 ? 'warn' : undefined },
     { key: 'providers', label: t('automation.tabs.providers'), sub: t('automation.tabs.providers_sub'), icon: <BrainCircuit size={16} /> },
     { key: 'settings', label: t('automation.tabs.settings'), sub: t('automation.tabs.settings_sub'), icon: <SlidersHorizontal size={16} /> },
@@ -283,6 +287,19 @@ export default function AutomationView() {
               </div>
             </div>
           </div>
+        )}
+
+        {/* ─────────────────── ONGLET CONTENUS ─────────────────── */}
+        {activeTab === 'contents' && (
+          <ContentsExplorer
+            databases={databases}
+            activeDb={activeDb}
+            running={running}
+            onGoMonitoring={() => setActiveTab('monitoring')}
+            onChanged={() => { refresh(); loadDocs() }}
+            onBatchStarted={onBatchStarted}
+            onDirtyChange={setContentsDirty}
+          />
         )}
 
         {/* ─────────────────── ONGLET DOCUMENTS ─────────────────── */}

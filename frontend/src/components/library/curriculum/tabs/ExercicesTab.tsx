@@ -4,6 +4,7 @@ import { BookOpen, Image as ImageIcon, Eye, Maximize2, PenLine, ChevronDown } fr
 import type { Chunk, CurriculumPayload } from '@/types'
 import { api } from '@/lib/api'
 import { useCurriculumBridge, HighlightTarget } from '@/contexts/CurriculumBridgeContext'
+import { useLanguage } from '@/contexts/LanguageContext'
 import MarkdownKatex from '@/components/library/MarkdownKatex'
 import BridgeButton from '@/components/library/BridgeButton'
 import ImageModal from '../ImageModal'
@@ -29,6 +30,7 @@ const CARD_ESTIMATE = 380 // px — hauteur estimée d'une rangée de 2 cartes (
 
 export default function ExercicesTab({ curriculum, activeDb, documentId }: Props) {
   const bridge = useCurriculumBridge()
+  const { t } = useLanguage()
   const { trimFilter, searchQuery, exoFilter, expandedIds } = bridge
 
   const [rows, setRows] = useState<ExoRow[] | null>(null)
@@ -142,7 +144,9 @@ export default function ExercicesTab({ curriculum, activeDb, documentId }: Props
       {error && <div className="content-box" style={{ color: 'var(--danger)' }} dir="auto">تعذّر تحميل التمارين : {error}</div>}
       {rows !== null && filtered.length === 0 && !error && (
         <div className="content-box" style={{ textAlign: 'center', color: 'var(--text-muted)' }} dir="auto">
-          لا توجد تمارين مطابقة للمعايير الحالية.
+          {rows.length === 0
+            ? t('library.no_exercises_typed')
+            : 'لا توجد تمارين مطابقة للمعايير الحالية.'}
         </div>
       )}
 

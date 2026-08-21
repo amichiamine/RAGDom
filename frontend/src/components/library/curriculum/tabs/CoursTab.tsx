@@ -3,7 +3,7 @@ import {
   BookOpen, ChevronsDown, ChevronsUp, ChevronDown, FileImage, PenTool,
   GraduationCap, Image as ImageIcon, X, Expand,
 } from 'lucide-react'
-import type { Chunk, CurriculumPayload, TocNode } from '@/types'
+import type { Chunk, CurriculumPayload, PedagogicalType, TocNode } from '@/types'
 import { api } from '@/lib/api'
 import { useCurriculumBridge, HighlightTarget } from '@/contexts/CurriculumBridgeContext'
 import BridgeButton from '@/components/library/BridgeButton'
@@ -22,6 +22,18 @@ interface Props {
 
 const COURS_PREFIX = 'cours_'
 const coursId = (tocId: string) => `${COURS_PREFIX}${tocId}`
+
+/** Libellés arabes des types pédagogiques (badge affiché seulement si typé). */
+const PEDAGOGICAL_LABEL: Record<PedagogicalType, string> = {
+  course_theory: 'درس',
+  proof_demonstration: 'برهان',
+  exercise_unsolved: 'تمرين',
+  exercise_solved: 'تمرين محلول',
+  solution_only: 'حل',
+  evaluation_exam: 'تقويم',
+  practical_work: 'نشاط تطبيقي',
+  general_content: 'محتوى',
+}
 
 /**
  * Onglet 3 — مستودع الدروس والمفاهيم (Lot 6). Liste de cartes de cours
@@ -126,17 +138,16 @@ function CoursCard({ cours, open, onToggle, activeDb, documentId, termIndex, onO
     setLoading(true); setError(null)
     ;(async () => {
       try {
-        const first = await api.library.getChunks(activeDb, documentId, 1, {
-          pedagogical_type: 'course_theory',
-          toc_id: cours.tocId,
-        })
+        // TOUT le contenu extrait des pages du chapitre (pas seulement les
+        // chunks typés course_theory) : sur les corpus réels la majorité des
+        // chunks ont pedagogical_type=NULL et souvent toc_id=NULL ; on cible donc
+        // la plage de pages du chapitre, toujours peuplée, pour ne rien masquer.
+        const range = { page_start: cours.pageStart, page_end: cours.pageEnd }
+        const first = await api.library.getChunks(activeDb, documentId, 1, range)
         let all = first.chunks ?? []
         const totalPages = first.total_pages ?? 1
         for (let p = 2; p <= totalPages; p++) {
-          const res = await api.library.getChunks(activeDb, documentId, p, {
-            pedagogical_type: 'course_theory',
-            toc_id: cours.tocId,
-          })
+          const res = await api.library.getChunks(activeDb, documentId, p, range)
           all = all.concat(res.chunks ?? [])
         }
         if (alive) setChunks(all)
@@ -147,7 +158,7 @@ function CoursCard({ cours, open, onToggle, activeDb, documentId, termIndex, onO
       }
     })()
     return () => { alive = false }
-  }, [open, chunks, loading, documentId, activeDb, cours.tocId])
+  }, [open, chunks, loading, documentId, activeDb, cours.pageStart, cours.pageEnd])
 
   // Résolveur d'assets mémoïsé (stabilise le memo de MarkdownKatex).
   const resolveAsset = useCallback(
@@ -220,13 +231,19 @@ function CoursCard({ cours, open, onToggle, activeDb, documentId, termIndex, onO
                   <div className="alert-secondary-box">لا يوجد نص مرقمن لهذا الدرس بعد.</div>
                 )}
                 {sortedChunks.map(ch => (
-                  <MarkdownKatex
-                    key={ch.id}
-                    raw={ch.content_markdown}
-                    lazy
-                    onPageJump={onOpenScanModal}
-                    resolveAsset={resolveAsset}
-                  />
+                  <div key={ch.id} style={{ marginBottom: 12 }}>
+                    {ch.pedagogical_type && (
+                      <span className="badge badge-secondary" style={{ marginBottom: 6, display: 'inline-block' }}>
+                        {PEDAGOGICAL_LABEL[ch.pedagogical_type] ?? ch.pedagogical_type}
+                      </span>
+                    )}
+                    <MarkdownKatex
+                      raw={ch.content_markdown}
+                      lazy
+                      onPageJump={onOpenScanModal}
+                      resolveAsset={resolveAsset}
+                    />
+                  </div>
                 ))}
               </div>
             </div>

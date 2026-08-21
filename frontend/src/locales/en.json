@@ -113,7 +113,8 @@
     "editor_show_scan": "Show scan",
     "editor_hide_scan": "Hide scan",
     "editor_original_scan": "Original scan (reference)",
-    "back_workspace": "Library workspace"
+    "back_workspace": "Library workspace",
+    "no_exercises_typed": "No exercise detected by automatic typing in this database. The extracted content is fully available in the Courses tab."
   },
   "search": {
     "placeholder": "Search this database...",
@@ -163,12 +164,40 @@
       "ingestion_sub": "Launch, re-run or stop the pipeline and manage your sources (tree, folders, upload).",
       "monitoring": "Monitoring",
       "monitoring_sub": "Real-time monitoring: pipeline steps, live console (SSE) and queue state.",
+      "contents": "Contents",
+      "contents_sub": "Explore and edit ingested data: database → document → chapter/page → chunks, with scoped re-run and purge.",
       "documents": "Documents",
       "documents_sub": "Documents ingested per database, scoped purge and quarantine re-runs.",
       "providers": "AI Providers",
       "providers_sub": "Configure your providers, API keys and models detected per key.",
       "settings": "Settings",
       "settings_sub": "Vector engine, system thresholds and advanced workshop settings."
+    },
+    "contents": {
+      "selection": "Scope selection",
+      "all_chapters": "Whole document",
+      "all_pages": "All",
+      "all_types": "All types",
+      "type_none": "(none)",
+      "search_local": "Search within page…",
+      "no_chunks": "No chunk for this scope.",
+      "col_type": "Type",
+      "col_preview": "Preview",
+      "col_actions": "Actions",
+      "edit": "Edit",
+      "reprocess_document": "Re-run this document",
+      "reprocess_chapter": "Re-run this chapter",
+      "reprocess_page": "Re-run this page",
+      "reprocess_started": "Re-run started — follow progress in the Monitoring tab.",
+      "purge_document": "Purge this document",
+      "purge_chapter": "Purge this chapter",
+      "purge_page": "Purge this page",
+      "purge_impact_title": "Purge impact",
+      "purge_scope": "Scope",
+      "purge_type_ok": "Type OK to confirm the purge",
+      "purge_confirm_btn": "Execute purge",
+      "purged": "Purge executed.",
+      "live_running": "A processing job is running."
     }
   },
   "pipeline": {

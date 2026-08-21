@@ -113,7 +113,8 @@
     "editor_show_scan": "Afficher le scan",
     "editor_hide_scan": "Masquer le scan",
     "editor_original_scan": "Scan original (rappel)",
-    "back_workspace": "Espace bibliothèque"
+    "back_workspace": "Espace bibliothèque",
+    "no_exercises_typed": "Aucun exercice détecté par le typage automatique dans cette base. Le contenu extrait reste consultable en intégralité dans l'onglet Cours."
   },
   "search": {
     "placeholder": "Rechercher dans cette base...",
@@ -163,12 +164,40 @@
       "ingestion_sub": "Lancez, ré-exécutez ou arrêtez le pipeline et gérez vos sources (arbre, dossiers, upload).",
       "monitoring": "Suivi",
       "monitoring_sub": "Monitoring temps réel : étapes du pipeline, console live (SSE) et état de la file.",
+      "contents": "Contenus",
+      "contents_sub": "Explorez et éditez les données ingérées : base → document → chapitre/page → chunks, avec ré-exécution et purge scopées.",
       "documents": "Documents",
       "documents_sub": "Documents ingérés par base, purge scopée et relance des éléments en quarantaine.",
       "providers": "Fournisseurs IA",
       "providers_sub": "Configurez vos fournisseurs, clés API et modèles détectés par clé.",
       "settings": "Réglages",
       "settings_sub": "Moteur vectoriel, seuils système et réglages avancés de l'atelier."
+    },
+    "contents": {
+      "selection": "Sélection du périmètre",
+      "all_chapters": "Tout le document",
+      "all_pages": "Toutes",
+      "all_types": "Tous les types",
+      "type_none": "(sans)",
+      "search_local": "Rechercher dans la page…",
+      "no_chunks": "Aucun chunk pour ce périmètre.",
+      "col_type": "Type",
+      "col_preview": "Aperçu",
+      "col_actions": "Actions",
+      "edit": "Éditer",
+      "reprocess_document": "Ré-exécuter ce document",
+      "reprocess_chapter": "Ré-exécuter ce chapitre",
+      "reprocess_page": "Ré-exécuter cette page",
+      "reprocess_started": "Ré-exécution lancée — suivez la progression dans l'onglet Suivi.",
+      "purge_document": "Purger ce document",
+      "purge_chapter": "Purger ce chapitre",
+      "purge_page": "Purger cette page",
+      "purge_impact_title": "Impact de la purge",
+      "purge_scope": "Périmètre",
+      "purge_type_ok": "Tapez OK pour confirmer la purge",
+      "purge_confirm_btn": "Exécuter la purge",
+      "purged": "Purge exécutée.",
+      "live_running": "Un traitement est en cours."
     }
   },
   "pipeline": {
