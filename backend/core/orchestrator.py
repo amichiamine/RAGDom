@@ -134,10 +134,62 @@ class PipelineOrchestrator:
                     processed += 1
                 elif outcome in ("QUARANTINE", "INVALID_SOURCE"):
                     quarantined += 1
+            self._finalize_batches(db_name, manifest)
             return {"processed": processed, "quarantined": quarantined, "stopped": self._stop_requested}
         finally:
             with self._lock:
                 self._running = False
+
+    def _fetch_document(self, db_name: str, document_id: str) -> dict:
+        conn = db.get_connection(db_name)
+        try:
+            row = conn.execute(
+                "SELECT id, title, filename, source_path, total_pages FROM documents WHERE id=?",
+                (document_id,),
+            ).fetchone()
+            if row is None:
+                raise RuntimeError("Document inconnu : %s" % document_id)
+            return {"id": row[0], "title": row[1], "filename": row[2],
+                    "source_path": row[3], "total_pages": row[4]}
+        finally:
+            conn.close()
+
+    def _finalize_batches(self, db_name: str, manifest: dict) -> None:
+        """Clôt les batchs terminés, lance la Couche 3bis (SolutionLinker, tech_specs
+        §4.4) par document complet, émet job_complete (contrat SSE Blueprint §7.4)."""
+        conn = db.get_connection(db_name)
+        try:
+            rows = conn.execute(
+                "SELECT b.id FROM ingestion_batches b WHERE b.status IN ('QUEUED','RUNNING') AND NOT EXISTS ("
+                " SELECT 1 FROM pipeline_jobs j WHERE j.batch_id=b.id AND j.status NOT IN"
+                " ('READY','QUARANTINE','INVALID_SOURCE'))"
+            ).fetchall()
+            for (batch_id,) in rows:
+                docs = [r[0] for r in conn.execute(
+                    "SELECT DISTINCT document_id FROM pipeline_jobs WHERE batch_id=?", (batch_id,))]
+                stats = conn.execute(
+                    "SELECT SUM(status='READY'), COUNT(*) FROM pipeline_jobs WHERE batch_id=?",
+                    (batch_id,),
+                ).fetchone()
+                conn.execute(
+                    "UPDATE ingestion_batches SET status='COMPLETED', pages_done=?, updated_at=CURRENT_TIMESTAMP"
+                    " WHERE id=?", (stats[0] or 0, batch_id))
+                conn.commit()
+                for doc_id in docs:
+                    try:
+                        linker = engine_registry.load_layer(manifest["id"], "layer_3bis_link")
+                        linked = linker.run_post_document(db_name, doc_id)
+                        logger.info("SolutionLinker %s : %d liaison(s)", doc_id, linked)
+                    except FileNotFoundError:
+                        logger.warning("layer_3bis_link absent du moteur %s", manifest["id"])
+                artifacts = conn.execute(
+                    "SELECT COUNT(*) FROM scientific_artifacts WHERE document_id IN (%s)"
+                    % ",".join("?" * len(docs)), docs).fetchone()[0] if docs else 0
+                self._emit("job_complete", {"batch_id": batch_id, "pages_indexed": stats[0] or 0,
+                                            "artifacts_extracted": artifacts, "done": True,
+                                            "success": (stats[0] or 0) == stats[1]})
+        finally:
+            conn.close()
 
     def _next_job(self, db_name: str) -> Optional[dict]:
         conn = db.get_connection(db_name)
@@ -168,10 +220,12 @@ class PipelineOrchestrator:
         """Isolation par page : try/except indépendant, purge mémoire systématique."""
         self._current = dict(job, status="PROCESSING_CV")
         started = time.perf_counter()
+        document = self._fetch_document(db_name, job["document_id"])
         ctx: Dict[str, object] = {
             "db_name": db_name,
             "engine": manifest,
             "job": job,
+            "document": document,
             "config": {
                 "sources_dir": config.SOURCES_DIR,
                 "pipeline_set_dir": config.PIPELINE_SET_DIR,

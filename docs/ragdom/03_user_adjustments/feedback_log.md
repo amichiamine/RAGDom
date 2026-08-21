@@ -13,3 +13,14 @@ rapports de tests livrés à chaque phase, commits GitHub par phase. Le Checkpoi
    3.9-compatible (typing.Optional, %-format) — fonctionne à l'identique en 3.11.
 3. llama-cpp-python : installation différée (compilation C longue sur 2 vCPU) —
    sera installé à la Phase du Key Manager local ; les SDKs cloud suffisent avant.
+
+## 2026-08-21 — Templates PHP reçus (Checkpoint Règle 8, prérequis Phase 4)
+ArchiSys3.0 a fourni Template_UI-UX.zip : index.php (35 Ko), library.php (135 Ko),
+automation.php (51 Ko) — archivés dans /Template_UI-UX/. L'imprégnation intégrale
+(lecture complète des 3 fichiers + croisement avec Frontend_UI_Specs) sera exécutée
+à l'entrée en Phase 4, conformément à la Règle 8.
+
+## 2026-08-21 — Incident opencv reproduit en réel (validation de la doc)
+Le piège documenté en tech_specs §8 s'est produit tel que prévu (rapid-* → opencv-python
+complet → libGL manquant, 8 tests e2e rouges). La procédure post-install documentée l'a
+résolu en 2 commandes ; numpy repinné 1.26.4. La documentation a prouvé sa valeur.
