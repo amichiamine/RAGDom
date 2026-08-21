@@ -81,13 +81,30 @@ def facets(db_name: str = Query(alias="db")):
 
 @router.get("/chunks")
 def chunks(db_name: str = Query(alias="db"), document_id: str = Query(...),
-           page_number: Optional[int] = None, page: int = 1, limit: int = Query(50, le=200)):
+           page_number: Optional[int] = None, pedagogical_type: Optional[str] = None,
+           page_start: Optional[int] = None, page_end: Optional[int] = None,
+           toc_id: Optional[str] = None, page: int = 1, limit: int = Query(50, le=200)):
     conn = _conn(db_name)
     try:
         where, args = "document_id=?", [document_id]
         if page_number is not None:
             where += " AND page_number=?"
             args.append(page_number)
+        if pedagogical_type is not None:  # V3.5 sprint pixel-perfect : filtres onglet Exercices
+            if pedagogical_type == "exercise":  # raccourci : solved + unsolved
+                where += " AND pedagogical_type IN ('exercise_solved','exercise_unsolved')"
+            else:
+                where += " AND pedagogical_type=?"
+                args.append(pedagogical_type)
+        if page_start is not None:
+            where += " AND page_number>=?"
+            args.append(page_start)
+        if page_end is not None:
+            where += " AND page_number<=?"
+            args.append(page_end)
+        if toc_id is not None:
+            where += " AND toc_id=?"
+            args.append(toc_id)
         total = conn.execute("SELECT COUNT(*) FROM document_chunks WHERE " + where, args).fetchone()[0]
         rows = conn.execute(
             "SELECT id, page_number, chunk_index, section_title, content_markdown, pedagogical_type,"
@@ -160,6 +177,79 @@ def page_scan(db_name: str = Query(alias="db"), document_id: str = Query(...),
         conn.close()
 
 
+@router.get("/page-scans")
+def page_scans_manifest(db_name: str = Query(alias="db"), document_id: Optional[str] = None,
+                        page: int = 1, limit: int = Query(200, le=500)):
+    """Manifeste de la galerie (sprint pixel-perfect Lot 1) : métadonnées SANS binaires.
+
+    Chaque entrée porte le chapitre TOC englobant (niveau 1) et le compte
+    d'exercices de la page — agrégats SQL, jamais calculés côté client.
+    """
+    conn = _conn(db_name)
+    try:
+        where, args = ("WHERE ps.document_id=?", [document_id]) if document_id else ("", [])
+        total = conn.execute("SELECT COUNT(*) FROM page_scans ps %s" % where, args).fetchone()[0]
+        rows = conn.execute(
+            "SELECT ps.document_id, ps.page_number, ps.width_px, ps.height_px,"
+            " (ps.thumb_webp IS NOT NULL),"
+            " (SELECT t.id FROM document_toc t WHERE t.document_id=ps.document_id AND t.level=1"
+            "   AND t.page_start<=ps.page_number AND COALESCE(t.page_end, 100000)>=ps.page_number"
+            "   ORDER BY t.page_start DESC LIMIT 1),"
+            " (SELECT t.title FROM document_toc t WHERE t.document_id=ps.document_id AND t.level=1"
+            "   AND t.page_start<=ps.page_number AND COALESCE(t.page_end, 100000)>=ps.page_number"
+            "   ORDER BY t.page_start DESC LIMIT 1),"
+            " (SELECT COUNT(*) FROM document_chunks c WHERE c.document_id=ps.document_id"
+            "   AND c.page_number=ps.page_number"
+            "   AND c.pedagogical_type IN ('exercise_solved','exercise_unsolved'))"
+            " FROM page_scans ps %s ORDER BY ps.document_id, ps.page_number"
+            " LIMIT ? OFFSET ?" % where, args + [limit, (page - 1) * limit]).fetchall()
+        data = [{"document_id": r[0], "page_number": r[1], "width": r[2], "height": r[3],
+                 "has_thumb": bool(r[4]), "chapter_toc_id": r[5], "chapter_title": r[6],
+                 "exercises_count": r[7]} for r in rows]
+        return {"data": data, "pagination": _paginate(page, limit, total)}
+    finally:
+        conn.close()
+
+
+def _curriculum_aggregates(conn) -> dict:
+    """Agrégats SQL du curriculum (sprint pixel-perfect Lot 1) — badges/compteurs de la Vue 2."""
+    def one(sql, args=()):
+        row = conn.execute(sql, args).fetchone()
+        return row[0] if row and row[0] is not None else 0
+
+    per_term = []
+    for term_id, term_index in conn.execute(
+            "SELECT id, term_index FROM curriculum_terms ORDER BY term_index"):
+        courses = one(
+            "SELECT COUNT(DISTINCT l2.from_id) FROM content_links l2"
+            " JOIN curriculum_programs p ON p.id = l2.to_id"
+            " WHERE l2.link_type='course_program' AND p.term_id=?", (term_id,))
+        exercises = one(
+            "SELECT COUNT(*) FROM content_links le WHERE le.link_type='course_exercise'"
+            " AND le.from_id IN (SELECT l2.from_id FROM content_links l2"
+            "   JOIN curriculum_programs p ON p.id = l2.to_id"
+            "   WHERE l2.link_type='course_program' AND p.term_id=?)", (term_id,))
+        per_term.append({
+            "term_id": term_id, "term_index": term_index,
+            "programs": one("SELECT COUNT(*) FROM curriculum_programs WHERE term_id=?", (term_id,)),
+            "assessments": one("SELECT COUNT(*) FROM assessments WHERE term_id=?", (term_id,)),
+            "courses": courses, "exercises": exercises,
+        })
+    return {
+        "per_term": per_term,
+        "global": {
+            "programs": one("SELECT COUNT(*) FROM curriculum_programs"),
+            "assessments": one("SELECT COUNT(*) FROM assessments"),
+            "courses": one("SELECT COUNT(*) FROM document_chunks WHERE pedagogical_type='course_theory'"),
+            "exercises": one("SELECT COUNT(*) FROM document_chunks"
+                             " WHERE pedagogical_type IN ('exercise_solved','exercise_unsolved')"),
+            "solutions": one("SELECT COUNT(*) FROM document_chunks WHERE pedagogical_type='solution_only'"),
+            "page_scans": one("SELECT COUNT(*) FROM page_scans"),
+            "chapters": one("SELECT COUNT(*) FROM document_toc WHERE level=1"),
+        },
+    }
+
+
 @router.get("/curriculum")
 def curriculum(db_name: str = Query(alias="db")):
     conn = _conn(db_name)
@@ -177,7 +267,8 @@ def curriculum(db_name: str = Query(alias="db")):
         links = [{"id": r[0], "link_type": r[1], "from_id": r[2], "to_id": r[3], "page_number": r[4]}
                  for r in conn.execute("SELECT id, link_type, from_id, to_id, page_number FROM content_links")]
         return {"curriculum_available": bool(terms or programs or assessments),
-                "terms": terms, "programs": programs, "assessments": assessments, "links": links}
+                "terms": terms, "programs": programs, "assessments": assessments, "links": links,
+                "aggregates": _curriculum_aggregates(conn)}
     finally:
         conn.close()
 

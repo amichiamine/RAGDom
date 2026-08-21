@@ -218,3 +218,46 @@ def test_llm_keys_masked_and_reveal():
 def test_quarantine_empty_then_listable():
     jobs = client.get("/api/pipeline/quarantine", params={"db": TEST_DB}).json()["jobs"]
     assert isinstance(jobs, list)
+
+
+# ── Sprint pixel-perfect Lot 1 : manifeste + agrégats + filtres ──
+def test_page_scans_manifest():
+    payload = client.get("/api/library/page-scans", params={"db": TEST_DB}).json()
+    data = payload["data"]
+    # La page 2 a été purgée par test_purge_dry_run_then_page → il reste les pages 1 et 3.
+    assert {d["page_number"] for d in data} == {1, 3}
+    first = data[0]
+    assert first["width"] > 2000 and first["has_thumb"] is True
+    assert first["exercises_count"] >= 0 and "chapter_title" in first
+    scoped = client.get("/api/library/page-scans",
+                        params={"db": TEST_DB, "document_id": _DOC_ID}).json()["data"]
+    assert len(scoped) == len(data)
+
+
+def test_curriculum_aggregates():
+    payload = client.get("/api/library/curriculum", params={"db": TEST_DB}).json()
+    agg = payload["aggregates"]
+    assert agg["global"]["page_scans"] == 2  # cohérent avec le manifeste post-purge
+    assert agg["global"]["solutions"] >= 1   # correction n°3 (page 3) — l'exercice (page 2) a été purgé
+    assert isinstance(agg["per_term"], list)  # vide en Mode Repli (aucun terme)
+    created = client.post("/api/curriculum/terms?db=" + TEST_DB,
+                          json={"term_index": 1, "label": "الفصل الأول"}).json()
+    per_term = client.get("/api/library/curriculum",
+                          params={"db": TEST_DB}).json()["aggregates"]["per_term"]
+    assert per_term and per_term[0]["term_index"] == 1 and per_term[0]["programs"] == 0
+    client.delete("/api/curriculum/terms/%s?db=%s" % (created["id"], TEST_DB))
+
+
+def test_chunks_filters_pedagogical_and_range():
+    sols = client.get("/api/library/chunks",
+                      params={"db": TEST_DB, "document_id": _DOC_ID,
+                              "pedagogical_type": "solution_only"}).json()["chunks"]
+    assert sols and all(c["pedagogical_type"] == "solution_only" for c in sols)
+    exos = client.get("/api/library/chunks",
+                      params={"db": TEST_DB, "document_id": _DOC_ID,
+                              "pedagogical_type": "exercise"}).json()["chunks"]
+    assert all(c["pedagogical_type"].startswith("exercise") for c in exos)  # vide post-purge : OK
+    ranged = client.get("/api/library/chunks",
+                        params={"db": TEST_DB, "document_id": _DOC_ID,
+                                "page_start": 3, "page_end": 3}).json()["chunks"]
+    assert ranged and all(c["page_number"] == 3 for c in ranged)
