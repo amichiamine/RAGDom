@@ -22,7 +22,7 @@ RUN npm run build
 FROM python:3.11-slim AS runtime
 ENV PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1
 # git requis par certaines résolutions pip ; pas de toolchain lourd (llama-cpp exclu du web).
-RUN apt-get update && apt-get install -y --no-install-recommends git \
+RUN apt-get update && apt-get install -y --no-install-recommends git curl ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -40,6 +40,15 @@ COPY engines/ engines/
 # Corpus embarqué : les PDF du dépôt font partie de l'image (persistants aux restarts,
 # disque Render FREE éphémère). Les uploads web atterrissent au même endroit.
 COPY sources/ sources/
+# Bases pré-ingérées (corpus 1AM, pipeline réel OCR VLM) : téléchargées depuis la
+# release GitHub (fichiers > 100 Mo impossibles dans le dépôt). Copiées vers
+# DATABASES_DIR au démarrage (main.py) → bibliothèque pré-chargée à chaque réveil.
+RUN mkdir -p databases_publiees \
+ && curl -fsSL -o databases_publiees/1AM_math_official-books.sqlite \
+    https://github.com/amichiamine/RAGDom/releases/download/corpus-1am-v1/1AM_math_official-books.sqlite \
+ && curl -fsSL -o databases_publiees/1AM_math_sources.sqlite \
+    https://github.com/amichiamine/RAGDom/releases/download/corpus-1am-v1/1AM_math_sources.sqlite \
+ || echo 'ATTENTION : bases publiées non téléchargées (release absente) — démarrage à vide.'
 COPY --from=ui /app/frontend/dist frontend/dist
 
 # Données persistantes (sources, bases, modèles) : volume /data.

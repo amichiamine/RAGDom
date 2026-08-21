@@ -8,3 +8,7 @@ data/
 *.sqlite
 *.sqlite-wal
 *.sqlite-shm
+
+# databases_publiees/ : petites bases publiées versionnables ; les grosses (>100 Mo)
+# passent par les assets de release GitHub (voir Dockerfile).
+!databases_publiees/*.sqlite

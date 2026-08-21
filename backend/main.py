@@ -43,6 +43,21 @@ async def lifespan(app: FastAPI):
     if resumed:
         print("[RAGDom] Reprise des files interrompues : %s" % resumed)
 
+    # Bases PUBLIÉES : toute base .sqlite présente dans databases_publiees/
+    # (dépôt local ou image Docker) est copiée vers DATABASES_DIR si absente —
+    # la bibliothèque renaît identique à chaque réveil du disque éphémère.
+    import shutil
+    published = os.environ.get("RAGDOM_PUBLISHED_DBS") or os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "databases_publiees")
+    if os.path.isdir(published):
+        os.makedirs(os.environ["DATABASES_DIR"], exist_ok=True)
+        for name in os.listdir(published):
+            if name.endswith(".sqlite"):
+                target = os.path.join(os.environ["DATABASES_DIR"], name)
+                if not os.path.exists(target):
+                    shutil.copy2(os.path.join(published, name), target)
+                    print("[RAGDom] Base publiée installée : %s" % name)
+
     engines = engine_registry.scan_engines()
     print("[RAGDom] Moteurs détectés : %s" % (", ".join(e["id"] for e in engines) or "aucun"))
     print("[RAGDom] Backend prêt.")
