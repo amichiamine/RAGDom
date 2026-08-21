@@ -52,14 +52,19 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# ── CORS (Développement) ──────────────────────────────────────
+# ── CORS (liste d'origines — Phase 7 : « http://localhost:5173,https://exemple.dz ») ──
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[config.FRONTEND_URL],
+    allow_origins=[o.strip() for o in config.FRONTEND_URL.split(",") if o.strip()],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ── Politique d'accès web (Phase 7 — inactive par défaut en local) ──
+from core.access_policy import AccessPolicyMiddleware  # noqa: E402
+
+app.add_middleware(AccessPolicyMiddleware)
 
 # ── Routes ───────────────────────────────────────────────────
 app.include_router(system_router, prefix="/api/system", tags=["System"])
