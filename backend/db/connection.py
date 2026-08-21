@@ -138,6 +138,8 @@ CREATE TABLE IF NOT EXISTS llm_keys (
     id              TEXT PRIMARY KEY,
     provider        TEXT NOT NULL,
     api_key         TEXT NOT NULL,
+    active_model    TEXT,               -- modèle PROPRE À CETTE CLÉ (quotas par modèle ;
+                                        -- la même clé peut être enregistrée N fois avec N modèles)
     status          TEXT DEFAULT 'active' CHECK(status IN ('active', 'blocked', 'disabled')),
     blocked_until   DATETIME,
     last_error_code INTEGER,
@@ -188,6 +190,9 @@ def init_config_db() -> None:
     cols = [r[1] for r in conn.execute("PRAGMA table_info(llm_settings)")]
     if "base_url" not in cols:
         conn.execute("ALTER TABLE llm_settings ADD COLUMN base_url TEXT")
+    key_cols = [r[1] for r in conn.execute("PRAGMA table_info(llm_keys)")]
+    if "active_model" not in key_cols:
+        conn.execute("ALTER TABLE llm_keys ADD COLUMN active_model TEXT")
     conn.execute("UPDATE llm_settings SET base_url='http://localhost:1234/v1'"
                  " WHERE provider='lmstudio' AND base_url IS NULL")
     # Purge des anciens modèles seedés en dur (obsolètes chez les providers → 404 au test)

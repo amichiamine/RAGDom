@@ -1,14 +1,18 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Save, X, UserPen, CircleCheck, TriangleAlert, CircleAlert } from 'lucide-react'
+import { Save, X, UserPen, CircleCheck, TriangleAlert, CircleAlert, Image as ImageIcon, PanelRightClose, PanelRightOpen } from 'lucide-react'
 import type { Chunk } from '@/types'
 import { api } from '@/lib/api'
 import { useToast } from '@/components/common/Toast'
+import { useLanguage } from '@/contexts/LanguageContext'
 import Modal from '@/components/common/Modal'
 import MarkdownKatex from '@/components/library/MarkdownKatex'
+import ImageModal from '@/components/library/curriculum/ImageModal'
 
 interface Props {
   chunk: Chunk
   activeDb: string
+  /** §7.3 — document du chunk : requis pour afficher le scan original de la page en rappel. */
+  documentId?: string
   open: boolean
   onClose: () => void
   /** Rappelé avec le chunk fusionné après enregistrement réussi. */
@@ -73,12 +77,28 @@ function LintRow({ note }: { note: LintNote }) {
 }
 
 /** §7.4 ChunkEditor — édition Markdown/KaTeX d'un chunk avec aperçu live + lint. */
-export default function ChunkEditor({ chunk, activeDb, open, onClose, onSaved }: Props) {
+export default function ChunkEditor({ chunk, activeDb, documentId, open, onClose, onSaved }: Props) {
   const toast = useToast()
+  const { t } = useLanguage()
   const [value, setValue] = useState(chunk.content_markdown)
   const [debounced, setDebounced] = useState(chunk.content_markdown)
   const [saving, setSaving] = useState(false)
   const [serverLint, setServerLint] = useState<LintNote[]>([])
+  // §7.3 : colonne de rappel du scan original — repliée par défaut (préserve la place
+  // du couple textarea/aperçu ; l'éditeur reste le focus principal).
+  const [showScan, setShowScan] = useState(false)
+  const [scanModalOpen, setScanModalOpen] = useState(false)
+
+  // URLs du scan de la page du chunk (image pleine pour le rappel + la modale HD,
+  // vignette en repli onError). Seulement si le document est connu (§7.3).
+  const scanUrl = useMemo(
+    () => (documentId ? api.library.getPageScanUrl(activeDb, documentId, chunk.page_number, false) : null),
+    [activeDb, documentId, chunk.page_number],
+  )
+  const scanThumbUrl = useMemo(
+    () => (documentId ? api.library.getPageScanUrl(activeDb, documentId, chunk.page_number, true) : null),
+    [activeDb, documentId, chunk.page_number],
+  )
 
   // Réinitialise à l'ouverture d'un nouveau chunk.
   useEffect(() => {
@@ -149,9 +169,23 @@ export default function ChunkEditor({ chunk, activeDb, open, onClose, onSaved }:
         </>
       }
     >
-      <div className="chunk-editor-grid">
+      <div className={`chunk-editor-grid${showScan && scanUrl ? ' with-scan' : ''}`}>
         <div className="chunk-editor-col">
-          <label className="chunk-editor-label">Markdown / LaTeX</label>
+          <div className="chunk-editor-label-row">
+            <label className="chunk-editor-label">Markdown / LaTeX</label>
+            {scanUrl && (
+              <button
+                type="button"
+                className="btn btn-outline-secondary btn-sm rounded-pill chunk-editor-scan-toggle"
+                onClick={() => setShowScan(s => !s)}
+                aria-pressed={showScan}
+                title={showScan ? t('library.editor_hide_scan') : t('library.editor_show_scan')}
+              >
+                {showScan ? <PanelRightClose size={14} /> : <PanelRightOpen size={14} />}
+                {showScan ? t('library.editor_hide_scan') : t('library.editor_show_scan')}
+              </button>
+            )}
+          </div>
           <textarea
             className="form-textarea form-mono chunk-editor-textarea"
             dir="auto"
@@ -166,6 +200,27 @@ export default function ChunkEditor({ chunk, activeDb, open, onClose, onSaved }:
             <MarkdownKatex raw={debounced} />
           </div>
         </div>
+        {showScan && scanUrl && (
+          <div className="chunk-editor-col">
+            <label className="chunk-editor-label">
+              <ImageIcon size={13} /> {t('library.editor_original_scan')} · {t('library.page')} {chunk.page_number}
+            </label>
+            <div className="chunk-editor-scan content-box">
+              <img
+                src={scanUrl}
+                alt={`${t('library.editor_original_scan')} — ${t('library.page')} ${chunk.page_number}`}
+                loading="lazy"
+                className="chunk-editor-scan-img"
+                onClick={() => setScanModalOpen(true)}
+                onError={e => {
+                  const img = e.currentTarget
+                  if (scanThumbUrl && img.src !== scanThumbUrl) img.src = scanThumbUrl
+                  else { img.style.display = 'none'; img.parentElement?.setAttribute('data-broken', 'true') }
+                }}
+              />
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="chunk-lint-panel">
@@ -177,6 +232,16 @@ export default function ChunkEditor({ chunk, activeDb, open, onClose, onSaved }:
           </>
         )}
       </div>
+
+      {scanUrl && (
+        <ImageModal
+          open={scanModalOpen}
+          title={`${t('library.editor_original_scan')} — ${t('library.page')} ${chunk.page_number}`}
+          src={scanUrl}
+          fallbackSrc={scanThumbUrl ?? undefined}
+          onClose={() => setScanModalOpen(false)}
+        />
+      )}
     </Modal>
   )
 }

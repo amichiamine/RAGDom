@@ -105,7 +105,14 @@
     "human_edited": "مصحّح يدويًا",
     "no_document_selected": "اختر وثيقة لعرض محتواها",
     "prev_page": "الصفحة السابقة",
-    "next_page": "الصفحة التالية"
+    "next_page": "الصفحة التالية",
+    "scans_gallery": "المسوح",
+    "scans_gallery_title": "معرض المسوح الضوئية",
+    "all_documents": "كل الوثائق",
+    "no_scans": "لا توجد مسوح متاحة",
+    "editor_show_scan": "إظهار المسح",
+    "editor_hide_scan": "إخفاء المسح",
+    "editor_original_scan": "المسح الأصلي (تذكير)"
   },
   "search": {
     "placeholder": "ابحث في هذه القاعدة...",
@@ -199,7 +206,16 @@
     "ingested": "مُدمَج",
     "target_db": "القاعدة الهدف",
     "empty": "لا توجد ملفات مصدر",
-    "drop_hint": "أفلت ملفات PDF هنا أو اضغط للرفع"
+    "drop_hint": "أفلت ملفات PDF هنا أو اضغط للرفع",
+    "root": "الجذر",
+    "target_folder": "المجلد الهدف",
+    "selected": "محدَّد",
+    "select_folder_target": "انقر لاستهداف هذا المجلد",
+    "upload_into": "الرفع إلى",
+    "new_folder_placeholder": "اسم المجلد (مثال: Maths/Term أو ChapA)",
+    "folder_name_invalid": "اسم مجلد غير صالح (أحرف وأرقام ومسافة و _ - . فقط).",
+    "confirm_delete_file": "حذف هذا الملف المصدر؟ هذا الإجراء لا يمكن التراجع عنه.",
+    "db_naming_hint": "اسم القاعدة يعتمد على المسار: /sources/Maths/TestAPI/x.pdf ← Maths_TestAPI.sqlite."
   },
   "onboarding": {
     "title": "لا توجد قواعد بيانات بعد",
@@ -272,12 +288,49 @@
     "key_state_none": "لا يوجد مفتاح",
     "key_state_active": "مفتاح نشط",
     "key_state_blocked": "مفتاح محظور",
-    "key_state_invalid": "مفتاح غير صالح"
+    "key_state_invalid": "مفتاح غير صالح",
+    "model_provider_default": "النموذج الافتراضي للمزوّد",
+    "model_provider_default_hint": "يُستعمل كبديل عندما لا يملك المفتاح نموذجًا خاصًا به.",
+    "key_model": "نموذج خاص بهذا المفتاح (له الأولوية)",
+    "key_model_inherit": "(نموذج المزوّد)"
   },
   "engines": {
     "title": "المحركات",
     "detected": "المحركات المكتشفة",
     "active": "نشط",
     "empty": "لم يُكتشف أي محرك"
+  },
+  "launcher": {
+    "title": "مُشغّل خط المعالجة",
+    "note": "ابدأ استيعابًا من شجرة المصادر أو أعد تنفيذ نطاق مفهرس مسبقًا.",
+    "tab_ingest": "بدء الاستيعاب",
+    "tab_reprocess": "إعادة التنفيذ",
+    "stop_pipeline": "إيقاف خط المعالجة",
+    "pick_source": "اختر الهدف من شجرة المصادر",
+    "selected": "التحديد",
+    "select_folder": "اختيار هذا المجلد (وضع المجلد)",
+    "folder_mode_hint": "تم اختيار مجلد: ستُدرَج كل ملفات PDF في المجلد (وضع المجلد).",
+    "mode_document": "المستند كاملًا",
+    "mode_page_range": "نطاق الصفحات",
+    "page_start": "البداية",
+    "page_end": "النهاية",
+    "launch_button": "تشغيل خط المعالجة",
+    "launched": "بدأ الاستيعاب",
+    "database": "القاعدة",
+    "document": "المستند",
+    "scope_document": "المستند كاملًا",
+    "scope_page_range": "نطاق الصفحات",
+    "scope_chapter": "فصل",
+    "select_chapter": "اختر فصلًا",
+    "preserve_human": "الحفاظ على التعديلات اليدوية",
+    "reprocess_warning": "يُطهّر النطاق ثم يعيد استيعابه بالكامل (كل الطبقات).",
+    "all_layers_note": "إعادة التنفيذ تُعيد تمرير كل الطبقات على النطاق (تنفيذ طبقة معزولة غير متاح في عقد المحرك — وحدة التنفيذ: الصفحة).",
+    "reprocess_button": "إعادة التنفيذ",
+    "reprocessed": "بدأت إعادة التنفيذ",
+    "queue": "الطابور",
+    "queue_current": "قيد التنفيذ",
+    "queue_idle": "الطابور خامل",
+    "queue_queued": "في الانتظار",
+    "queue_done_today": "أُنجزت اليوم"
   }
 }

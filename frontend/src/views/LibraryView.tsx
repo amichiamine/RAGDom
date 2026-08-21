@@ -3,7 +3,7 @@ import { Link, useSearchParams } from 'react-router-dom'
 import { api } from '@/lib/api'
 import { useDatabase } from '@/contexts/DatabaseContext'
 import { useLanguage } from '@/contexts/LanguageContext'
-import type { Document, TocNode, Chunk, Facets, SearchResult, AskSource, CurriculumPayload } from '@/types'
+import type { Document, TocNode, Chunk, Facets, SearchResult, AskSource, CurriculumPayload, PageScanManifestEntry } from '@/types'
 import CurriculumWorkspace from '@/components/library/curriculum/CurriculumWorkspace'
 import ThemeToggle from '@/components/layout/ThemeToggle'
 import LanguageSelector from '@/components/layout/LanguageSelector'
@@ -18,7 +18,7 @@ import { Spinner, ErrorBanner, EmptyState, SkeletonRows } from '@/components/com
 import { formatBytes, domainBadgeStyle } from '@/lib/utils'
 import { useTheme } from '@/contexts/ThemeContext'
 
-type Tab = 'explore' | 'search' | 'ask'
+type Tab = 'explore' | 'search' | 'ask' | 'scans'
 
 export default function LibraryView() {
   const { databases, activeDb, setActiveDb, isLoading: dbLoading } = useDatabase()
@@ -50,6 +50,12 @@ export default function LibraryView() {
   // ── Curriculum (V3.1 D1-B) : décide Mode Repli vs 6 onglets pixel-perfect ──
   const [curriculum, setCurriculum] = useState<CurriculumPayload | null>(null)
   const [curriculumLoading, setCurriculumLoading] = useState(false)
+
+  // ── Galerie de scans générique (Mode Repli, §5.2 préambule) ──
+  const [scanManifest, setScanManifest] = useState<PageScanManifestEntry[]>([])
+  const [scansLoading, setScansLoading] = useState(false)
+  const [scanDocFilter, setScanDocFilter] = useState<string>('all')
+  const [scanPage, setScanPage] = useState(1)
 
   // ── Deep-link ?db= et ?q= depuis le hero ──
   useEffect(() => {
@@ -96,6 +102,18 @@ export default function LibraryView() {
     return () => { alive = false }
   }, [activeDb])
 
+  // ── Charge le manifeste des scans à l'ouverture de l'onglet Scans (Mode Repli) ──
+  useEffect(() => {
+    if (!activeDb || tab !== 'scans') return
+    setScansLoading(true)
+    let alive = true
+    api.library.getPageScans(activeDb)
+      .then(res => { if (alive) { setScanManifest(res.pages ?? []); setScanPage(1) } })
+      .catch(() => { if (alive) setScanManifest([]) })
+      .finally(() => { if (alive) setScansLoading(false) })
+    return () => { alive = false }
+  }, [activeDb, tab])
+
   const loadDocument = useCallback(async (doc: Document) => {
     if (!activeDb) return
     setActiveDoc(doc); setPage(1); setHighlightChunkId(null)
@@ -125,6 +143,19 @@ export default function LibraryView() {
           return [...prev, ...(res.chunks ?? []).filter(c => !existing.has(c.id))]
         }))
         .catch(() => { /* silencieux : le scan reste affiché */ })
+    }
+  }
+
+  // Clic sur une vignette de la galerie générique → ouvre la page dans le SideBySideViewer
+  // (réutilise le mécanisme de navigation de page du Mode Repli : loadDocument + goToPage).
+  const openScanPage = (entry: PageScanManifestEntry) => {
+    const doc = documents.find(d => d.id === entry.document_id)
+    if (!doc) return
+    setTab('explore')
+    if (activeDoc?.id === doc.id) {
+      goToPage(entry.page_number)
+    } else {
+      loadDocument(doc).then(() => goToPage(entry.page_number))
     }
   }
 
@@ -286,6 +317,7 @@ export default function LibraryView() {
           {/* Onglets */}
           <div role="tablist" style={{ display: 'flex', gap: 8, marginBottom: 20, flexWrap: 'wrap' }}>
             <TabBtn active={tab === 'explore'} onClick={() => setTab('explore')} icon="fa-book-open" label={t('library.documents')} />
+            <TabBtn active={tab === 'scans'} onClick={() => setTab('scans')} icon="fa-images" label={t('library.scans_gallery')} />
             <TabBtn active={tab === 'search'} onClick={() => setTab('search')} icon="fa-magnifying-glass" label={t('library.search_studio')} />
             <TabBtn active={tab === 'ask'} onClick={() => setTab('ask')} icon="fa-comments" label={t('library.ask_studio')} />
           </div>
@@ -315,6 +347,20 @@ export default function LibraryView() {
                   />
                 </div>
               )
+            ) : tab === 'scans' ? (
+              <div className="auto-card">
+                <FallbackScansGallery
+                  activeDb={activeDb}
+                  manifest={scanManifest}
+                  loading={scansLoading}
+                  documents={documents}
+                  docFilter={scanDocFilter}
+                  onDocFilter={f => { setScanDocFilter(f); setScanPage(1) }}
+                  gridPage={scanPage}
+                  onGridPage={setScanPage}
+                  onOpenPage={openScanPage}
+                />
+              </div>
             ) : tab === 'search' ? (
               <div className="auto-card"><SearchStudio activeDb={activeDb} onSelectResult={onSelectResult} /></div>
             ) : (
@@ -332,6 +378,7 @@ export default function LibraryView() {
         <ChunkEditor
           chunk={editingChunk}
           activeDb={activeDb}
+          documentId={activeDoc?.id}
           open={!!editingChunk}
           onClose={() => setEditingChunk(null)}
           onSaved={(updated) => {
@@ -358,6 +405,91 @@ function TopbarLite() {
     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
       <Link to="/" className="btn btn-outline-primary btn-sm rounded-pill"><i className="fa-solid fa-house" /> {t('nav.back_portal')}</Link>
       <div style={{ display: 'flex', gap: 8 }}><LanguageSelector /><ThemeToggle /></div>
+    </div>
+  )
+}
+
+/**
+ * §5.2 (préambule) — Galerie de scans générique du Mode Repli : grille de vignettes
+ * (manifeste page_scans + thumb=true), filtre par document si plusieurs, pagination
+ * client, clic → ouvre la page dans le SideBySideViewer. Aucune donnée en dur.
+ */
+const SCANS_PER_PAGE = 24
+function FallbackScansGallery({
+  activeDb, manifest, loading, documents, docFilter, onDocFilter, gridPage, onGridPage, onOpenPage,
+}: {
+  activeDb: string
+  manifest: PageScanManifestEntry[]
+  loading: boolean
+  documents: Document[]
+  docFilter: string
+  onDocFilter: (f: string) => void
+  gridPage: number
+  onGridPage: (p: number) => void
+  onOpenPage: (entry: PageScanManifestEntry) => void
+}) {
+  const { t } = useLanguage()
+  const multiDoc = documents.length > 1
+  const filtered = docFilter === 'all' ? manifest : manifest.filter(e => e.document_id === docFilter)
+  const totalGridPages = Math.max(1, Math.ceil(filtered.length / SCANS_PER_PAGE))
+  const safePage = Math.min(gridPage, totalGridPages)
+  const slice = filtered.slice((safePage - 1) * SCANS_PER_PAGE, safePage * SCANS_PER_PAGE)
+  const docTitle = (id: string) => documents.find(d => d.id === id)?.title || documents.find(d => d.id === id)?.filename || id
+
+  if (loading) return <Spinner label={t('common.loading')} />
+  if (manifest.length === 0) return <EmptyState icon="fa-images" title={t('library.no_scans')} />
+
+  return (
+    <div>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 16, flexWrap: 'wrap' }}>
+        <h4 style={{ margin: 0, display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+          <i className="fa-solid fa-images" style={{ color: 'var(--warning)' }} /> {t('library.scans_gallery_title')} ({filtered.length})
+        </h4>
+        {multiDoc && (
+          <select
+            className="form-select"
+            style={{ maxWidth: 320 }}
+            value={docFilter}
+            onChange={e => onDocFilter(e.target.value)}
+            dir="auto"
+          >
+            <option value="all">{t('library.all_documents')}</option>
+            {documents.map(d => <option key={d.id} value={d.id}>{d.title || d.filename}</option>)}
+          </select>
+        )}
+      </div>
+
+      <div className="scan-grid-row" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))' }}>
+        {slice.map(entry => (
+          <div key={`${entry.document_id}_${entry.page_number}`} className="scan-grid-card scan-card-flex">
+            <div className="scan-thumb-wrap" onClick={() => onOpenPage(entry)} title={`${t('library.page')} ${entry.page_number}`}>
+              <img
+                src={api.library.getPageScanUrl(activeDb, entry.document_id, entry.page_number, true)}
+                loading="lazy"
+                alt={`${t('library.scan')} ${entry.page_number}`}
+              />
+              <span className="badge badge-primary scan-badge-page font-num">{t('library.page')} {entry.page_number}</span>
+            </div>
+            <div className="scan-card-body">
+              <small className="scan-chapter-title" dir="auto" title={entry.chapter_title ?? docTitle(entry.document_id)}>
+                <i className="fa-solid fa-book-bookmark" style={{ color: 'var(--primary)' }} /> {entry.chapter_title ?? docTitle(entry.document_id)}
+              </small>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {totalGridPages > 1 && (
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12, marginTop: 16 }}>
+          <button className="btn btn-outline-secondary btn-sm" onClick={() => onGridPage(Math.max(1, safePage - 1))} disabled={safePage <= 1}>
+            <i className="fa-solid fa-chevron-right" /> {t('library.prev_page')}
+          </button>
+          <span className="badge badge-subtle font-num">{safePage} / {totalGridPages}</span>
+          <button className="btn btn-outline-secondary btn-sm" onClick={() => onGridPage(Math.min(totalGridPages, safePage + 1))} disabled={safePage >= totalGridPages}>
+            {t('library.next_page')} <i className="fa-solid fa-chevron-left" />
+          </button>
+        </div>
+      )}
     </div>
   )
 }

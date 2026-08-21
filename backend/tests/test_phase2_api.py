@@ -261,3 +261,35 @@ def test_chunks_filters_pedagogical_and_range():
                         params={"db": TEST_DB, "document_id": _DOC_ID,
                                 "page_start": 3, "page_end": 3}).json()["chunks"]
     assert ranged and all(c["page_number"] == 3 for c in ranged)
+
+
+def test_reprocess_scoped_page():
+    """Ré-exécution scopée (Lot contrôle pipeline) : purge + ré-ingestion de la page 1."""
+    before = client.get("/api/library/chunks",
+                        params={"db": TEST_DB, "document_id": _DOC_ID, "page_number": 1}).json()["chunks"]
+    assert before, "la page 1 doit exister avant reprocess"
+    response = client.post("/api/pipeline/reprocess",
+                           json={"db": TEST_DB, "scope": "page_range", "document_id": _DOC_ID,
+                                 "page_start": 1, "page_end": 1})
+    assert response.status_code == 202, response.text
+    payload = response.json()
+    assert payload["page_start"] == 1 and payload["page_end"] == 1
+    _wait_batch(payload["batch_id"])
+    after = client.get("/api/library/chunks",
+                       params={"db": TEST_DB, "document_id": _DOC_ID, "page_number": 1}).json()["chunks"]
+    assert after, "la page 1 doit être ré-ingérée"
+    scan = client.get("/api/library/page-scan",
+                      params={"db": TEST_DB, "document_id": _DOC_ID, "page": 1})
+    assert scan.status_code == 200  # scan régénéré
+
+
+def test_key_model_per_key():
+    """Modèle PAR CLÉ : la même clé peut exister avec des modèles différents."""
+    k1 = client.post("/api/llm/keys", json={"provider": "gemini", "api_key": "AIzaMEMECLE0001"}).json()["key_id"]
+    k2 = client.post("/api/llm/keys", json={"provider": "gemini", "api_key": "AIzaMEMECLE0001"}).json()["key_id"]
+    assert k1 != k2  # même secret, deux enregistrements
+    assert client.put("/api/llm/keys/%s" % k1, json={"active_model": "modele-alpha"}).json()["updated"]
+    assert client.put("/api/llm/keys/%s" % k2, json={"active_model": "modele-beta"}).json()["updated"]
+    keys = {k["id"]: k for k in client.get("/api/llm/keys").json()["keys"]}
+    assert keys[k1]["active_model"] == "modele-alpha" and keys[k2]["active_model"] == "modele-beta"
+    client.delete("/api/llm/keys/%s" % k1); client.delete("/api/llm/keys/%s" % k2)

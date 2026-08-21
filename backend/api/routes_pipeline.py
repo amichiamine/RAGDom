@@ -37,6 +37,13 @@ def _broadcast(event: str, data: dict) -> None:
 orchestrator.subscribe(_broadcast)
 
 
+def _resolve_source(source_path: str) -> str:
+    """Chemin absolu OU relatif à /sources/ (contrat UI : rel_path de l'arbre)."""
+    if not os.path.isabs(source_path):
+        source_path = os.path.join(config.SOURCES_DIR, source_path)
+    return os.path.realpath(source_path)
+
+
 def extract_document_metadata(source_path: str, sources_dir: str) -> dict:
     """Implémentation IMPOSÉE tech_specs §13 (doc_source, tags, niveau, nom de base)."""
     rel_path = os.path.relpath(os.path.dirname(source_path), sources_dir)
@@ -60,7 +67,7 @@ class StartBody(BaseModel):
 
 def _register_document(db_name: str, source_path: str) -> dict:
     """Crée la base si besoin + enregistre le document (métadonnées §13). Idempotent."""
-    real = os.path.realpath(source_path)
+    real = _resolve_source(source_path)
     if not real.startswith(os.path.realpath(config.SOURCES_DIR) + os.sep):
         raise HTTPException(400, "source_path hors de /sources/")
     if not os.path.exists(real):
@@ -114,7 +121,7 @@ def _run_worker(db_name: str) -> None:
 
 @router.post("/start", status_code=202)
 def start(body: StartBody):
-    real = os.path.realpath(body.source_path)
+    real = _resolve_source(body.source_path)
     if body.mode == "folder":
         folder_db = body.target_db or extract_document_metadata(
             os.path.join(real, "x.pdf"), config.SOURCES_DIR)["db_name"]
@@ -210,6 +217,71 @@ def cancel_batch(batch_id: str, db_name: str = Query(alias="db")):
         return {"cancelled": True, "removed_jobs": cur.rowcount}
     finally:
         conn.close()
+
+
+class ReprocessBody(BaseModel):
+    """Ré-exécution SCOPÉE : purge du périmètre puis ré-ingestion du même périmètre.
+
+    Scopes : document | page_range | chapter. La purge préserve les éditions
+    humaines par défaut ; la ré-ingestion repasse TOUTES les couches du moteur
+    sur le périmètre (l'unité d'exécution du pipeline est la page — D4-A).
+    """
+    db: str
+    scope: str  # document | page_range | chapter
+    document_id: str
+    page_start: Optional[int] = None
+    page_end: Optional[int] = None
+    toc_id: Optional[str] = None
+    preserve_human_edits: bool = True
+
+
+@router.post("/reprocess", status_code=202)
+def reprocess(body: ReprocessBody):
+    if body.scope not in ("document", "page_range", "chapter"):
+        raise HTTPException(400, "scope invalide (document | page_range | chapter)")
+    conn = db.get_connection(body.db)
+    try:
+        row = conn.execute("SELECT source_path, total_pages FROM documents WHERE id=?",
+                           (body.document_id,)).fetchone()
+        if row is None:
+            raise HTTPException(404, "Document introuvable")
+        source_path, total_pages = row
+        toc_row = None
+        if body.scope == "chapter":
+            if not body.toc_id:
+                raise HTTPException(400, "toc_id requis pour le scope chapter")
+            toc_row = conn.execute("SELECT page_start, page_end FROM document_toc WHERE id=?",
+                                   (body.toc_id,)).fetchone()
+            if toc_row is None:
+                raise HTTPException(404, "Chapitre introuvable")
+    finally:
+        conn.close()
+    if not os.path.exists(source_path):
+        raise HTTPException(409, "PDF source absent de /sources/ — ré-exécution impossible")
+
+    # 1) Purge du périmètre (réutilise la purge scopée réelle — jamais de duplication)
+    purge_scope = {"document": "document", "page_range": "page_range", "chapter": "chapter"}[body.scope]
+    purge_result = purge(PurgeBody(db=body.db, scope=purge_scope, document_id=body.document_id,
+                                   page_start=body.page_start, page_end=body.page_end,
+                                   toc_id=body.toc_id, dry_run=False,
+                                   preserve_human_edits=body.preserve_human_edits,
+                                   confirm=None))
+    # 2) Ré-ingestion du même périmètre
+    if body.scope == "document":
+        page_start, page_end = 1, total_pages
+    elif body.scope == "chapter":
+        page_start, page_end = toc_row[0], toc_row[1] or total_pages
+    else:
+        if not body.page_start:
+            raise HTTPException(400, "page_start requis pour le scope page_range")
+        page_start = body.page_start
+        page_end = min(body.page_end or body.page_start, total_pages)
+    batch = orchestrator.enqueue_batch(body.db, body.document_id, source_path,
+                                       body.scope, page_start, page_end)
+    _launch(body.db)
+    return {"reprocessed_scope": body.scope, "purged": purge_result.get("deleted"),
+            "batch_id": batch["batch_id"], "pages_total": batch["pages_total"],
+            "page_start": page_start, "page_end": page_end, "status": "QUEUED"}
 
 
 class PurgeBody(BaseModel):

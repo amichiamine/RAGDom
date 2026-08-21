@@ -43,7 +43,7 @@ def _active_keys(provider: str):
     try:
         now = datetime.utcnow().isoformat(sep=" ")
         return conn.execute(
-            "SELECT id, api_key FROM llm_keys WHERE provider=? AND status='active'"
+            "SELECT id, api_key, active_model FROM llm_keys WHERE provider=? AND status='active'"
             " AND (blocked_until IS NULL OR blocked_until < ?) ORDER BY created_at", (provider, now),
         ).fetchall()
     finally:
@@ -128,7 +128,7 @@ def _call_ollama(prompt: str, timeout_s: int) -> Optional[str]:
         return None
 
 
-def list_models(provider: str) -> dict:
+def list_models(provider: str, key_id: Optional[str] = None) -> dict:
     """Détection EN DIRECT des modèles du provider (zéro liste codée en dur).
 
     Utilise la clé active stockée (ou la clé .env) et la base_url éventuelle.
@@ -140,8 +140,15 @@ def list_models(provider: str) -> dict:
     finally:
         conn.close()
     base_url = row[0] if row else None
-    keys = _active_keys(provider)
-    api_key = keys[0][1] if keys else (config.env_api_key(provider) or "")
+    api_key = ""
+    if key_id:  # détection avec CETTE clé précise
+        conn = db.get_config_db()
+        krow = conn.execute("SELECT api_key FROM llm_keys WHERE id=?", (key_id,)).fetchone()
+        conn.close()
+        api_key = krow[0] if krow else ""
+    if not api_key:
+        keys = _active_keys(provider)
+        api_key = keys[0][1] if keys else (config.env_api_key(provider) or "")
 
     try:
         if provider == "gemini":
@@ -211,17 +218,18 @@ def generate(prompt: str, image_b64: Optional[str] = None,
         keys = _active_keys(provider)
         env_key = config.env_api_key(provider)
         if env_key and not keys:  # fallback .env de démarrage (tech_specs §10)
-            keys = [(None, env_key)]
+            keys = [(None, env_key, None)]
         if provider == "lmstudio" and not keys:  # serveur local : clé facultative
-            keys = [(None, "")]
-        for key_id, api_key in keys:
+            keys = [(None, "", None)]
+        for key_id, api_key, key_model in keys:
+            effective_model = key_model or model  # priorité au modèle DE LA CLÉ
             for attempt, delay in enumerate((0, 2, 4, 8)):
                 if delay:
                     time.sleep(delay)
                 try:
-                    content = _call_provider(provider, model, api_key, prompt, image_b64,
+                    content = _call_provider(provider, effective_model, api_key, prompt, image_b64,
                                              timeout_s, base_url=base_url)
-                    return {"content": content, "provider": "%s/%s" % (provider, model),
+                    return {"content": content, "provider": "%s/%s" % (provider, effective_model),
                             "fallback_triggered": fallback_triggered}
                 except httpx.HTTPStatusError as exc:
                     code = exc.response.status_code
@@ -272,13 +280,14 @@ def test_key(key_id: str) -> dict:
         return {"success": False, "status": "unknown", "message": "Clé introuvable."}
     provider, api_key = row
     conn2 = db.get_config_db()
+    key_model_row = conn2.execute("SELECT active_model FROM llm_keys WHERE id=?", (key_id,)).fetchone()
     settings_row = conn2.execute(
         "SELECT active_model, base_url FROM llm_settings WHERE provider=?", (provider,)).fetchone()
     conn2.close()
-    model = settings_row[0] if settings_row else None
+    model = (key_model_row[0] if key_model_row and key_model_row[0] else None)         or (settings_row[0] if settings_row else None)
     base_url = settings_row[1] if settings_row else None
     if not model:  # aucun modèle choisi : auto-détection en direct (zéro dur)
-        detected = list_models(provider)
+        detected = list_models(provider, key_id=key_id)
         if detected["models"]:
             model = detected["models"][0]
         elif detected["error"]:
