@@ -61,6 +61,9 @@ def _get_embedder():
     _embedder["tried"] = True
     if os.environ.get("RAGDOM_OFFLINE", "false").lower() == "true":
         return None
+    if os.environ.get("RAGDOM_LOW_MEMORY", "false").lower() == "true":
+        return None  # hébergements ≤512 Mo : l'encodeur ONNX provoque un OOM kill
+                     # → recherche BM25 seule (repli documenté tech_specs §3.3)
     try:
         from fastembed import TextEmbedding
         _embedder["model"] = TextEmbedding("sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
