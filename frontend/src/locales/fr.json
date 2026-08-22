@@ -225,7 +225,9 @@
       "providers": "Fournisseurs IA",
       "providers_sub": "Configurez vos fournisseurs, clés API et modèles détectés par clé.",
       "settings": "Réglages",
-      "settings_sub": "Moteur vectoriel, seuils système et réglages avancés de l'atelier."
+      "settings_sub": "Moteur vectoriel, seuils système et réglages avancés de l'atelier.",
+      "validation": "Validation live",
+      "validation_sub": "Prévisualisez un périmètre, exécutez-le dans une copie de travail, inspectez les différences et décidez sans données simulées."
     },
     "contents": {
       "selection": "Sélection du périmètre",
@@ -451,5 +453,101 @@
     "queue_idle": "File au repos",
     "queue_queued": "En attente",
     "queue_done_today": "Terminées aujourd'hui"
+  },
+  "validation": {
+    "readonly": "Lecture seule — mutations désactivées",
+    "scope": {
+      "title": "Périmètre universel",
+      "database": "Base",
+      "document": "Document",
+      "all_documents": "Tous les documents",
+      "level": "Niveau",
+      "chapter": "Chapitre",
+      "course": "Cours",
+      "heading": "Titre",
+      "page": "Page",
+      "range": "Plage de pages",
+      "selection": "Sélection",
+      "toc_node": "Élément TOC",
+      "page_start": "Page de début",
+      "page_end": "Page de fin",
+      "pages_selection": "Pages (séparées par des virgules)",
+      "chunks_selection": "Chunks (identifiants)",
+      "document_required": "Sélectionnez un document pour ce niveau."
+    },
+    "builder": {
+      "title": "Nouvelle validation",
+      "hint": "Une prévisualisation serveur est obligatoire avant chaque lancement.",
+      "options": "Sécurité et isolation",
+      "working_copy": "Copie de travail",
+      "working_copy_hint": "Activée par défaut : la base approuvée n’est pas modifiée avant acceptation.",
+      "preserve_human": "Préserver les éditions humaines",
+      "preserve_human_hint": "Protège les corrections manuelles pendant le traitement.",
+      "preview_summary": "Résumé de la prévisualisation",
+      "preview": "Prévisualiser",
+      "launch": "Lancer la validation",
+      "preview_required": "Prévisualisez ce périmètre avant de lancer.",
+      "started": "Validation lancée."
+    },
+    "metrics": {
+      "pages": "pages",
+      "chunks": "chunks",
+      "artifacts": "artefacts",
+      "human_preserved": "éditions protégées",
+      "latency": "Latence",
+      "confidence": "Confiance"
+    },
+    "runs": {
+      "title": "Exécutions persistantes",
+      "hint": "Historique serveur et état live ciblé.",
+      "refresh": "Actualiser",
+      "empty": "Aucune validation enregistrée.",
+      "select": "Sélectionnez une exécution.",
+      "polling": "Polling de repli",
+      "cancelled": "Annulation demandée.",
+      "direct": "Écriture directe",
+      "pages": "Pages du run"
+    },
+    "inspection": {
+      "title": "Inspection unifiée",
+      "empty": "Aucune inspection disponible.",
+      "scan": "Scan",
+      "chunks": "Chunks",
+      "artifacts": "Artefacts",
+      "toc": "TOC",
+      "curriculum": "Curriculum",
+      "benchmarks": "Benchmarks",
+      "errors": "Erreurs",
+      "terms": "Trimestres",
+      "programs": "Programmes",
+      "assessments": "Évaluations",
+      "links": "Liens"
+    },
+    "diff": {
+      "title": "Diff avant / après",
+      "empty": "Aucune différence disponible.",
+      "before": "Avant",
+      "after": "Après",
+      "artifacts": "Artefacts",
+      "metrics": "Métriques",
+      "metric": "Métrique",
+      "added": "Ajouté",
+      "removed": "Supprimé",
+      "changed": "Modifié",
+      "unchanged": "Inchangé"
+    },
+    "decisions": {
+      "title": "Décisions de page",
+      "run_title": "Décision globale",
+      "accept_page": "Accepter la page",
+      "reject_page": "Rejeter la page",
+      "restore_page": "Restaurer la page",
+      "accept_run": "Accepter le run",
+      "reject_run": "Rejeter le run",
+      "restore_run": "Restaurer le run",
+      "accept_done": "Acceptation enregistrée.",
+      "reject_done": "Rejet enregistré.",
+      "restore_done": "Restauration demandée."
+    }
   }
 }

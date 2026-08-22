@@ -225,7 +225,9 @@
       "providers": "AI Providers",
       "providers_sub": "Configure your providers, API keys and models detected per key.",
       "settings": "Settings",
-      "settings_sub": "Vector engine, system thresholds and advanced workshop settings."
+      "settings_sub": "Vector engine, system thresholds and advanced workshop settings.",
+      "validation": "Live validation",
+      "validation_sub": "Preview a scope, run it in a working copy, inspect differences and decide without mocked data."
     },
     "contents": {
       "selection": "Scope selection",
@@ -451,5 +453,101 @@
     "queue_idle": "Queue idle",
     "queue_queued": "Queued",
     "queue_done_today": "Done today"
+  },
+  "validation": {
+    "readonly": "Read-only — mutations disabled",
+    "scope": {
+      "title": "Universal scope",
+      "database": "Database",
+      "document": "Document",
+      "all_documents": "All documents",
+      "level": "Level",
+      "chapter": "Chapter",
+      "course": "Course",
+      "heading": "Heading",
+      "page": "Page",
+      "range": "Page range",
+      "selection": "Selection",
+      "toc_node": "TOC item",
+      "page_start": "Start page",
+      "page_end": "End page",
+      "pages_selection": "Pages (comma-separated)",
+      "chunks_selection": "Chunks (identifiers)",
+      "document_required": "Select a document for this level."
+    },
+    "builder": {
+      "title": "New validation",
+      "hint": "A server preview is required before every run.",
+      "options": "Safety and isolation",
+      "working_copy": "Working copy",
+      "working_copy_hint": "Enabled by default: the approved database is unchanged until acceptance.",
+      "preserve_human": "Preserve human edits",
+      "preserve_human_hint": "Protects manual corrections during processing.",
+      "preview_summary": "Preview summary",
+      "preview": "Preview",
+      "launch": "Start validation",
+      "preview_required": "Preview this scope before starting.",
+      "started": "Validation started."
+    },
+    "metrics": {
+      "pages": "pages",
+      "chunks": "chunks",
+      "artifacts": "artifacts",
+      "human_preserved": "protected edits",
+      "latency": "Latency",
+      "confidence": "Confidence"
+    },
+    "runs": {
+      "title": "Persistent runs",
+      "hint": "Server history and targeted live state.",
+      "refresh": "Refresh",
+      "empty": "No saved validation run.",
+      "select": "Select a run.",
+      "polling": "Fallback polling",
+      "cancelled": "Cancellation requested.",
+      "direct": "Direct write",
+      "pages": "Run pages"
+    },
+    "inspection": {
+      "title": "Unified inspection",
+      "empty": "No inspection available.",
+      "scan": "Scan",
+      "chunks": "Chunks",
+      "artifacts": "Artifacts",
+      "toc": "TOC",
+      "curriculum": "Curriculum",
+      "benchmarks": "Benchmarks",
+      "errors": "Errors",
+      "terms": "Terms",
+      "programs": "Programs",
+      "assessments": "Assessments",
+      "links": "Links"
+    },
+    "diff": {
+      "title": "Before / after diff",
+      "empty": "No diff available.",
+      "before": "Before",
+      "after": "After",
+      "artifacts": "Artifacts",
+      "metrics": "Metrics",
+      "metric": "Metric",
+      "added": "Added",
+      "removed": "Removed",
+      "changed": "Changed",
+      "unchanged": "Unchanged"
+    },
+    "decisions": {
+      "title": "Page decisions",
+      "run_title": "Run decision",
+      "accept_page": "Accept page",
+      "reject_page": "Reject page",
+      "restore_page": "Restore page",
+      "accept_run": "Accept run",
+      "reject_run": "Reject run",
+      "restore_run": "Restore run",
+      "accept_done": "Acceptance saved.",
+      "reject_done": "Rejection saved.",
+      "restore_done": "Restore requested."
+    }
   }
 }

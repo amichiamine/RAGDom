@@ -22,11 +22,12 @@ import CurriculumStudio from '@/components/admin/CurriculumStudio'
 import TelemetryExplorer from '@/components/admin/TelemetryExplorer'
 import DatabaseLifecycle from '@/components/admin/DatabaseLifecycle'
 import ArtifactImportModal from '@/components/admin/ArtifactImportModal'
-import { FilePlus2, Rocket, Activity, FolderOpen, BrainCircuit, SlidersHorizontal, Layers } from 'lucide-react'
+import { FilePlus2, Rocket, Activity, FolderOpen, BrainCircuit, SlidersHorizontal, Layers, ShieldCheck } from 'lucide-react'
+import ValidationStudio from '@/components/validation/ValidationStudio'
 import { formatBytes, formatNumber } from '@/lib/utils'
 
-type TabKey = 'ingestion' | 'monitoring' | 'contents' | 'documents' | 'providers' | 'settings'
-const TAB_ORDER: TabKey[] = ['ingestion', 'monitoring', 'contents', 'documents', 'providers', 'settings']
+type TabKey = 'ingestion' | 'monitoring' | 'validation' | 'contents' | 'documents' | 'providers' | 'settings'
+const TAB_ORDER: TabKey[] = ['ingestion', 'monitoring', 'validation', 'contents', 'documents', 'providers', 'settings']
 
 export default function AutomationView() {
   const { databases, activeDb, setActiveDb, isLoading: dbLoading, refresh } = useDatabase()
@@ -175,6 +176,7 @@ export default function AutomationView() {
   const TABS: { key: TabKey; label: string; sub: string; icon: ReactNode; dot?: 'run' | 'warn' }[] = [
     { key: 'ingestion', label: t('automation.tabs.ingestion'), sub: t('automation.tabs.ingestion_sub'), icon: <Rocket size={16} /> },
     { key: 'monitoring', label: t('automation.tabs.monitoring'), sub: t('automation.tabs.monitoring_sub'), icon: <Activity size={16} />, dot: running ? 'run' : undefined },
+    { key: 'validation', label: t('automation.tabs.validation'), sub: t('automation.tabs.validation_sub'), icon: <ShieldCheck size={16} /> },
     { key: 'contents', label: t('automation.tabs.contents'), sub: t('automation.tabs.contents_sub'), icon: <Layers size={16} />, dot: contentsDirty ? 'warn' : undefined },
     { key: 'documents', label: t('automation.tabs.documents'), sub: t('automation.tabs.documents_sub'), icon: <FolderOpen size={16} />, dot: quarantineCount > 0 ? 'warn' : undefined },
     { key: 'providers', label: t('automation.tabs.providers'), sub: t('automation.tabs.providers_sub'), icon: <BrainCircuit size={16} /> },
@@ -287,6 +289,11 @@ export default function AutomationView() {
               </div>
             </div>
           </div>
+        )}
+
+        {/* ─────────────────── ONGLET VALIDATION LIVE ─────────────────── */}
+        {activeTab === 'validation' && (
+          <ValidationStudio databases={databases} activeDb={activeDb} readonly={health?.readonly ?? false} />
         )}
 
         {/* ─────────────────── ONGLET CONTENUS ─────────────────── */}
