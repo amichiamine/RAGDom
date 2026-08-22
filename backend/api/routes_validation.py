@@ -710,9 +710,10 @@ def create_embedding_profile(body: EmbeddingProfileDTO, db_name: str = Query(ali
                                 " AND model_version=? AND pooling=? AND dimensions=? AND normalized=?",
                                 natural).fetchone()
         metadata = dict(body.metadata)
-        metadata["profile_contract"] = {"model_name": natural[0], "model_version": natural[1],
-                                         "pooling": natural[2], "dimensions": natural[3],
-                                         "normalized": bool(natural[4])}
+        if not isinstance(metadata.get("profile_contract"), dict):
+            metadata["profile_contract"] = {"model_name": natural[0], "model_version": natural[1],
+                                             "pooling": natural[2], "dimensions": natural[3],
+                                             "normalized": bool(natural[4])}
         if existing:
             stored = json.loads(existing[1] or "{}")
             if stored != metadata:
