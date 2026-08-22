@@ -1,5 +1,44 @@
 # JOURNAL des passes (le plus récent en premier)
 
+## 2026-08-22 19:20 — V4.4 : EXPLOSION CV-FIRST (zéro LLM) + hygiène LaTeX — TOUS les cadres explosés
+- **Constat utilisateur validé** : « les mêmes quotas suffisaient à l'autre moteur » —
+  exact. Le goulot n'était pas le quota mais NOTRE patron d'appel (image pleine page
+  + JSON géant → 429 immédiat sur la clé forte, flash-lite incapable). Remède
+  architectural : le maximum se fait SANS LLM.
+- **NOUVEAU frame_segmenter.py** : segmentation locale CPU (XY-cut par profils de
+  projection, cv2+numpy, ~0,5 s/cadre sandbox). Route requalify-artifacts :
+  `strategy:"cv"` (défaut) | `"vlm"` (historique).
+- **RÉSULTAT EN PRODUCTION** : 217 cadres non-échec + 46 vlm_failed retryés =
+  **TOUS les cadres pleine page explosés, frames=0 atteint DEUX fois** (flux normal
+  + retry_failed). **+2 142 sous-artefacts créés/ancrés, 0 échec, 0 appel LLM.**
+  Base : 993 → **3 135 artefacts**. Republiée (301,4 Mo) + redeploy clearCache.
+- **HYGIÈNE LaTeX de bout en bout** (rouge brut constaté par l'utilisateur, cause :
+  raw_data avec délimiteurs $$ embarqués — 612 artefacts — exposés par le fix F8,
+  + throwOnError:false qui peint les erreurs en rouge en comptant le rendu comme
+  structuré, + repli text-danger du pipeline markdown) :
+  frontend stripMathDelimiters + repairLatex + renderKatexStrict (réussit ou repli
+  NEUTRE), data_table au raw_data LaTeX array redirigé vers KaTeX ; backend
+  _sanitize_latex dans le qualifieur + garde d'ancrage (jamais d'insertion au
+  milieu d'un bloc $$). VÉRIFIÉ LIVE : 0 rouge, 0 $$ visible, 0 begin{array} brut,
+  0 erreur console.
+- **BUG DOCKER LATENT TROUVÉ ET CORRIGÉ (cv2 absent de l'image web !)** :
+  opencv-python et opencv-python-headless partagent le dossier cv2/ ; le
+  `pip uninstall opencv-python` du Dockerfile SUPPRIMAIT les fichiers, et le
+  `pip install headless` suivant répondait « already satisfied » sans rien réécrire
+  → ModuleNotFoundError: cv2 au runtime (cassait silencieusement TOUTE ingestion
+  web). Fix : --force-reinstall --no-deps + `python -c "import cv2"` au build.
+  Diagnostiqué par sonde d'inventaire dans le 503 (numpy/PIL/fitz ok, cv2 absent).
+- **RESTE (quotas uniquement)** : qualification VLM des 2 142 nouveaux crops par
+  petits appels — clés 1 ET 3 sont parties en 429 (quotas JOUR épuisés par la
+  journée entière de travail). Boucle idempotente prête :
+  `enrich_loop.py qualify 230 10` en rafales au réarmement quotidien (les crops
+  non qualifiés s'affichent proprement en attendant : crop + badge أصل + comparateur).
+  38 crops marqués vlm_failed_at aujourd'hui → `retry_failed` les reprendra.
+- Pièges neufs consignés : lots CV calibrés pour le CPU 0.1 du FREE (limit<=6,
+  ~25 s/lot ; limit 50 = timeout HTTP + verrou d'écriture tenu ~10 min par le lot
+  survivant — « database is locked » pour tout appel concurrent) ; les réponses
+  client peuvent mourir alors que le lot serveur CONTINUE et committe.
+
 ## 2026-08-22 17:45 — V4.3 EN PRODUCTION : vérifié live + données corrigées + enrichissement
 - **Déploiements** : dep-da4rlbgjo6nc73dtggkg (code V4.3, build Docker Render vert =
   npm install + tsc + vite build validés avec mermaid/plotly) puis

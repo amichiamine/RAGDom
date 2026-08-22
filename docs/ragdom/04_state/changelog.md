@@ -1,3 +1,17 @@
+# 2026-08-22 — V4.4 : explosion CV-first (zéro LLM) + hygiène LaTeX
+
+- **frame_segmenter.py** (nouveau) : segmentation locale CPU des cadres pleine page
+  (XY-cut) ; route requalify `strategy:"cv"` par défaut. **Tous les cadres du manuel
+  explosés en production : +2 142 sous-artefacts, 0 échec, 0 appel LLM** (993 →
+  3 135 artefacts). Qualification aval par petits crops, au fil des quotas.
+- Hygiène LaTeX : délimiteurs embarqués strippés, réparation déterministe
+  (begin{ → \begin{, backslash orphelin), rendu KaTeX STRICT (échec → repli neutre,
+  plus jamais de rouge), data_table-LaTeX redirigé vers KaTeX, garde d'ancrage
+  (jamais au milieu d'un bloc $$), _sanitize_latex côté qualifieur.
+- Fix Dockerfile CRITIQUE : cv2 absent de l'image web (uninstall d'opencv-python
+  supprimait le dossier partagé, réinstall no-op) → --force-reinstall --no-deps
+  + import vérifié au build. Cassait silencieusement toute ingestion web.
+
 # 2026-08-22 — V4.2 / V4.3 : fix boucle explode + conformité multimodale complète
 
 - **V4.2 (déployé)** : `/pipeline/requalify-artifacts` excluait mal les cadres déjà
