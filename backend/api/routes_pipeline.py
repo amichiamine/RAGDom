@@ -634,8 +634,11 @@ def _explode_frames_cv(conn, body, frames):
         from core import engine_registry
         active = engine_registry.active_engine()
         seg = engine_registry.load_layer(active["id"], "frame_segmenter")
-    except Exception:  # noqa: BLE001 — moteur/segmenteur indisponible
-        raise HTTPException(503, "Segmentation CV indisponible (moteur inactif)")
+    except Exception as exc:  # noqa: BLE001 — moteur/segmenteur indisponible
+        # Cause réelle exposée (diagnostic ops) : FileNotFoundError = couche absente
+        # de l'image, ImportError = dépendance manquante, etc.
+        raise HTTPException(503, "Segmentation CV indisponible : %s: %s"
+                            % (type(exc).__name__, str(exc)[:200]))
     if body.dry_run:
         return {"dry_run": True, "mode": "explode", "strategy": "cv",
                 "frames": len(frames), "created": 0, "skipped_text_regions": 0}
