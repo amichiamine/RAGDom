@@ -1,59 +1,106 @@
-import { useEffect, useState } from 'react'
-import { ImageIcon, Table2, Sigma, Maximize2 } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
+import { ImageIcon, Maximize2 } from 'lucide-react'
 import type { Artifact } from '@/types'
 import { api } from '@/lib/api'
 import { useLanguage } from '@/contexts/LanguageContext'
-import MarkdownKatex from '@/components/library/MarkdownKatex'
+import ArtifactRenderer from '@/components/library/ArtifactRenderer'
 import ImageModal from '@/components/library/curriculum/ImageModal'
 
 interface Props {
   db: string
   documentId: string
   page: number
-  /** Titre optionnel (par défaut « الوسائط المستخرجة / Matériels extraits »). */
+  /**
+   * IDs d'artefacts déjà ancrés (`asset://artifacts/{id}`) dans le texte de la page :
+   * ils sont marqués « مضمّنة في النص » et ne sont PAS rendus une seconde fois ici
+   * (galerie de contrôle sans doublon avec le corps de lecture).
+   */
+  embeddedIds?: ReadonlySet<string> | string[]
+  /** Callback quand les artefacts d'une page sont chargés (remonte le cache au parent). */
+  onLoaded?: (page: number, artifacts: Artifact[]) => void
   compact?: boolean
 }
 
-/** Badge arabe court par type d'artefact rendu. */
+/** Badge arabe court par type d'artefact (galerie de contrôle). */
 const TYPE_BADGE: Record<string, string> = {
   dense_illustration: 'رسم',
   data_table: 'جدول',
   latex_formula: 'صيغة',
+  geometry_vector: 'شكل',
+  flowchart: 'مخطط',
+  signal_waveform: 'إشارة',
+  smiles_chem: 'صيغة كيميائية',
+  code_snippet: 'شيفرة',
 }
 
+function arabicTypeBadge(type: string): string {
+  if (TYPE_BADGE[type]) return TYPE_BADGE[type]
+  const t = type.toLowerCase()
+  if (t.includes('table')) return 'جدول'
+  if (t.includes('geometry') || t.includes('svg') || t.includes('vector')) return 'شكل'
+  if (t.includes('matrix') || t.includes('latex') || t.includes('formula') || t.includes('equation')) return 'صيغة'
+  if (t.includes('flow') || t.includes('mermaid')) return 'مخطط'
+  if (t.includes('signal') || t.includes('waveform') || t.includes('plot') || t.includes('chart')) return 'إشارة'
+  if (t.includes('smiles') || t.includes('chem') || t.includes('mol')) return 'صيغة كيميائية'
+  if (t.includes('code') || t.includes('snippet')) return 'شيفرة'
+  return type
+}
+
+/** Seuil au-delà duquel un artefact est un re-cadrage quasi-pleine-page (doublon du scan). */
+const FULLPAGE_RATIO = 0.7
+
 /**
- * Section « الوسائط المستخرجة / Matériels extraits » d'une page de lecture.
- * Charge `getArtifacts(db, {document_id, page_number})` et affiche :
- *  - dense_illustration → <img> (crop WebP, lazy) cliquable → ImageModal HD
- *  - data_table          → raw_data rendu en Markdown/KaTeX (tableau)
- *  - latex_formula       → UNIQUEMENT si has_binary (image) ; sinon déjà dans le texte
- * Rien affiché s'il n'y a aucune vraie média. Zéro donnée en dur.
+ * Galerie de CONTRÔLE en pied de page : rend chaque artefact via <ArtifactRenderer>
+ * (rendu par type, badges sémantiques, comparateur intégré). Filtre les cadres
+ * quasi-pleine-page (area_ratio > 0.7 → masqués derrière un lien togglable) et évite
+ * tout doublon avec les artefacts déjà ancrés dans le texte (embeddedIds).
  */
-export default function PageMedia({ db, documentId, page }: Props) {
+export default function PageMedia({ db, documentId, page, embeddedIds, onLoaded }: Props) {
   const { t } = useLanguage()
   const [artifacts, setArtifacts] = useState<Artifact[] | null>(null)
   const [modal, setModal] = useState<{ src: string; title: string } | null>(null)
+  const [showFullpage, setShowFullpage] = useState(false)
+
+  const embedded = useMemo<ReadonlySet<string>>(
+    () => (embeddedIds instanceof Set ? embeddedIds : new Set(embeddedIds ?? [])),
+    [embeddedIds],
+  )
 
   useEffect(() => {
     let alive = true
     setArtifacts(null)
+    setShowFullpage(false)
     if (!documentId || !page) { setArtifacts([]); return }
     api.library.getArtifacts(db, { document_id: documentId, page_number: page })
-      .then(r => { if (alive) setArtifacts(r.artifacts ?? []) })
+      .then(r => {
+        if (!alive) return
+        const list = r.artifacts ?? []
+        setArtifacts(list)
+        onLoaded?.(page, list)
+      })
       .catch(() => { if (alive) setArtifacts([]) })
     return () => { alive = false }
+    // onLoaded volontairement hors deps (callback stable côté parent attendu).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [db, documentId, page])
 
-  // Ne conserve que les médias réellement rendables (pas les formules déjà dans le texte).
+  // Ne conserve que les médias réellement rendables.
   const renderable = (artifacts ?? []).filter(a => {
     const type = (a.artifact_type || '').toLowerCase()
     if (type.includes('illustration') || type.includes('image') || type.includes('figure')) return true
     if (type.includes('table')) return true
+    if (type.includes('geometry') || type.includes('svg') || type.includes('vector')) return a.has_binary === true || !!a.raw_data
     // Formule : seulement si un binaire image existe (sinon dupliquerait le texte).
     if (type.includes('formula') || type.includes('latex') || type.includes('equation')) return a.has_binary === true
-    // Autres types Tier 3 : rendus s'ils ont un binaire.
+    // Autres types (source structurée / Tier 3) : rendus s'ils ont un binaire.
     return a.has_binary === true
   })
+
+  // Cadres quasi-pleine-page (area_ratio > 0.7) : re-cadrages de la page → masqués par défaut.
+  const isFullpage = (a: Artifact) => typeof a.area_ratio === 'number' && a.area_ratio > FULLPAGE_RATIO
+  const fullpage = renderable.filter(isFullpage)
+  const primary = renderable.filter(a => !isFullpage(a))
+  const visible = showFullpage ? [...primary, ...fullpage] : primary
 
   if (artifacts === null) {
     return (
@@ -63,6 +110,22 @@ export default function PageMedia({ db, documentId, page }: Props) {
     )
   }
   if (renderable.length === 0) return null
+  // Que des cadres pleine page → section réduite au seul lien de révélation.
+  if (primary.length === 0 && !showFullpage && fullpage.length === renderable.length) {
+    return (
+      <div className="page-media" style={{ marginTop: 14, paddingTop: 12, borderTop: '1px dashed var(--border-color)' }}>
+        <button
+          type="button"
+          className="btn btn-sm btn-link"
+          onClick={() => setShowFullpage(true)}
+          style={{ fontSize: '0.78rem', color: 'var(--text-muted)', padding: 0 }}
+          dir="auto"
+        >
+          {t('library.media_fullpage_toggle').replace('{n}', String(fullpage.length))}
+        </button>
+      </div>
+    )
+  }
 
   return (
     <div className="page-media" style={{ marginTop: 14, paddingTop: 12, borderTop: '1px dashed var(--border-color)' }}>
@@ -70,56 +133,53 @@ export default function PageMedia({ db, documentId, page }: Props) {
         <span className="badge badge-info" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
           <ImageIcon size={13} /> {t('library.media_section')}
         </span>
-        <span className="badge badge-subtle font-num">{renderable.length} {t('library.media_count_unit')}</span>
+        <span className="badge badge-subtle font-num">{primary.length} {t('library.media_count_unit')}</span>
       </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-        {renderable.map(a => {
-          const type = (a.artifact_type || '').toLowerCase()
-          const isImage = type.includes('illustration') || type.includes('image') || type.includes('figure') || (a.has_binary === true && !type.includes('table'))
-          const isTable = type.includes('table')
-          const badge = TYPE_BADGE[a.artifact_type] ?? a.artifact_type
-          const badgeIcon = isTable ? <Table2 size={12} /> : type.includes('formula') ? <Sigma size={12} /> : <ImageIcon size={12} />
-          const binaryUrl = api.library.getArtifactBinaryUrl(db, a.id)
+        {visible.map(a => {
+          const badge = arabicTypeBadge(a.artifact_type)
+          const binaryUrl = a.has_binary ? api.library.getArtifactBinaryUrl(db, a.id) : undefined
+          const isEmbedded = embedded.has(a.id)
 
           return (
             <figure key={a.id} className="page-media-item" style={{ margin: 0, background: 'var(--bg-card-inner)', border: '1px solid var(--border-color)', borderRadius: 12, padding: 12 }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
-                <span className="badge badge-secondary" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                  {badgeIcon} {badge}
+                <span className="badge badge-secondary" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }} dir="auto">
+                  <ImageIcon size={12} /> {badge}
                 </span>
-                {isImage && a.has_binary && (
-                  <button
-                    type="button"
-                    className="btn btn-sm btn-outline-secondary"
-                    onClick={() => setModal({ src: binaryUrl, title: a.caption ?? badge })}
-                    title={t('library.media_zoom')}
-                  >
-                    <Maximize2 size={12} /> {t('library.media_zoom')}
-                  </button>
-                )}
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                  {isEmbedded && (
+                    <span className="badge badge-subtle" dir="auto" title={t('library.media_embedded_in_text')}>
+                      {t('library.media_embedded_in_text')}
+                    </span>
+                  )}
+                  {binaryUrl && (
+                    <button
+                      type="button"
+                      className="btn btn-sm btn-outline-secondary"
+                      onClick={() => setModal({ src: binaryUrl, title: a.caption ?? badge })}
+                      title={t('library.media_zoom')}
+                    >
+                      <Maximize2 size={12} /> {t('library.media_zoom')}
+                    </button>
+                  )}
+                </span>
               </div>
 
-              {isTable ? (
-                <div className="page-media-table">
-                  {a.raw_data
-                    ? <MarkdownKatex lazy raw={a.raw_data} />
-                    : <div className="text-muted" dir="auto">{t('library.media_empty')}</div>}
+              {isEmbedded ? (
+                <div style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.82rem', padding: '6px 0' }} dir="auto">
+                  {t('library.media_embedded_in_text')}
                 </div>
-              ) : a.has_binary ? (
-                <img
-                  src={binaryUrl}
-                  loading="lazy"
-                  alt={a.caption ?? badge}
-                  onClick={() => setModal({ src: binaryUrl, title: a.caption ?? badge })}
-                  style={{ maxWidth: '100%', display: 'block', margin: '0 auto', borderRadius: 8, cursor: 'zoom-in' }}
-                  onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none' }}
+              ) : (
+                <ArtifactRenderer
+                  artifact={a}
+                  fallbackImageUrl={binaryUrl}
+                  onEnlarge={(src, title) => setModal({ src, title })}
                 />
-              ) : a.raw_data ? (
-                <MarkdownKatex lazy raw={a.raw_data} />
-              ) : null}
+              )}
 
-              {a.caption && (
+              {!isEmbedded && a.caption && (
                 <figcaption dir="auto" style={{ marginTop: 8, fontSize: '0.82rem', color: 'var(--text-muted)', textAlign: 'center' }}>
                   {a.caption}
                 </figcaption>
@@ -128,6 +188,20 @@ export default function PageMedia({ db, documentId, page }: Props) {
           )
         })}
       </div>
+
+      {fullpage.length > 0 && !showFullpage && (
+        <div style={{ marginTop: 10, textAlign: 'center' }}>
+          <button
+            type="button"
+            className="btn btn-sm btn-link"
+            onClick={() => setShowFullpage(true)}
+            style={{ fontSize: '0.78rem', color: 'var(--text-muted)', padding: 0 }}
+            dir="auto"
+          >
+            {t('library.media_fullpage_toggle').replace('{n}', String(fullpage.length))}
+          </button>
+        </div>
+      )}
 
       <ImageModal
         open={modal !== null}

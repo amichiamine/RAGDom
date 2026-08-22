@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """RAGDom — Routes /api/library/* (Blueprint §7.2 + §7.6 : corrections, benchmarks,
 curriculum GET, import Tier 3). Pagination tech_specs §14. Python 3.9+."""
+import json
 import struct
 import uuid
 from typing import Optional
@@ -122,22 +123,50 @@ def artifacts(db_name: str = Query(alias="db"), chunk_id: Optional[str] = None,
     try:
         where, args = [], []
         if chunk_id:
-            where.append("chunk_id=?"); args.append(chunk_id)
+            where.append("a.chunk_id=?"); args.append(chunk_id)
         if document_id:
-            where.append("document_id=?"); args.append(document_id)
+            where.append("a.document_id=?"); args.append(document_id)
         if page_number is not None:
-            where.append("page_number=?"); args.append(page_number)
+            where.append("a.page_number=?"); args.append(page_number)
         clause = " AND ".join(where) or "1=1"
+        # LEFT JOIN page_scans (mêmes document_id+page_number) pour disposer des dimensions
+        # de la page et calculer area_ratio = surface bbox / surface page. bounding_box_json
+        # est un DICT {"x0","y0","x1","y1"} → parse en Python (jamais en SQL).
         rows = conn.execute(
-            "SELECT id, domain, artifact_type, raw_data, render_config_json, caption,"
-            " bounding_box_json, is_human_edited, page_number, (raw_binary IS NOT NULL)"
-            " FROM scientific_artifacts WHERE %s ORDER BY page_number LIMIT 500" % clause, args).fetchall()
+            "SELECT a.id, a.domain, a.artifact_type, a.raw_data, a.render_config_json, a.caption,"
+            " a.bounding_box_json, a.is_human_edited, a.page_number, (a.raw_binary IS NOT NULL),"
+            " ps.width_px, ps.height_px"
+            " FROM scientific_artifacts a"
+            " LEFT JOIN page_scans ps ON ps.document_id=a.document_id AND ps.page_number=a.page_number"
+            " WHERE %s ORDER BY a.page_number LIMIT 500" % clause, args).fetchall()
         return {"artifacts": [{"id": r[0], "domain": r[1], "artifact_type": r[2], "raw_data": r[3],
                                "raw_binary": None, "render_config_json": r[4], "caption": r[5],
                                "bounding_box_json": r[6], "is_human_edited": r[7],
-                               "page_number": r[8], "has_binary": bool(r[9])} for r in rows]}
+                               "page_number": r[8], "has_binary": bool(r[9]),
+                               "area_ratio": _area_ratio(r[6], r[10], r[11])} for r in rows]}
     finally:
         conn.close()
+
+
+def _area_ratio(bbox_json: Optional[str], width_px: Optional[int],
+                height_px: Optional[int]) -> Optional[float]:
+    """Surface bbox / surface page (float 0-1, arrondi 3 décimales) ; None si non calculable.
+
+    bounding_box_json est un DICT {"x0","y0","x1","y1"} (coordonnées 300 DPI). On parse
+    en Python, on borne à [0,1] et on renvoie None dès qu'une donnée manque ou est invalide
+    (pas de scan joint, bbox absente/malformée, dimensions nulles)."""
+    if not bbox_json or not width_px or not height_px:
+        return None
+    try:
+        box = json.loads(bbox_json)
+        w = float(box["x1"]) - float(box["x0"])
+        h = float(box["y1"]) - float(box["y0"])
+        page_area = float(width_px) * float(height_px)
+        if w <= 0 or h <= 0 or page_area <= 0:
+            return None
+        return round(max(0.0, min(1.0, (w * h) / page_area)), 3)
+    except (ValueError, TypeError, KeyError):
+        return None
 
 
 @router.get("/artifact-binary")

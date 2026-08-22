@@ -137,6 +137,8 @@ export const api = {
     getSettings: () => request<{ settings: AppSettings }>('/system/settings'),
     getEngines: () => request<{ engines: EngineManifest[]; active_engine: string }>('/system/engines'), // V3.4
     updateSetting: (key: string, value: string) => request('/system/settings', { method: 'PUT', body: JSON.stringify({ key, value }) }),
+    // Documentation Make.com (LECTURE seule, route ADMIN) : { contract, prompts } en Markdown brut.
+    getMakeDocs: () => request<{ contract: string; prompts: string }>('/system/docs/make'),
   },
   library: {
     getDocuments: (db: string, page = 1, limit = 50) =>

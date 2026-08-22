@@ -1152,6 +1152,114 @@ La colonne `render_config_json` dans `scientific_artifacts` doit suivre **exacte
 
 ---
 
+## **12.1 CONTRAT DE PORTABILITÉ DE LA BASE AUTONOME (MAJ 2026-08-22)**
+
+Contrat **plug-and-play** normatif : ce qu'un consommateur (React, PHP, Electron, APK
+Android, No-Code) est en droit d'attendre d'un `.sqlite` RAGDom, sans aucune dépendance
+externe. Il fait autorité sur la lecture du contenu multimodal ; il ne redéfinit pas le
+DDL (§1) ni le dictionnaire des renderers (§12) — il en garantit la **consommabilité**.
+
+Référence de code : `backend/db/schema_core.sql` + `schema_vec.sql` (§1),
+`backend/api/routes_library.py` (`/artifacts`, `/artifact-binary`, `/page-scan`),
+`engines/sci-engine/pipeline/` (Couches 0→7 + 3bis). Les modules
+`artifact_qualifier.py` / `layer_2_extract.py` sont **EN COURS** d'écriture par un autre
+agent : les clauses ci-dessous décrivent le contrat **CIBLE** que ces modules doivent
+respecter, indépendamment de leur état d'implémentation courant.
+
+### **12.1.1 — Autonomie (un seul fichier)**
+
+Un unique fichier `.sqlite` contient **la totalité** du contenu servi à l'UI ; aucun lien
+vers `/sources/`, `/pipeline-set/` ni aucun asset disque n'est autorisé à la lecture :
+
+- **Texte du flux** : `document_chunks.content_markdown` (Markdown + LaTeX `$…$` / `$$…$$`).
+- **Sommaire hiérarchique** : `document_toc` (arbre `parent_id` / `level` 1→3).
+- **Scans de pages** : `page_scans` (`image_webp` pleine résolution BLOB + `thumb_webp`
+  vignette + `width_px` / `height_px` / `dpi`), pré-requis de la conversion BBox → CSS %.
+- **Artefacts** : `scientific_artifacts` portant, pour CHAQUE artefact :
+  - `raw_data` : payload textuel **structuré** (LaTeX, SVG, Markdown, SMILES, Mermaid,
+    JSON Plotly…) — peut être `NULL` ;
+  - `raw_binary` : découpe **WebP ORIGINALE** (BLOB) — **TOUJOURS conservée**, jamais
+    modifiée ni supprimée par une requalification ;
+  - `render_config_json` : configuration du renderer (§12) ;
+  - `caption` : légende textuelle ;
+  - `bounding_box_json` : dict `{"x0","y0","x1","y1"}` en pixels du scan (300 DPI).
+- **Recherche plein-texte** : table FTS5 `search_index` (peuplée par triggers).
+- **Recherche vectorielle** : `vec_chunks` (sqlite-vec) **si présente** ; son absence est
+  un état valide (repli BM25, §1 Règle Conditionnelle) — le consommateur ne doit jamais
+  la présumer.
+
+### **12.1.2 — Ancrage in-situ des illustrations**
+
+Une ancre `![caption](asset://artifacts/{artifact_id})` placée dans `content_markdown`
+signifie : « l'illustration `{artifact_id}` s'affiche **à CETTE position** du flux de
+lecture ». Résolution imposée :
+
+1. `{artifact_id}` → `SELECT` de la ligne `scientific_artifacts`.
+2. Si `raw_data` **non vide** → rendre selon `render_config_json` (renderer de §12).
+3. **Sinon** → servir `raw_binary` en `image/webp` (repli universel).
+4. L'**original** (`raw_binary`) reste **TOUJOURS disponible** en contrôle/comparateur,
+   même quand un rendu structuré existe (via `/api/library/artifact-binary`).
+
+Le schéma d'URI **`asset://figures/…`** est également reconnu : il est résolu côté
+frontend par `frontend/src/lib/markdownKatex.ts` (fonction `transformStructuredBlocks`,
+via le callback optionnel `resolveAsset(figureFileName)`). Un consommateur qui rencontre
+`asset://figures/NOM` doit fournir ce résolveur ; à défaut le nom brut est utilisé.
+Un consommateur peut donc rencontrer les deux schémas et doit les traiter comme des
+ancres d'illustration.
+
+### **12.1.3 — Familles v1 garanties**
+
+Tout consommateur conforme rend **au minimum** ces familles (le reste de §12 est réservé
+V3.x ; toute famille inconnue retombe sur le repli universel `raw_binary`) :
+
+| `artifact_type` | Renderer (§12) | Couvre |
+|---|---|---|
+| `latex_formula` | katex | Formules mathématiques |
+| `matrix` | katex | Matrices **ET** opérations posées (`\begin{array}`) |
+| `data_table` | tanstack-table | Tableaux de données |
+| `geometry_vector` | svg | Géométrie, dessins libres, schémas fléchés, démonstrations visuelles |
+| `flowchart` | mermaid | Organigrammes, diagrammes d'états |
+| `signal_waveform` | plotly | Courbes / signaux (Plotly JSON) |
+| `smiles_chem` | ketcher | Molécules (SMILES) |
+| `code_snippet` | shiki | Extraits de code |
+| `dense_illustration` | openseadragon | Illustration dense / repli image |
+
+**Repli universel** : pour tout `artifact_type` non géré, ou tout `raw_data` vide, le
+consommateur affiche `raw_binary` (`image/webp`). Aucun artefact n'est jamais « perdu ».
+
+### **12.1.4 — Sémantique pédagogique (clé additive)**
+
+`render_config_json` **peut** porter une clé additive
+`"semantic": "demonstration" | "illustration" | "exercise_support"`, **quel que soit** le
+`artifact_type` — une démonstration peut être un schéma fléché, un dessin libre ou une
+suite d'opérations posées. Cette clé est **purement additive** : un renderer de §12 qui
+l'ignore fonctionne à l'identique (aucun dommage). Un consommateur pédagogique peut la
+lire pour adapter l'affichage (badge, regroupement, filtrage).
+
+### **12.1.5 — Ordre & fidélité de lecture**
+
+- **Ordre canonique** = ordre d'apparition des ancres `asset://…` dans `content_markdown`.
+- **À défaut d'ancre** = tri stable `(page_number, y0, x0)` (y0/x0 issus de
+  `bounding_box_json`).
+- **Recadrage de contrôle** : une bbox couvrant **> 70 %** de la surface de la page est un
+  recadrage de contrôle (quasi pleine page), **pas** une figure de contenu. Le ratio est
+  exposé par l'API sous `area_ratio` (float borné `[0,1]`, `GET /api/library/artifacts` ;
+  `NULL` si non calculable). Un consommateur peut masquer/dé-prioriser ces artefacts.
+
+### **12.1.6 — Recette de conformité consommateur (checklist 7 points)**
+
+Un consommateur est déclaré conforme s'il réussit, sur une base fournie **seule** :
+
+1. **Ouvrir** le `.sqlite` sans aucun fichier annexe (ni `/sources/`, ni `/pipeline-set/`).
+2. **Résoudre** une ancre `asset://artifacts/{id}` → ligne `scientific_artifacts`.
+3. **Rendre** un artefact **SVG** (`geometry_vector`).
+4. **Rendre** un artefact **LaTeX** (`latex_formula` ou `matrix`).
+5. **Rendre** un artefact **tableau** (`data_table`).
+6. **Afficher** l'**original** `raw_binary` d'un artefact dans un comparateur côté rendu.
+7. **Lire** la clé `semantic` d'un artefact (et l'ignorer sans erreur si absente).
+
+---
+
 ## **13. RÈGLES DE GÉNÉRATION doc_source ET domain_tags_json**
 
 Ces champs sont **auto-générés** par l'orchestrateur lors de l'enregistrement d'un nouveau document. L'agent ne doit jamais les saisir manuellement.

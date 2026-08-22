@@ -1,5 +1,18 @@
 # JOURNAL des passes (le plus récent en premier)
 
+## 2026-08-22 11:15 — V4.0 : MULTIMODAL STRUCTURÉ PORTABLE (contrat consolidé 7 messages)
+- Qualifieur VLM toutes familles (artifact_qualifier.py) : geometry/dessins libres/
+  opérations posées (LaTeX array)/diagrammes états-structures/organigrammes (Mermaid)/
+  courbes (Plotly JSON)/matrices/tableaux/chimie (SMILES)/code + SÉMANTIQUE pédagogique
+  (demonstration/illustration/exercise_support dans render_config_json).
+- ANCRAGE in-situ : ![caption](asset://artifacts/{id}) écrit dans content_markdown
+  (marqueurs [[FIGURE:n]] au prompt OCR, tri y0/x0, repli au ratio de paragraphe) —
+  base .sqlite plug-and-play (contrat consigné tech_specs §12.1).
+- Originaux WebP TOUJOURS conservés (comparateur UI : structuré/original/comparer).
+- POST /pipeline/requalify-artifacts (corpus existant, sans ré-OCR, idempotent).
+- Frontend : ancres rendues in-situ par famille, badges sémantiques, galerie de
+  contrôle dédupliquée, area_ratio>0.7 masqués. 84 tests, tsc 0, 0 dépendance ajoutée.
+- Guide déploiement HTML refondu exhaustif (46,7 Ko autonome).
 ## 2026-08-22 03:05 — V3.12 : GRAND AUDIT 4 axes + mise en conformité totale
 - Audits parallèles : live-navigateur (0 erreur console, 2 écarts), contrats
   front↔back (1 bloquant key_id, 2 latents db manquant, types mensongers),

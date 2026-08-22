@@ -1,0 +1,276 @@
+# -*- coding: utf-8 -*-
+"""sci-engine — Qualification VLM des artefacts visuels (tech_specs §12).
+
+Contrat consolidé (multimodal COMPLET) : les découpes WebP `dense_illustration`
+(Tier 1) qui sont de VRAIES sous-figures (et non des cadres quasi-pleine-page)
+sont soumises à un VLM qui tente de les RE-TYPER FINEMENT, de les STRUCTURER en
+base ET de consigner leur SÉMANTIQUE pédagogique.
+
+Familles traitées (chaque artefact TYPÉ + STRUCTURÉ + SÉMANTIQUE) :
+
+  geometry / drawing / diagram-svg + svg valide  → geometry_vector (svg, katex-free)
+  operation (opération posée) / matrix + latex   → matrix         (LaTeX, katex)
+  diagram-mermaid / flowchart      + mermaid      → flowchart      (mermaid)
+  plot                             + plotly_json  → signal_waveform (plotly)
+  table                            + markdown     → data_table     (markdown)
+  chemistry                        + smiles       → smiles_chem    (ketcher)
+  code                             + code+lang    → code_snippet   (shiki)
+  photo / other / échec                           → None (reste dense_illustration ;
+                                                    caption maj si renvoyée)
+
+SÉMANTIQUE : une DÉMONSTRATION = enchaînement qui PROUVE/EXPLIQUE une propriété
+(souvent flèches/étapes, quelle qu'en soit la FORME : schéma fléché, dessin libre
+démonstratif, enchaînement annoté). Détectée quel que soit le `type`. Le champ
+`semantic` non-null est FUSIONNÉ dans render_config_json (clé additive, ignorée
+par les renderers) — y compris pour un dense_illustration conservé.
+
+EXIGENCE ABSOLUE : le `raw_binary` (crop WebP original) n'est JAMAIS modifié ni
+supprimé — il sert de comparateur / contrôle visuel dans l'UI à côté du rendu
+structuré. Ce module ne renvoie QUE le nouveau typage textuel ; l'appelant
+(couche 2 ou route de requalification) conserve le binaire tel quel.
+
+Le pipeline NE S'ARRÊTE JAMAIS ici : toute erreur (VLM injoignable, JSON
+illisible, SVG hors gabarit…) renvoie None ou un simple caption. Python 3.9+.
+"""
+import base64
+import json
+import re
+
+# ── Gabarits render_config_json (tech_specs §12, verbatim) ──
+_RC_GEOMETRY = {"renderer": "svg", "sanitize": True, "zoomable": True}
+_RC_MATRIX = {"renderer": "katex", "displayMode": True, "throwOnError": False}
+_RC_FLOWCHART = {"renderer": "mermaid", "theme": "default"}
+_RC_PLOT = {"renderer": "plotly", "type": "scatter"}
+_RC_TABLE = {"renderer": "tanstack-table", "pagination": True, "pageSize": 20}
+_RC_CHEM = {"renderer": "ketcher", "readOnly": True}
+_RC_CODE = {"renderer": "shiki", "lang": "text", "theme": "github-dark"}
+_RC_DENSE = {"renderer": "openseadragon", "tileSources": None, "showNavigator": True}
+
+_SVG_MAX_BYTES = 200 * 1024  # SVG autonome < 200 Ko (garde-fou UI)
+_SVG_RE = re.compile(r"<svg\b[^>]*>.*</svg>", re.S | re.I)
+
+_VALID_TYPES = {"geometry", "drawing", "operation", "diagram", "flowchart",
+                "plot", "matrix", "table", "chemistry", "code", "photo", "other"}
+_VALID_SEMANTICS = {"demonstration", "illustration", "exercise_support"}
+
+_PROMPT = (
+    "Tu es un extracteur d'artefacts scientifiques. On te donne l'image d'UNE figure "
+    "issue d'un manuel scolaire (langue arabe, sens RTL). Analyse-la et réponds "
+    "STRICTEMENT par UN SEUL objet JSON, sans texte avant ni après, sans balise "
+    "Markdown, au format EXACT :\n"
+    '{"type":"geometry|drawing|operation|diagram|flowchart|plot|matrix|table|'
+    'chemistry|code|photo|other",'
+    '"semantic":"demonstration|illustration|exercise_support|null",'
+    '"caption_ar":"légende courte en arabe",'
+    '"svg":null,"latex":null,"mermaid":null,"plotly_json":null,"markdown":null,'
+    '"smiles":null,"code":null,"lang":null}\n'
+    "Règles de TYPE :\n"
+    "- geometry / drawing (y compris DESSIN LIBRE démonstratif) → \"svg\" : "
+    "reproduction FIDÈLE (traits, points, labels, FLÈCHES et ANNOTATIONS comprises) "
+    "en SVG autonome (<svg ...>...</svg> avec viewBox ; texte arabe autorisé).\n"
+    "- operation (opération POSÉE : addition/soustraction/multiplication/division "
+    "en colonnes) → \"latex\" avec \\begin{array} FIDÈLE (retenues en exposant).\n"
+    "- diagram (état / structure / décomposition / schéma FLÉCHÉ) → \"mermaid\" si "
+    "c'est un graphe ou un flux, SINON \"svg\".\n"
+    "- flowchart (organigramme) → \"mermaid\".\n"
+    "- plot (courbe / graphique) → \"plotly_json\" : "
+    '{"data":[{"x":[...],"y":[...],"type":"scatter"}],"layout":{"title":"..."}}.\n'
+    "- matrix → \"latex\" (matrice/expression, sans délimiteurs $).\n"
+    "- table → \"markdown\" (tableau Markdown avec | et ---).\n"
+    "- chemistry → \"smiles\" (chaîne SMILES).\n"
+    "- code → \"code\" (le code) ET \"lang\" (le langage).\n"
+    "- photo (photographie réelle) / other → tous les champs de contenu à null.\n"
+    "Règle de SÉMANTIQUE :\n"
+    "- \"semantic\"=\"demonstration\" si la figure PROUVE ou EXPLIQUE une propriété "
+    "par un ENCHAÎNEMENT (étapes, flèches, annotations) — quelle qu'en soit la forme "
+    "(schéma fléché, dessin libre démonstratif, enchaînement annoté).\n"
+    "- \"illustration\" si purement illustrative ; \"exercise_support\" si support "
+    "d'exercice ; null si indéterminé.\n"
+    "- \"caption_ar\" est TOUJOURS une légende courte en arabe.\n"
+    "Ne renvoie QUE le JSON.")
+
+
+def _extract_json(text):
+    """Parse robuste : isole le PREMIER objet {...} équilibré et json.loads.
+
+    Tolère les préambules, les clôtures ```json, et le bruit après l'objet.
+    Renvoie un dict ou None (jamais d'exception)."""
+    if not text or not isinstance(text, str):
+        return None
+    start = text.find("{")
+    if start < 0:
+        return None
+    depth = 0
+    in_str = False
+    escape = False
+    for i in range(start, len(text)):
+        ch = text[i]
+        if in_str:
+            if escape:
+                escape = False
+            elif ch == "\\":
+                escape = True
+            elif ch == '"':
+                in_str = False
+            continue
+        if ch == '"':
+            in_str = True
+        elif ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                candidate = text[start:i + 1]
+                try:
+                    parsed = json.loads(candidate)
+                    return parsed if isinstance(parsed, dict) else None
+                except (ValueError, TypeError):
+                    return None
+    return None
+
+
+def _valid_svg(svg):
+    if not svg or not isinstance(svg, str):
+        return False
+    if not _SVG_RE.search(svg):
+        return False
+    return len(svg.encode("utf-8")) < _SVG_MAX_BYTES
+
+
+def _valid_plotly(payload):
+    """plotly_json valide = objet avec un tableau `data` non vide (ou chaîne JSON idem)."""
+    obj = payload
+    if isinstance(payload, str):
+        try:
+            obj = json.loads(payload)
+        except (ValueError, TypeError):
+            return None
+    if not isinstance(obj, dict):
+        return None
+    data = obj.get("data")
+    if not isinstance(data, list) or not data:
+        return None
+    return json.dumps(obj, ensure_ascii=False)
+
+
+def _clean(value):
+    return value.strip() if isinstance(value, str) and value.strip() else None
+
+
+def _semantic_of(parsed):
+    sem = parsed.get("semantic")
+    sem = sem.strip().lower() if isinstance(sem, str) else None
+    return sem if sem in _VALID_SEMANTICS else None
+
+
+def _with_semantic(render_config: dict, semantic):
+    """Fusionne la sémantique (clé additive) dans le render_config et sérialise."""
+    rc = dict(render_config)
+    if semantic:
+        rc["semantic"] = semantic
+    return json.dumps(rc, ensure_ascii=False)
+
+
+def _map_result(parsed):
+    """Applique le mapping type→artefact structuré (tech_specs §12) + sémantique.
+
+    Renvoie un dict {artifact_type, raw_data, render_config_json, caption,
+    searchable_text, semantic} prêt à persister. Si le type est
+    photo/other/échec de structuration : renvoie un dict SANS artifact_type
+    (l'artefact reste dense_illustration) mais qui porte tout de même `caption`
+    et `semantic` (fusion additive côté appelant). Renvoie None si le VLM n'a
+    rien d'exploitable (pas de dict / type invalide / ni caption ni semantic)."""
+    if not isinstance(parsed, dict):
+        return None
+    art_type = parsed.get("type")
+    if art_type not in _VALID_TYPES:
+        art_type = None
+    caption = _clean(parsed.get("caption_ar"))
+    semantic = _semantic_of(parsed)
+    latex = _clean(parsed.get("latex"))
+    svg = _clean(parsed.get("svg"))
+    mermaid = _clean(parsed.get("mermaid"))
+    markdown = _clean(parsed.get("markdown"))
+    smiles = _clean(parsed.get("smiles"))
+    code = _clean(parsed.get("code"))
+    lang = _clean(parsed.get("lang"))
+    plotly = _valid_plotly(parsed.get("plotly_json"))
+
+    new_type = raw_data = base_rc = None
+    if art_type in ("geometry", "drawing") and _valid_svg(svg):
+        new_type, raw_data, base_rc = "geometry_vector", svg, _RC_GEOMETRY
+    elif art_type == "diagram" and _valid_svg(svg) and not mermaid:
+        new_type, raw_data, base_rc = "geometry_vector", svg, _RC_GEOMETRY
+    elif art_type == "diagram" and mermaid:
+        new_type, raw_data, base_rc = "flowchart", mermaid, _RC_FLOWCHART
+    elif art_type == "flowchart" and mermaid:
+        new_type, raw_data, base_rc = "flowchart", mermaid, _RC_FLOWCHART
+    elif art_type in ("operation", "matrix") and latex:
+        new_type, raw_data, base_rc = "matrix", "$$%s$$" % latex.strip("$"), _RC_MATRIX
+    elif art_type == "plot" and plotly:
+        new_type, raw_data, base_rc = "signal_waveform", plotly, _RC_PLOT
+    elif art_type == "table" and markdown:
+        new_type, raw_data, base_rc = "data_table", markdown, _RC_TABLE
+    elif art_type == "chemistry" and smiles:
+        new_type, raw_data, base_rc = "smiles_chem", smiles, _RC_CHEM
+    elif art_type == "code" and code:
+        rc = dict(_RC_CODE)
+        rc["lang"] = lang or "text"
+        new_type, raw_data, base_rc = "code_snippet", code, rc
+
+    if new_type is None:
+        # photo / other / structure attendue absente → NON requalifié : l'artefact
+        # reste dense_illustration. On renvoie tout de même caption + semantic pour
+        # que l'appelant mette à jour la légende et fusionne la sémantique.
+        if caption is None and semantic is None:
+            return None
+        return {"artifact_type": None, "raw_data": None,
+                "render_config_json": _with_semantic(_RC_DENSE, semantic) if semantic else None,
+                "caption": caption, "semantic": semantic,
+                "searchable_text": caption}
+
+    searchable = (caption or "") + " " + (raw_data or "")
+    return {
+        "artifact_type": new_type,
+        "raw_data": raw_data,
+        "render_config_json": _with_semantic(base_rc, semantic),
+        "caption": caption,
+        "semantic": semantic,
+        "searchable_text": searchable.strip()[:500] or new_type,
+    }
+
+
+def qualify_visual_artifact(webp_bytes, generate_fn, timeout_s=60):
+    """Qualifie UNE découpe WebP via VLM et renvoie le nouveau typage structuré.
+
+    Args:
+        webp_bytes  : bytes du crop WebP original (JAMAIS modifié).
+        generate_fn : callable(prompt, image_b64=..., timeout_s=...) → dict|None
+                      (typiquement backend.llm.key_manager.generate).
+        timeout_s   : délai VLM.
+
+    Returns:
+        dict|None. En cas de RE-TYPAGE : {artifact_type, raw_data,
+        render_config_json, caption, searchable_text, semantic}. En cas de
+        photo/other mais avec légende/sémantique utile : même forme mais
+        artifact_type=None (l'appelant garde dense_illustration + met à jour
+        caption / fusionne semantic). None si rien d'exploitable.
+        Ne lève JAMAIS : le pipeline ne s'arrête pas ici.
+    """
+    if not webp_bytes or generate_fn is None:
+        return None
+    try:
+        image_b64 = base64.b64encode(webp_bytes).decode("ascii")
+    except (TypeError, ValueError):
+        return None
+    try:
+        result = generate_fn(_PROMPT, image_b64=image_b64, timeout_s=timeout_s)
+    except Exception:  # noqa: BLE001 — VLM injoignable / exception provider : on abandonne
+        return None
+    if not result or not isinstance(result, dict):
+        return None
+    parsed = _extract_json(result.get("content"))
+    mapped = _map_result(parsed)
+    if mapped is not None and result.get("provider"):
+        mapped["vlm_provider"] = result.get("provider")
+    return mapped

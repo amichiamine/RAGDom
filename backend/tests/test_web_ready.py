@@ -87,6 +87,25 @@ def test_ask_rate_limit(monkeypatch):
                        json={"query": "q"}).status_code != 429
 
 
+def test_make_docs_route():
+    # LECTURE seule : renvoie {contract, prompts} non vides (docs/make/*.md présents).
+    res = client.get("/api/system/docs/make")
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert isinstance(body.get("contract"), str) and "Contrat" in body["contract"]
+    assert isinstance(body.get("prompts"), str) and "AI Scenario Builder" in body["prompts"]
+    # Route d'ADMINISTRATION : jamais classée publique.
+    assert not is_public("GET", "/api/system/docs/make")
+
+
+def test_make_docs_is_admin_guarded(monkeypatch):
+    monkeypatch.setattr(config, "RAGDOM_AUTH_TOKEN", "s3cret")
+    # Sans jeton : 401 (admin) ; avec le bon jeton : 200.
+    assert client.get("/api/system/docs/make").status_code == 401
+    assert client.get("/api/system/docs/make",
+                      headers={"Authorization": "Bearer s3cret"}).status_code == 200
+
+
 def test_reveal_lock(monkeypatch):
     monkeypatch.setattr(config, "RAGDOM_ALLOW_REVEAL", False)
     created = client.post("/api/llm/keys", json={"provider": "gemini", "api_key": "AIzaFAKEXXXX9999"})

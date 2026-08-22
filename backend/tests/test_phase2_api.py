@@ -358,3 +358,36 @@ def test_curriculum_aggregate_courses_reflects_toc():
             path = os.path.join(config.DATABASES_DIR, agg_db + suffix)
             if os.path.exists(path):
                 os.remove(path)
+
+
+# ── Requalification VLM du corpus (§12) : forme du dry_run (route admin) ──
+def test_requalify_artifacts_dry_run_shape():
+    """dry_run = comptes seuls, aucune donnée modifiée, forme de réponse stable.
+
+    Le mini-manuel natif n'a pas de crops dense_illustration → candidates=0, mais
+    la FORME de la réponse (clés du contrat) doit être respectée et le dry_run ne
+    doit JAMAIS toucher la base ni exiger un provider VLM."""
+    response = client.post("/api/pipeline/requalify-artifacts",
+                           json={"db": TEST_DB, "dry_run": True, "limit": 85})
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    for key in ("dry_run", "candidates", "requalified", "anchored",
+                "by_type", "by_semantic", "skipped_failures"):
+        assert key in payload, "clé manquante : %s" % key
+    assert payload["dry_run"] is True
+    assert payload["requalified"] == 0 and payload["anchored"] == 0
+    assert isinstance(payload["candidates"], int)
+    assert isinstance(payload["by_type"], dict) and isinstance(payload["by_semantic"], dict)
+
+
+def test_requalify_artifacts_is_admin_guarded():
+    """La route de requalification est ADMIN : masquée en mode consultation (404)."""
+    import config as _cfg
+    original = _cfg.RAGDOM_READONLY
+    _cfg.RAGDOM_READONLY = True
+    try:
+        r = client.post("/api/pipeline/requalify-artifacts",
+                        json={"db": TEST_DB, "dry_run": True})
+        assert r.status_code == 404
+    finally:
+        _cfg.RAGDOM_READONLY = original

@@ -8,6 +8,7 @@ import os
 import queue as queue_module
 import re
 import threading
+import time
 import uuid
 from typing import List, Optional
 
@@ -437,6 +438,215 @@ def reset(db_name: str = Query(alias="db"), document_id: Optional[str] = None):
     result = purge(body)
     return {"success": True, "deleted_chunks": result["deleted"]["chunks"],
             "deleted_artifacts": result["deleted"]["artifacts"], "message": "Base réinitialisée."}
+
+
+class RequalifyBody(BaseModel):
+    retry_failed: bool = False
+    pace_s: float = 4.0  # cadence anti-RPM entre appels VLM
+    """Requalification VLM du corpus EXISTANT (contrat consolidé §12) : reprend les
+    dense_illustration à raw_binary NON NULL et ≤70 % de page, les RE-TYPE +
+    STRUCTURE + SÉMANTIQUE, et (option) les ANCRE dans le chunk à leur vraie
+    position. raw_binary JAMAIS supprimé. Route admin."""
+    db: str
+    document_id: Optional[str] = None
+    limit: int = 200
+    dry_run: bool = False
+    anchor: bool = True
+
+
+def _qualifier_and_generate():
+    """(qualify_visual_artifact, generate) chargés depuis le moteur actif + noyau.
+
+    Renvoie (None, None) si RAGDOM_VLM_ARTIFACTS=false ou si l'un des deux est
+    indisponible (le corpus n'est alors pas modifié)."""
+    if os.environ.get("RAGDOM_VLM_ARTIFACTS", "auto").lower() == "false":
+        return None, None
+    try:
+        from core import engine_registry
+        manifest = engine_registry.active_engine()
+        if manifest is None:
+            return None, None
+        module = engine_registry.load_layer(manifest["id"], "artifact_qualifier")
+        qualify_fn = module.qualify_visual_artifact
+    except Exception:  # noqa: BLE001
+        return None, None
+    try:
+        from llm.key_manager import generate
+    except Exception:  # noqa: BLE001
+        return None, None
+    return qualify_fn, generate
+
+
+def _requalify_area_ratio(bbox_json, width_px, height_px):
+    """area_ratio depuis bounding_box_json (DICT) + dimensions page_scans. None si
+    non calculable (traité comme candidat exclu > seuil)."""
+    if not bbox_json or not width_px or not height_px:
+        return None
+    try:
+        box = json.loads(bbox_json)
+        w = float(box["x1"]) - float(box["x0"])
+        h = float(box["y1"]) - float(box["y0"])
+        page = float(width_px) * float(height_px)
+        if w <= 0 or h <= 0 or page <= 0:
+            return None
+        return (w * h) / page
+    except (ValueError, TypeError, KeyError):
+        return None
+
+
+_PARA_RE = re.compile(r"\n\n+")
+
+
+def _anchor_in_chunk(conn, artifact_id: str, caption: Optional[str], document_id: str,
+                     page_number: int, y0: Optional[float], page_height: Optional[int]) -> bool:
+    """Ancre idempotente `![caption](asset://artifacts/{id})` dans le chunk (même
+    doc+page) au \\n\\n le plus proche du ratio y0/page_height. Ne réinsère pas si
+    l'ancre existe déjà (idempotent). Déclenche le trigger FTS via UPDATE. True si
+    modifié."""
+    marker = "asset://artifacts/%s" % artifact_id
+    row = conn.execute(
+        "SELECT id, content_markdown FROM document_chunks"
+        " WHERE document_id=? AND page_number=? ORDER BY chunk_index LIMIT 1",
+        (document_id, page_number)).fetchone()
+    if row is None:
+        return False
+    chunk_id, md = row[0], row[1] or ""
+    if marker in md:
+        return False  # déjà ancré (idempotent)
+    image_md = "![%s](%s)" % (caption or "", marker)
+    seps = [m.start() for m in _PARA_RE.finditer(md)]
+    if seps and page_height and y0 is not None:
+        ratio = max(0.0, min(1.0, float(y0) / float(page_height)))
+        target = ratio * max(1, len(md))
+        offset = min(seps, key=lambda s: abs(s - target))
+        new_md = md[:offset] + "\n\n" + image_md + md[offset:]
+    else:
+        new_md = (md + "\n\n" + image_md) if md else image_md
+    conn.execute("UPDATE document_chunks SET content_markdown=? WHERE id=?", (new_md, chunk_id))
+    return True
+
+
+@router.post("/requalify-artifacts")
+def requalify_artifacts(body: RequalifyBody):
+    """Requalification VLM du corpus existant (§12). dry_run = comptes ; réel =
+    UPDATE type/raw_data/render_config_json/caption/searchable_text (+ ancre)."""
+    conn = db.get_connection_or_http(body.db)
+    try:
+        where, args = ["a.artifact_type='dense_illustration'", "a.raw_binary IS NOT NULL"], []
+        if body.document_id:
+            where.append("a.document_id=?"); args.append(body.document_id)
+        if not body.retry_failed:  # ne pas retenter en boucle les échecs marqués
+            where.append("(a.render_config_json IS NULL OR (a.render_config_json"
+                         " NOT LIKE '%vlm_failed_at%' AND a.render_config_json"
+                         " NOT LIKE '%vlm_qualified_at%'))")
+        rows = conn.execute(
+            "SELECT a.id, a.document_id, a.page_number, a.bounding_box_json, a.caption,"
+            " ps.width_px, ps.height_px"
+            " FROM scientific_artifacts a"
+            " LEFT JOIN page_scans ps ON ps.document_id=a.document_id AND ps.page_number=a.page_number"
+            " WHERE %s ORDER BY a.page_number" % " AND ".join(where),
+            args).fetchall()
+
+        # Candidats = dense_illustration, raw_binary NON NULL, ≤70 % (bbox DICT).
+        # `limit` borne le NOMBRE DE CANDIDATS traités (pas la fenêtre SQL) : un
+        # petit limit qui ne tomberait que sur des cadres pleine-page traiterait
+        # sinon 0 sous-figure.
+        cap = max(1, min(body.limit, 2000))
+        candidates = []
+        for r in rows:
+            ratio = _requalify_area_ratio(r[3], r[5], r[6])
+            if ratio is not None and ratio <= 0.70:
+                candidates.append(r)
+                if len(candidates) >= cap:
+                    break
+
+        if body.dry_run:
+            return {"dry_run": True, "candidates": len(candidates), "requalified": 0,
+                    "anchored": 0, "by_type": {}, "by_semantic": {}, "skipped_failures": 0}
+
+        qualify_fn, generate_fn = _qualifier_and_generate()
+        if qualify_fn is None or generate_fn is None:
+            raise HTTPException(503, "Qualification VLM indisponible (RAGDOM_VLM_ARTIFACTS=false,"
+                                     " moteur inactif ou noyau LLM injoignable)")
+
+        timeout_s = int(config.VLM_TIMEOUT_SECONDS)
+        requalified = anchored = skipped_failures = 0
+        by_type: dict = {}
+        by_semantic: dict = {}
+        conn.execute("BEGIN")
+        for art_id, doc_id, page_number, bbox_json, _caption, _w, page_h in candidates:
+            blob = conn.execute("SELECT raw_binary FROM scientific_artifacts WHERE id=?",
+                                (art_id,)).fetchone()
+            if blob is None or blob[0] is None:
+                skipped_failures += 1
+                continue
+            try:
+                result = qualify_fn(blob[0], generate_fn, timeout_s=timeout_s)
+            except Exception:  # noqa: BLE001 — jamais d'arrêt
+                result = None
+            if body.pace_s > 0:
+                time.sleep(min(body.pace_s, 15.0))  # respect du RPM des providers
+            if not result or not result.get("artifact_type"):
+                # photo/other/échec : caption + sémantique éventuelles mises à jour.
+                if result and (result.get("caption") or result.get("render_config_json")):
+                    # Photo/other CLASSÉ : marquer vlm_qualified_at pour ne plus le re-soumettre.
+                    import datetime as _dt
+                    try:
+                        cfg = json.loads(result.get("render_config_json") or "{}")
+                    except ValueError:
+                        cfg = {}
+                    cfg["vlm_qualified_at"] = _dt.datetime.utcnow().isoformat()
+                    conn.execute(
+                        "UPDATE scientific_artifacts SET caption=COALESCE(?,caption),"
+                        " render_config_json=? WHERE id=?",
+                        (result.get("caption"), json.dumps(cfg, ensure_ascii=False), art_id))
+                    if result.get("semantic"):
+                        by_semantic[result["semantic"]] = by_semantic.get(result["semantic"], 0) + 1
+                else:
+                    skipped_failures += 1
+                    # Marqueur persistant : exclu des prochaines vagues (retry_failed pour retenter)
+                    import datetime as _dt
+                    prev = conn.execute("SELECT render_config_json FROM scientific_artifacts"
+                                        " WHERE id=?", (art_id,)).fetchone()
+                    try:
+                        cfg = json.loads(prev[0]) if prev and prev[0] else {}
+                    except ValueError:
+                        cfg = {}
+                    cfg["vlm_failed_at"] = _dt.datetime.utcnow().isoformat()
+                    conn.execute("UPDATE scientific_artifacts SET render_config_json=? WHERE id=?",
+                                 (json.dumps(cfg, ensure_ascii=False), art_id))
+                continue
+            conn.execute(
+                "UPDATE scientific_artifacts SET artifact_type=?, raw_data=?,"
+                " render_config_json=?, caption=COALESCE(?,caption), searchable_text=? WHERE id=?",
+                (result["artifact_type"], result["raw_data"], result["render_config_json"],
+                 result.get("caption"), result.get("searchable_text") or result["artifact_type"],
+                 art_id))
+            requalified += 1
+            by_type[result["artifact_type"]] = by_type.get(result["artifact_type"], 0) + 1
+            if result.get("semantic"):
+                by_semantic[result["semantic"]] = by_semantic.get(result["semantic"], 0) + 1
+            if body.anchor:
+                y0 = None
+                try:
+                    y0 = float(json.loads(bbox_json)["y0"]) if bbox_json else None
+                except (ValueError, TypeError, KeyError):
+                    y0 = None
+                if _anchor_in_chunk(conn, art_id, result.get("caption"), doc_id,
+                                    page_number, y0, page_h):
+                    anchored += 1
+        conn.commit()
+        return {"dry_run": False, "candidates": len(candidates), "requalified": requalified,
+                "anchored": anchored, "by_type": by_type, "by_semantic": by_semantic,
+                "skipped_failures": skipped_failures}
+    except HTTPException:
+        conn.rollback()
+        raise
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
 
 
 @router.get("/quarantine")

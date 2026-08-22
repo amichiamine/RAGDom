@@ -3,8 +3,9 @@ import {
   BookOpen, ChevronsDown, ChevronsUp, ChevronDown, FileImage, PenTool,
   GraduationCap, Image as ImageIcon, X, Expand,
 } from 'lucide-react'
-import type { Chunk, CurriculumPayload, Document, PedagogicalType, TocNode } from '@/types'
+import type { Artifact, Chunk, CurriculumPayload, Document, PedagogicalType, TocNode } from '@/types'
 import { api } from '@/lib/api'
+import { splitMarkdownOnArtifactAnchors } from '@/lib/markdownKatex'
 import { useCurriculumBridge, HighlightTarget } from '@/contexts/CurriculumBridgeContext'
 import BridgeButton from '@/components/library/BridgeButton'
 import MarkdownKatex from '@/components/library/MarkdownKatex'
@@ -136,6 +137,10 @@ function CoursCard({ cours, open, onToggle, activeDb, documentId, termIndex, onO
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [sideBySide, setSideBySide] = useState(false)
+  // Cache des artefacts par page (alimenté par PageMedia.onLoaded), partagé avec
+  // le rendu intercalé (asset://artifacts/{id}) → métadonnées sans refetch.
+  const [artifactsByPage, setArtifactsByPage] = useState<Map<number, Artifact[]>>(() => new Map())
+  const [enlarged, setEnlarged] = useState<{ src: string; title: string } | null>(null)
 
   // Chargement paresseux des chunks du chapitre (une seule fois, à l'ouverture).
   // PIÈGE ÉVITÉ : ni `loading` ni `chunks` dans les deps — setLoading(true)
@@ -176,6 +181,41 @@ function CoursCard({ cours, open, onToggle, activeDb, documentId, termIndex, onO
     (artifactRef: string) => api.library.getArtifactBinaryUrl(activeDb, artifactRef),
     [activeDb],
   )
+
+  // Index id → Artifact (toutes pages chargées) pour le rendu intercalé.
+  const artifactById = useMemo(() => {
+    const idx = new Map<string, Artifact>()
+    for (const list of artifactsByPage.values()) for (const a of list) idx.set(a.id, a)
+    return idx
+  }, [artifactsByPage])
+
+  const artifactResolver = useCallback((id: string) => artifactById.get(id), [artifactById])
+  const artifactBinaryUrl = useCallback(
+    (id: string) => api.library.getArtifactBinaryUrl(activeDb, id),
+    [activeDb],
+  )
+  const onArtifactsLoaded = useCallback((pageNo: number, list: Artifact[]) => {
+    setArtifactsByPage(prev => {
+      const next = new Map(prev)
+      next.set(pageNo, list)
+      return next
+    })
+  }, [])
+
+  // IDs d'artefacts ancrés (`asset://artifacts/{id}`) par page → dédup PageMedia.
+  const embeddedByPage = useMemo(() => {
+    const map = new Map<number, Set<string>>()
+    for (const ch of chunks ?? []) {
+      const ids = splitMarkdownOnArtifactAnchors(ch.content_markdown)
+        .filter(s => s.kind === 'artifact')
+        .map(s => (s as { id: string }).id)
+      if (!ids.length) continue
+      const set = map.get(ch.page_number) ?? new Set<string>()
+      ids.forEach(id => set.add(id))
+      map.set(ch.page_number, set)
+    }
+    return map
+  }, [chunks])
 
   // Ouverture du scan liée au document propre de cette carte (repli document = unité).
   const openScan = useCallback(
@@ -273,11 +313,20 @@ function CoursCard({ cours, open, onToggle, activeDb, documentId, termIndex, onO
                           lazy
                           onPageJump={openScan}
                           resolveAsset={resolveAsset}
+                          artifactResolver={artifactResolver}
+                          artifactBinaryUrl={artifactBinaryUrl}
+                          onEnlarge={(src, title) => setEnlarged({ src, title })}
                         />
                       </div>
                     ))}
                     {/* Matériels multimodaux extraits de cette page (schémas, tableaux, formules-images). */}
-                    <PageMedia db={activeDb} documentId={documentId} page={pageNo} />
+                    <PageMedia
+                      db={activeDb}
+                      documentId={documentId}
+                      page={pageNo}
+                      embeddedIds={embeddedByPage.get(pageNo)}
+                      onLoaded={onArtifactsLoaded}
+                    />
                   </div>
                 ))}
               </div>
@@ -325,6 +374,14 @@ function CoursCard({ cours, open, onToggle, activeDb, documentId, termIndex, onO
           </div>
         </div>
       )}
+
+      {/* Agrandissement d'un artefact rendu (SVG/original) dans le corps de lecture. */}
+      <ImageModal
+        open={enlarged !== null}
+        title={enlarged?.title ?? ''}
+        src={enlarged?.src ?? ''}
+        onClose={() => setEnlarged(null)}
+      />
     </HighlightTarget>
   )
 }

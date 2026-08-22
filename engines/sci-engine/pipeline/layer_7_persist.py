@@ -94,9 +94,9 @@ def run(ctx: dict) -> dict:
                 "INSERT INTO scientific_artifacts (id, document_id, chunk_id, page_number, domain,"
                 " artifact_type, raw_data, raw_binary, render_config_json, caption, searchable_text,"
                 " bounding_box_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
-                (str(uuid.uuid4()), doc_id, anchor_chunk, page_number, artifact["domain"],
-                 artifact["artifact_type"], artifact.get("raw_data"), artifact.get("raw_binary"),
-                 artifact["render_config_json"], artifact.get("caption"),
+                (artifact.get("id") or str(uuid.uuid4()), doc_id, anchor_chunk, page_number,
+                 artifact["domain"], artifact["artifact_type"], artifact.get("raw_data"),
+                 artifact.get("raw_binary"), artifact["render_config_json"], artifact.get("caption"),
                  artifact["searchable_text"], artifact.get("bounding_box_json")),
             )
 

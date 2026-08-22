@@ -320,6 +320,8 @@ La promotion d'une famille Tier 2/3 → Tier 1 se fait exclusivement par add-on 
 
 *Note : Le DDL complet et exhaustif, incluant tous les indexes et triggers, est défini dans `tech_specs.md` (Section 1). Ce fichier fait autorité pour l'implémentation.*
 
+*Portabilité : le contrat plug-and-play du `.sqlite` autonome (autonomie, ancrage in-situ `asset://`, familles v1 garanties, clé `semantic`, ordre de lecture, recette de conformité 7 points) est normé dans `tech_specs.md` §12.1 « Contrat de Portabilité de la Base Autonome ».*
+
 ### **5.4 Déploiement Web (Docker Single-Origin) — (MAJ 2026-08-22)**
 
 Source : `Dockerfile`, `backend/main.py`. Un build = un artefact = un processus : FastAPI sert l'UI compilée **et** l'API en single-origin (zéro CORS inter-origines). Hébergeurs de **conteneurs** uniquement (VPS, Fly.io, Railway, Render, Coolify) — les binaires natifs excluent Cloudflare Workers pour le backend (la vitrine Cloudflare reste un add-on séparé, `deploy/cloudflare/`).

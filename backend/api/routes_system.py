@@ -247,6 +247,31 @@ def database_delete(filename: str, body: DeleteDbBody):
     return {"deleted": True}
 
 
+# ═══════════════════ Documentation Make.com (LECTURE seule, ADMIN) ═══════════════════
+# Racine du projet = parent de backend/ (ce module vit dans backend/api/).
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_MAKE_DOCS_DIR = os.path.join(_PROJECT_ROOT, "docs", "make")
+_MAKE_CONTRACT_PATH = os.path.join(_MAKE_DOCS_DIR, "CONTRAT_SCENARIO_MAKE.md")
+_MAKE_PROMPTS_PATH = os.path.join(_MAKE_DOCS_DIR, "PROMPTS_SCENARIOS_MAKE.md")
+
+
+@router.get("/docs/make")
+def make_docs() -> dict:
+    """Renvoie les deux markdown Make.com (contrat + prompts) — LECTURE seule.
+
+    Route d'ADMINISTRATION (non listée dans access_policy._PUBLIC_RULES) : elle
+    passe donc par la garde Bearer/session dès qu'un contrôle d'accès est actif.
+    404 propre si l'un des fichiers est absent (aucune écriture, jamais).
+    """
+    if not (os.path.isfile(_MAKE_CONTRACT_PATH) and os.path.isfile(_MAKE_PROMPTS_PATH)):
+        raise HTTPException(404, "Documentation Make.com introuvable (docs/make/)")
+    with open(_MAKE_CONTRACT_PATH, encoding="utf-8") as fh:
+        contract = fh.read()
+    with open(_MAKE_PROMPTS_PATH, encoding="utf-8") as fh:
+        prompts = fh.read()
+    return {"contract": contract, "prompts": prompts}
+
+
 _SETTINGS_WHITELIST = ("vec_distance_threshold", "bm25_score_threshold", "force_sqlite_vec")
 
 

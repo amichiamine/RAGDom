@@ -76,6 +76,7 @@ export interface Artifact {
   page_number?: number | null;   // V3.5 : page d'origine (rendu multimodal côté lecture)
   has_binary?: boolean;          // V3.5 : crop WebP disponible via /library/artifact-binary
   is_human_edited?: number | boolean; // V3.2/V3.5 : artefact corrigé manuellement (badge édition humaine)
+  area_ratio?: number | null;    // surface bbox / surface page (0-1) ; null si non calculable — >0.7 = re-cadrage pleine page
 }
 
 export interface FacetItem {

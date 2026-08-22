@@ -3,225 +3,485 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>RAGDom — Guide de déploiement web gratuit</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<title>RAGDom — Guide de déploiement web (local, Docker & Render)</title>
 <style>
 :root{--bg:#0b1020;--surface:#111731;--surface2:#182040;--border:#26305c;--text:#e6eaf6;--sub:#9aa5c9;
---accent:#3b82f6;--green:#10b981;--amber:#f59e0b;--red:#ef4444;--purple:#8b5cf6;--cyan:#06b6d4}
+--accent:#3b82f6;--green:#10b981;--amber:#f59e0b;--red:#ef4444;--purple:#8b5cf6;--cyan:#06b6d4;
+--mono:'JetBrains Mono','SFMono-Regular',ui-monospace,'Cascadia Code',Consolas,monospace;
+--sans:'Space Grotesk','Segoe UI',system-ui,-apple-system,sans-serif}
 *{box-sizing:border-box;margin:0;padding:0}
-body{background:var(--bg);color:var(--text);font-family:'Space Grotesk',sans-serif;line-height:1.65}
-.wrap{max-width:980px;margin:0 auto;padding:48px 28px 90px}
-header{padding:56px 0 40px;border-bottom:1px solid var(--border)}
-.kicker{font-family:'JetBrains Mono',monospace;color:var(--accent);font-size:.85rem;letter-spacing:.14em;text-transform:uppercase}
-h1{font-size:2.5rem;font-weight:700;margin:.4em 0 .3em;line-height:1.15}
-.lead{color:var(--sub);font-size:1.12rem;max-width:760px}
-h2{font-size:1.55rem;margin:2.6em 0 .7em;padding-top:1.2em;border-top:1px solid var(--border)}
-h2 .num{font-family:'JetBrains Mono',monospace;color:var(--accent);margin-right:.5em}
-h3{font-size:1.12rem;margin:1.6em 0 .5em;color:#fff}
+html{scroll-behavior:smooth}
+body{background:var(--bg);color:var(--text);font-family:var(--sans);line-height:1.65}
+.wrap{max-width:1000px;margin:0 auto;padding:44px 28px 100px}
+header{padding:52px 0 36px;border-bottom:1px solid var(--border)}
+.kicker{font-family:var(--mono);color:var(--accent);font-size:.82rem;letter-spacing:.16em;text-transform:uppercase}
+h1{font-size:2.55rem;font-weight:700;margin:.35em 0 .3em;line-height:1.14}
+.lead{color:var(--sub);font-size:1.12rem;max-width:800px}
+h2{font-size:1.55rem;margin:2.4em 0 .7em;padding-top:1.15em;border-top:1px solid var(--border);scroll-margin-top:20px}
+h2 .num{font-family:var(--mono);color:var(--accent);margin-right:.55em;font-size:1.15rem}
+h3{font-size:1.14rem;margin:1.7em 0 .5em;color:#fff}
+h4{font-size:1rem;margin:1.3em 0 .4em;color:#fff;font-family:var(--mono);letter-spacing:.02em}
 p{margin:.65em 0;color:var(--text)}
 .sub{color:var(--sub)}
-code{font-family:'JetBrains Mono',monospace;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:.12em .45em;font-size:.88em}
-pre{background:#0a0f22;border:1px solid var(--border);border-radius:12px;padding:18px 20px;overflow-x:auto;margin:.9em 0;font-family:'JetBrains Mono',monospace;font-size:.88rem;line-height:1.6}
-pre code{background:none;border:none;padding:0}
-.card{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:24px 26px;margin:1.1em 0}
-.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px;margin:1em 0}
-.badge{display:inline-block;font-family:'JetBrains Mono',monospace;font-size:.72rem;padding:3px 12px;border-radius:999px;letter-spacing:.06em;margin-right:6px;margin-bottom:6px}
+ul,ol{margin:.6em 0 .6em 1.4em;color:var(--text)}
+li{margin:.3em 0}
+code{font-family:var(--mono);background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:.12em .45em;font-size:.86em;white-space:nowrap}
+pre{background:#070c1c;border:1px solid var(--border);border-radius:12px;padding:16px 20px;overflow-x:auto;margin:.9em 0;font-family:var(--mono);font-size:.86rem;line-height:1.6}
+pre code{background:none;border:none;padding:0;white-space:pre}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:22px 26px;margin:1.1em 0}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px;margin:1.1em 0}
+.badge{display:inline-block;font-family:var(--mono);font-size:.7rem;padding:3px 12px;border-radius:999px;letter-spacing:.05em;margin-right:6px;margin-bottom:4px;vertical-align:middle}
 .b-green{background:rgba(16,185,129,.14);color:#34d399;border:1px solid rgba(16,185,129,.4)}
 .b-amber{background:rgba(245,158,11,.14);color:#fbbf24;border:1px solid rgba(245,158,11,.4)}
 .b-blue{background:rgba(59,130,246,.14);color:#60a5fa;border:1px solid rgba(59,130,246,.4)}
 .b-red{background:rgba(239,68,68,.14);color:#f87171;border:1px solid rgba(239,68,68,.4)}
-table{width:100%;border-collapse:collapse;margin:1em 0;font-size:.95rem}
-th{text-align:left;font-family:'JetBrains Mono',monospace;font-size:.75rem;letter-spacing:.1em;text-transform:uppercase;color:var(--sub);padding:10px 14px;border-bottom:2px solid var(--border)}
-td{padding:12px 14px;border-bottom:1px solid var(--border);vertical-align:top}
+.b-purple{background:rgba(139,92,246,.14);color:#a78bfa;border:1px solid rgba(139,92,246,.4)}
+.b-gray{background:rgba(154,165,201,.12);color:#9aa5c9;border:1px solid rgba(154,165,201,.35)}
+table{width:100%;border-collapse:collapse;margin:1em 0;font-size:.92rem}
+th{text-align:left;font-family:var(--mono);font-size:.72rem;letter-spacing:.08em;text-transform:uppercase;color:var(--sub);padding:10px 14px;border-bottom:2px solid var(--border)}
+td{padding:11px 14px;border-bottom:1px solid var(--border);vertical-align:top}
 tr:hover td{background:rgba(59,130,246,.05)}
+td code{white-space:normal}
 .step{display:flex;gap:18px;margin:1.2em 0;align-items:flex-start}
-.step .n{flex:0 0 38px;height:38px;border-radius:50%;background:var(--accent);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-family:'JetBrains Mono',monospace}
-.step .body{flex:1}
+.step .n{flex:0 0 38px;height:38px;border-radius:50%;background:var(--accent);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-family:var(--mono)}
+.step .body{flex:1;min-width:0}
 .callout{border-left:4px solid var(--amber);background:rgba(245,158,11,.07);border-radius:0 12px 12px 0;padding:14px 18px;margin:1em 0}
 .callout.ok{border-color:var(--green);background:rgba(16,185,129,.07)}
 .callout.danger{border-color:var(--red);background:rgba(239,68,68,.07)}
+.callout.info{border-color:var(--accent);background:rgba(59,130,246,.07)}
 .diagram{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:20px;margin:1.4em 0}
-svg text{font-family:'Space Grotesk',sans-serif}
-svg .mono{font-family:'JetBrains Mono',monospace}
-footer{margin-top:70px;padding-top:22px;border-top:1px solid var(--border);color:var(--sub);font-size:.85rem}
+svg text{font-family:var(--sans)}
+svg .mono{font-family:var(--mono)}
+footer{margin-top:72px;padding-top:22px;border-top:1px solid var(--border);color:var(--sub);font-size:.85rem}
 a{color:#60a5fa;text-decoration:none}a:hover{text-decoration:underline}
 .env{display:grid;grid-template-columns:auto 1fr;gap:8px 18px;font-size:.9rem}
 .env code{white-space:nowrap}
-@media(max-width:640px){h1{font-size:1.9rem}.wrap{padding:28px 16px 60px}.env{grid-template-columns:1fr}}
+/* Sommaire */
+.toc{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:22px 26px;margin:1.6em 0}
+.toc h3{margin-top:0}
+.toc ol{list-style:none;margin:0;padding:0;columns:2;column-gap:32px}
+.toc li{margin:.35em 0;break-inside:avoid}
+.toc a{font-size:.95rem}
+.toc .tnum{font-family:var(--mono);color:var(--accent);margin-right:.5em;font-size:.85rem}
+/* Faux écran Render */
+.mock{background:#0d1424;border:1px solid var(--border);border-radius:14px;overflow:hidden;margin:1em 0;box-shadow:0 10px 30px rgba(0,0,0,.35)}
+.mock .bar{display:flex;align-items:center;gap:7px;background:#151d33;padding:9px 14px;border-bottom:1px solid var(--border)}
+.mock .dot{width:11px;height:11px;border-radius:50%}
+.mock .d1{background:#ff5f56}.mock .d2{background:#ffbd2e}.mock .d3{background:#27c93f}
+.mock .url{margin-left:12px;font-family:var(--mono);font-size:.76rem;color:var(--sub);background:#0a1122;border:1px solid var(--border);border-radius:6px;padding:3px 12px;flex:1}
+.mock .screen{padding:20px 22px}
+.mock .rlabel{font-family:var(--mono);font-size:.7rem;letter-spacing:.1em;text-transform:uppercase;color:var(--sub);margin-bottom:6px}
+.mock .field{background:#0a1122;border:1px solid var(--border);border-radius:8px;padding:10px 14px;margin:8px 0;font-size:.9rem;display:flex;align-items:center;justify-content:space-between;gap:12px}
+.mock .field .val{font-family:var(--mono);color:var(--text)}
+.mock .field .tag{font-family:var(--mono);font-size:.72rem;color:var(--sub)}
+.mock .btn{display:inline-block;background:var(--accent);color:#fff;border-radius:8px;padding:8px 18px;font-weight:600;font-size:.86rem;margin-top:6px}
+.mock .btn.ok{background:var(--green)}
+.mock .sel{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent) inset}
+.pill{display:inline-block;font-family:var(--mono);font-size:.74rem;padding:2px 10px;border-radius:6px;background:var(--surface2);border:1px solid var(--border);color:var(--text)}
+.kv{font-family:var(--mono);font-size:.82rem;color:var(--sub)}
+@media(max-width:680px){h1{font-size:1.95rem}.wrap{padding:26px 15px 60px}.env{grid-template-columns:1fr}.toc ol{columns:1}}
 </style>
 </head>
 <body>
 <div class="wrap">
 
 <header>
-  <div class="kicker">RAGDom · Phase 7 · branche post-v1</div>
-  <h1>Déployer RAGDom sur le web, gratuitement</h1>
-  <p class="lead">La version web <strong>complète</strong> (UI + API + moteur d'ingestion sci-engine) tient dans <strong>une seule image Docker</strong> servie par un seul processus. Ce guide couvre les hébergeurs gratuits qui savent l'exécuter — et explique pourquoi certains (Vercel, Cloudflare) ne servent que l'interface.</p>
+  <div class="kicker">RAGDom · Déploiement web · Single-origin FastAPI</div>
+  <h1>Déployer RAGDom : du poste local au web</h1>
+  <p class="lead">RAGDom est une bibliothèque numérique scientifique <strong>local-first</strong> avec version web complète. Un même processus FastAPI sert <strong>l'interface compilée ET l'API</strong> (single-origin, zéro CORS inter-origines). Ce guide couvre les trois façons de l'exécuter — en IDE pour développer, en build local pour la production sur poste, et en ligne sur Render.com via Docker — puis détaille <strong>chaque variable de configuration</strong> et le dépannage réel.</p>
+  <p style="margin-top:16px">
+    <span class="badge b-blue">Version V3.12</span>
+    <span class="badge b-purple">FastAPI + sci-engine</span>
+    <span class="badge b-green">Python 3.9+/3.11 · Node 20</span>
+    <span class="badge b-gray">SQLite · FTS5 + sqlite-vec</span>
+  </p>
 </header>
 
-<h2><span class="num">00</span>Comprendre en 30 secondes : qui peut héberger quoi</h2>
+<!-- ══════════════ SOMMAIRE ══════════════ -->
+<div class="toc">
+  <h3>Sommaire</h3>
+  <ol>
+    <li><span class="tnum">01</span><a href="#vue">Vue d'ensemble &amp; architecture</a></li>
+    <li><span class="tnum">02</span><a href="#local-ide">Local via IDE (développement)</a></li>
+    <li><span class="tnum">03</span><a href="#local-build">Local après build (production locale)</a></li>
+    <li><span class="tnum">04</span><a href="#env">Configuration <code>.env</code> exhaustive</a></li>
+    <li><span class="tnum">05</span><a href="#render">Render.com — pas à pas illustré</a></li>
+    <li><span class="tnum">06</span><a href="#docker">Docker générique (tout hébergeur)</a></li>
+    <li><span class="tnum">07</span><a href="#corpus">Publier son propre corpus</a></li>
+    <li><span class="tnum">08</span><a href="#depannage">Dépannage</a></li>
+  </ol>
+</div>
 
+<!-- ══════════════ 01 VUE D'ENSEMBLE ══════════════ -->
+<h2 id="vue"><span class="num">01</span>Vue d'ensemble &amp; architecture</h2>
+
+<p>Le postulat central est le <strong>single-origin</strong> : au démarrage, <code>backend/main.py</code> monte les routes <code>/api/*</code> <em>puis</em>, si le dossier <code>frontend/dist</code> existe (ou si <code>RAGDOM_UI_DIST</code> pointe vers un build), il monte ce dossier sur <code>/</code> avec un <strong>fallback SPA</strong> : toute URL sans extension qui n'est pas une route API renvoie <code>index.html</code>. Une seule URL sert donc l'application entière — pas de <code>VITE_API_URL</code>, pas de CORS inter-origines en production.</p>
+
+<div class="card">
+<pre><code># backend/main.py — montage single-origin (extrait fidèle)
+_DIST_DIR = os.environ.get("RAGDOM_UI_DIST") or .../frontend/dist
+if os.path.isdir(_DIST_DIR):
+    class _SPAStaticFiles(StaticFiles):
+        async def get_response(self, path, scope):
+            try: return await super().get_response(path, scope)
+            except 404:
+                if "." not in dernier_segment:          # route SPA
+                    return index.html
+    app.mount("/", _SPAStaticFiles(directory=_DIST_DIR, html=True))</code></pre>
+<p class="sub">Les routes <code>/api/*</code> sont montées <strong>avant</strong> le mount statique : elles gardent la priorité. Le backend expose <strong>60 routes</strong> réparties sur 7 routers (system, library, search, pipeline, llm, curriculum, auth).</p>
+</div>
+
+<h3>Schéma des composants</h3>
 <div class="diagram">
-<svg viewBox="0 0 900 360" width="100%" role="img" aria-label="Architecture de déploiement">
-  <!-- Conteneur -->
-  <rect x="20" y="20" width="540" height="320" rx="18" fill="none" stroke="#10b981" stroke-width="2" stroke-dasharray="0"/>
-  <text x="40" y="52" fill="#34d399" font-size="17" font-weight="700">🐳 IMAGE DOCKER — la version web complète</text>
-  <text x="40" y="74" fill="#9aa5c9" font-size="12.5">docker build → docker run · un seul processus, une seule URL</text>
-  <!-- UI -->
-  <rect x="40" y="92" width="235" height="105" rx="12" fill="#182040" stroke="#3b82f6" stroke-width="1.5"/>
-  <text x="55" y="120" fill="#60a5fa" font-size="14" font-weight="700">Interface (dist/)</text>
-  <text x="55" y="142" fill="#e6eaf6" font-size="12">React 19 · 6 onglets · KaTeX</text>
-  <text x="55" y="160" fill="#e6eaf6" font-size="12">compilée par npm run build</text>
-  <text x="55" y="184" fill="#9aa5c9" font-size="11.5" class="mono">servie sur /</text>
-  <!-- API -->
-  <rect x="300" y="92" width="240" height="105" rx="12" fill="#182040" stroke="#8b5cf6" stroke-width="1.5"/>
-  <text x="315" y="120" fill="#a78bfa" font-size="14" font-weight="700">API FastAPI (Python)</text>
-  <text x="315" y="142" fill="#e6eaf6" font-size="12">48 routes · recherche hybride</text>
-  <text x="315" y="160" fill="#e6eaf6" font-size="12">purge · Ask RAG · SSE</text>
-  <text x="315" y="184" fill="#9aa5c9" font-size="11.5" class="mono">servie sur /api/*</text>
-  <!-- Moteur -->
-  <rect x="40" y="215" width="500" height="105" rx="12" fill="#182040" stroke="#f59e0b" stroke-width="1.5"/>
-  <text x="55" y="243" fill="#fbbf24" font-size="14" font-weight="700">Moteur sci-engine + données</text>
-  <text x="55" y="265" fill="#e6eaf6" font-size="12">OCR (ONNX) · OpenCV · sqlite-vec · PyMuPDF — binaires natifs, batchs de plusieurs minutes</text>
-  <text x="55" y="285" fill="#e6eaf6" font-size="12">bases .sqlite sur disque (/data) · 2 Go RAM max</text>
-  <text x="55" y="307" fill="#f87171" font-size="12" font-weight="600">⛔ Serverless JS (Workers/Vercel) — ✅ mais OK via Cloudflare CONTAINERS (payant, §4bis)</text>
-  <!-- Hébergeurs -->
-  <text x="600" y="52" fill="#e6eaf6" font-size="15" font-weight="700">Qui exécute cette image ?</text>
-  <rect x="590" y="70" width="290" height="120" rx="12" fill="rgba(16,185,129,.08)" stroke="#10b981" stroke-width="1.5"/>
-  <text x="606" y="97" fill="#34d399" font-size="13.5" font-weight="700">✅ Hébergeurs de CONTENEURS</text>
-  <text x="606" y="121" fill="#e6eaf6" font-size="12.5">Render (gratuit) · HF Spaces (PRO $)</text>
-  <text x="606" y="141" fill="#e6eaf6" font-size="12.5">Koyeb (gratuit) · Railway ($)</text>
-  <text x="606" y="161" fill="#e6eaf6" font-size="12.5">Railway · Fly.io · VPS · CF Containers ($)</text>
-  <rect x="590" y="210" width="290" height="110" rx="12" fill="rgba(245,158,11,.07)" stroke="#f59e0b" stroke-width="1.5"/>
-  <text x="606" y="237" fill="#fbbf24" font-size="13.5" font-weight="700">🖼️ UI seule (vitrine statique)</text>
-  <text x="606" y="261" fill="#e6eaf6" font-size="12.5">Cloudflare · Vercel · Netlify…</text>
-  <text x="606" y="281" fill="#9aa5c9" font-size="11.5">servent dist/ mais doivent pointer</text>
-  <text x="606" y="298" fill="#9aa5c9" font-size="11.5">vers un backend hébergé ailleurs</text>
+<svg viewBox="0 0 920 340" width="100%" role="img" aria-label="Architecture RAGDom single-origin">
+  <!-- Navigateur -->
+  <rect x="20" y="120" width="150" height="90" rx="12" fill="#182040" stroke="#3b82f6" stroke-width="1.6"/>
+  <text x="95" y="150" fill="#60a5fa" font-size="14" font-weight="700" text-anchor="middle">Navigateur</text>
+  <text x="95" y="172" fill="#e6eaf6" font-size="11" text-anchor="middle">React 19 SPA</text>
+  <text x="95" y="190" fill="#9aa5c9" font-size="10.5" text-anchor="middle" class="mono">1 seule origine</text>
+  <!-- flèche -->
+  <line x1="170" y1="165" x2="235" y2="165" stroke="#9aa5c9" stroke-width="1.6" marker-end="url(#a)"/>
+  <text x="202" y="155" fill="#9aa5c9" font-size="10" text-anchor="middle" class="mono">HTTP</text>
+  <!-- FastAPI (conteneur logique) -->
+  <rect x="240" y="40" width="330" height="260" rx="16" fill="none" stroke="#8b5cf6" stroke-width="1.8" stroke-dasharray="5 4"/>
+  <text x="405" y="64" fill="#a78bfa" font-size="13" font-weight="700" text-anchor="middle">Processus FastAPI (uvicorn) — port 8000</text>
+  <!-- UI mount -->
+  <rect x="258" y="80" width="140" height="70" rx="10" fill="#182040" stroke="#3b82f6" stroke-width="1.3"/>
+  <text x="328" y="106" fill="#60a5fa" font-size="12" font-weight="700" text-anchor="middle">UI statique</text>
+  <text x="328" y="124" fill="#e6eaf6" font-size="10.5" text-anchor="middle">dist/ sur /</text>
+  <text x="328" y="140" fill="#9aa5c9" font-size="10" text-anchor="middle" class="mono">SPA fallback</text>
+  <!-- API mount -->
+  <rect x="412" y="80" width="140" height="70" rx="10" fill="#182040" stroke="#8b5cf6" stroke-width="1.3"/>
+  <text x="482" y="106" fill="#a78bfa" font-size="12" font-weight="700" text-anchor="middle">API /api/*</text>
+  <text x="482" y="124" fill="#e6eaf6" font-size="10.5" text-anchor="middle">60 routes · 7 routers</text>
+  <text x="482" y="140" fill="#9aa5c9" font-size="10" text-anchor="middle" class="mono">access_policy</text>
+  <!-- sci-engine -->
+  <rect x="258" y="170" width="294" height="55" rx="10" fill="#182040" stroke="#f59e0b" stroke-width="1.3"/>
+  <text x="405" y="193" fill="#fbbf24" font-size="12" font-weight="700" text-anchor="middle">Moteur sci-engine (9 couches)</text>
+  <text x="405" y="211" fill="#9aa5c9" font-size="10" text-anchor="middle">OCR VLM · PyMuPDF · embeddings ONNX 384d</text>
+  <!-- SQLite -->
+  <rect x="258" y="238" width="140" height="48" rx="10" fill="#182040" stroke="#06b6d4" stroke-width="1.3"/>
+  <text x="328" y="260" fill="#22d3ee" font-size="12" font-weight="700" text-anchor="middle">SQLite</text>
+  <text x="328" y="277" fill="#9aa5c9" font-size="9.5" text-anchor="middle" class="mono">FTS5 + sqlite-vec</text>
+  <!-- config db -->
+  <rect x="412" y="238" width="140" height="48" rx="10" fill="#182040" stroke="#06b6d4" stroke-width="1.3"/>
+  <text x="482" y="260" fill="#22d3ee" font-size="12" font-weight="700" text-anchor="middle">config.sqlite</text>
+  <text x="482" y="277" fill="#9aa5c9" font-size="9.5" text-anchor="middle" class="mono">clés · comptes</text>
+  <!-- Providers LLM -->
+  <line x1="570" y1="165" x2="635" y2="165" stroke="#9aa5c9" stroke-width="1.6" marker-end="url(#a)"/>
+  <rect x="640" y="110" width="255" height="110" rx="12" fill="rgba(16,185,129,.06)" stroke="#10b981" stroke-width="1.5"/>
+  <text x="767" y="136" fill="#34d399" font-size="13" font-weight="700" text-anchor="middle">Providers LLM (externes)</text>
+  <text x="767" y="160" fill="#e6eaf6" font-size="11" text-anchor="middle">Gemini · Groq · OpenAI …</text>
+  <text x="767" y="180" fill="#e6eaf6" font-size="11" text-anchor="middle">Ollama local (OLLAMA_BASE_URL)</text>
+  <text x="767" y="202" fill="#9aa5c9" font-size="10" text-anchor="middle" class="mono">rotation de clés · OCR VLM · /ask</text>
+  <defs><marker id="a" markerWidth="9" markerHeight="9" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#9aa5c9"/></marker></defs>
 </svg>
 </div>
 
+<div class="callout info"><strong>Trois modes d'exécution</strong> couverts par ce guide : <span class="pill">§02 IDE</span> le frontend Vite (5173) et le backend (8000) tournent séparément, Vite proxie <code>/api</code> vers le backend ; <span class="pill">§03 build local</span> le frontend est compilé dans <code>dist/</code> et servi par FastAPI, une seule origine <code>http://localhost:8000</code> ; <span class="pill">§05 Render</span> l'image Docker fait la même chose en ligne.</div>
+
+<!-- ══════════════ 02 LOCAL IDE ══════════════ -->
+<h2 id="local-ide"><span class="num">02</span>Local via IDE (développement)</h2>
+
+<h3>Prérequis</h3>
+<div class="grid">
+  <div class="card"><span class="badge b-blue">Python</span><p><strong>3.9+ (cible 3.11)</strong>. Le code évite toute syntaxe 3.10+ (voir <code>config.py</code>). Le lanceur crée un venv <code>backend/.venv</code>.</p></div>
+  <div class="card"><span class="badge b-green">Node.js</span><p><strong>Node 20</strong> (aligné sur l'étage build du Dockerfile <code>node:20-alpine</code>). Fournit <code>npm</code> pour le frontend Vite 5 et les scripts racine.</p></div>
+</div>
+
+<h3>Installation initiale &amp; lancement unifié</h3>
+<p>Le <code>package.json</code> racine orchestre tout via <code>scripts/dev-backend.mjs</code> (lanceur multiplateforme Windows/Linux/macOS). Deux commandes suffisent :</p>
+<pre><code># À LA RACINE du dépôt
+npm install          # concurrently (dépendance de lancement)
+npm run setup        # frontend: npm install  +  backend: crée .venv, installe requirements.txt
+                     #   puis post-install obligatoire : opencv-python-headless + numpy 1.26.4
+npm run dev          # lance API + UI en parallèle (concurrently)</code></pre>
+
+<p>Ce que <code>npm run dev</code> déclenche réellement, d'après le lanceur :</p>
+<ul>
+  <li><strong>venv auto-détecté</strong> : le script cherche le Python dans <code>backend/.venv</code>, <code>backend/venv</code>, puis <code>.venv</code>/<code>venv</code> à la racine. Absent → message « lancez d'abord : npm run setup ».</li>
+  <li><strong>port libre automatique</strong> : il part de <code>BACKEND_PORT</code> (défaut 8000) et teste jusqu'à +19 ; s'il est occupé, il bascule (« Port 8000 occupé → bascule sur 8001 ») et <strong>exporte le port choisi</strong> pour que le proxy Vite le suive.</li>
+  <li><strong>double processus</strong> : <code>concurrently</code> lance <code>node scripts/dev-backend.mjs</code> (uvicorn avec <code>--reload</code>) et <code>npm --prefix frontend run dev</code> (Vite). Le dev-server Vite écoute sur <strong>5173</strong> et proxie <code>/api</code> vers <code>http://localhost:${BACKEND_PORT}</code>.</li>
+</ul>
+
+<h4>Modes du lanceur</h4>
 <table>
-<tr><th>Tu veux</th><th>Solution</th><th>Coût</th><th>Section</th></tr>
-<tr><td><strong>La version web complète, gratuite, tout de suite</strong></td><td><strong>Render (Docker)</strong> — HF Spaces Docker est devenu PRO (§1)</td><td>0 €</td><td>§2 ⭐</td></tr>
-<tr><td>Alternative gratuite avec domaine .onrender.com</td><td>Render (Docker)</td><td>0 € (veille après 15 min d'inactivité)</td><td>§2</td></tr>
-<tr><td>Confort maximal + disque persistant</td><td>Railway (Docker)</td><td>essai 5 $ puis ~5 $/mois</td><td>§3</td></tr>
-<tr><td>Vitrine UI ultra-rapide sur ton pipeline actuel</td><td>Cloudflare (assets)</td><td>0 €</td><td>§4</td></tr>
-<tr><td><strong>Tout via Cloudflare</strong> (GA avril 2026)</td><td>Cloudflare <strong>Containers</strong></td><td>Workers Paid 5 $/mois + CPU actif</td><td>§4bis</td></tr>
+<tr><th>Commande</th><th>Effet</th></tr>
+<tr><td><code>node scripts/dev-backend.mjs --setup</code><br><span class="kv">(= npm run setup, partie backend)</span></td><td>Crée <code>backend/.venv</code>, <code>pip install -r requirements.txt</code>, puis désinstalle <code>opencv-python</code> et installe <code>opencv-python-headless==4.10.0.84</code> + <code>numpy==1.26.4</code> (post-install obligatoire).</td></tr>
+<tr><td><code>node scripts/dev-backend.mjs --pytest</code><br><span class="kv">(= npm run test:backend)</span></td><td>Lance <code>pytest tests/ -q --ignore=tests/bench_ram_100p.py</code> dans le venv.</td></tr>
+<tr><td><code>node scripts/dev-backend.mjs --no-reload</code><br><span class="kv">(= npm run start)</span></td><td>Uvicorn <strong>sans</strong> <code>--reload</code> (démarrage plus stable, pas de rechargement à chaud).</td></tr>
 </table>
 
-<div class="callout"><strong>⚠️ La seule vraie limite du 100 % gratuit :</strong> les offres gratuites (HF Spaces, Render, Koyeb) ont un <strong>stockage éphémère</strong> — au redémarrage du conteneur, les bases <code>.sqlite</code> uploadées sont perdues. Deux parades : ① ingérer localement puis <em>ré-uploader la base finie</em> (fichier unique, grâce à la Base Autonome V3.5) après chaque redémarrage — parfait pour démo/consultation ; ② passer à un plan avec volume (Railway/Fly/HF persistent ~5 $/mois) pour la persistance réelle.</div>
+<h3>Première utilisation : créer le compte</h3>
+<div class="callout"><strong>Le login se fait par NOM D'UTILISATEUR, pas par email.</strong> C'est explicite dans <code>routes_auth.py</code> : identifiant de 3 à 64 caractères (<code>lettres, chiffres, _ - .</code> — sans espaces ni accents) + mot de passe de 8 caractères minimum. Le hachage est <code>scrypt</code> (stdlib, sel aléatoire par compte), aucune dépendance hors whitelist. La session émise (12 h glissantes) sert de jeton Bearer.</div>
+<ul>
+  <li>Ouvrez l'UI, allez sur <code>/login</code> — l'écran de création apparaît tant qu'<strong>aucun compte n'existe</strong>.</li>
+  <li>En local, la création du premier compte est <strong>libre</strong> (postulat Local-First : tant qu'aucun compte n'existe et qu'aucun <code>RAGDOM_AUTH_TOKEN</code> n'est défini, l'administration reste ouverte).</li>
+  <li>Dès qu'un compte existe (ou qu'un jeton env est défini), les routes d'administration exigent une session valide (401 sinon).</li>
+</ul>
 
-<h2><span class="num">01</span>Hugging Face Spaces — ⚠️ devenu PAYANT pour Docker (vérifié en conditions réelles)</h2>
-<div class="callout danger"><strong>Testé le 21/08/2026 avec un vrai compte :</strong> l'API HF répond désormais <code>402 — « hosting Gradio and Docker Spaces on free cpu-basic requires a PRO subscription »</code>. Les Spaces Docker (privés ET publics) exigent l'abonnement HF PRO. <strong>Le gratuit de référence devient Render (§2)</strong> — la section ci-dessous reste valable pour les abonnés PRO.</div>
+<h3>Lancer le backend seul</h3>
+<p>Pour travailler sur l'API sans le dev-server Vite :</p>
+<pre><code>cd backend
+python main.py            # ou : python -m uvicorn main:app --reload</code></pre>
+<p class="sub"><code>main.py</code> et <code>config.py</code> <strong>déduisent tous les chemins</strong> de l'arborescence du projet (racine = parent de <code>backend/</code>) : <code>sources/</code>, <code>databases/</code>, <code>pipeline_set/</code>, <code>models/</code>, <code>engines/</code>, et <code>backend/ragdom_config.sqlite</code>. Le <code>.env</code> est donc <strong>optionnel</strong> — il ne sert qu'à personnaliser. Si <code>frontend/dist</code> n'existe pas encore, seul l'API répond (attendu en mode IDE).</p>
+
+<!-- ══════════════ 03 LOCAL BUILD ══════════════ -->
+<h2 id="local-build"><span class="num">03</span>Local après build (production locale)</h2>
+
+<p>Pour obtenir le comportement <strong>single-origin</strong> sur votre poste — une seule URL qui sert tout, comme en ligne — compilez le frontend puis lancez le backend :</p>
 
 <div class="step"><div class="n">1</div><div class="body">
-<h3>Créer le Space</h3>
-<p>Sur <a href="https://huggingface.co" target="_blank" rel="noopener noreferrer">huggingface.co</a> (compte gratuit) → <strong>New Space</strong> → Name : <code>ragdom</code> → SDK : <strong>Docker</strong> → Blank → Visibility : <strong>Private</strong> (recommandé) → Create.</p>
+<h3>Compiler l'interface</h3>
+<pre><code>cd frontend
+npm run build     # tsc -b && vite build → génère frontend/dist/</code></pre>
+<p class="sub">Le build TypeScript strict (<code>tsc -b</code>) précède Vite : une erreur de type fait échouer le build.</p>
 </div></div>
 
 <div class="step"><div class="n">2</div><div class="body">
-<h3>Pousser le code de la branche <code>post-v1</code></h3>
-<pre><code>git clone -b post-v1 https://github.com/amichiamine/RAGDom.git
-cd RAGDom
-git remote add space https://huggingface.co/spaces/&lt;TON_USER&gt;/ragdom
-git push space post-v1:main</code></pre>
-<p class="sub">(À la demande de mot de passe : un token HF « write », créé dans Settings → Access Tokens.)</p>
+<h3>Lancer le backend (il sert l'UI compilée)</h3>
+<pre><code>cd backend
+python main.py</code></pre>
+<p>Au démarrage, <code>main.py</code> détecte <code>frontend/dist</code> et affiche <code>[RAGDom] UI servie en single-origin depuis …</code>. Tout est alors accessible sur <strong>une seule origine</strong> :</p>
+<p><span class="pill">http://localhost:8000</span> &nbsp;→&nbsp; l'UI sur <code>/</code>, les routes SPA (ex. <code>/library</code>), et l'API sur <code>/api/*</code>.</p>
+</div></div>
+
+<div class="callout info"><strong><code>RAGDOM_UI_DIST</code> (optionnel).</strong> Par défaut, FastAPI cherche <code>&lt;racine&gt;/frontend/dist</code>. Pour servir un build situé ailleurs (dossier partagé, artefact CI), définissez <code>RAGDOM_UI_DIST=/chemin/vers/dist</code> — le mount statique s'appuie sur ce dossier à la place.</div>
+
+<h3>Vérifier</h3>
+<pre><code>curl http://localhost:8000/api/system/health
+# → {"status":"ok","version":"3.5","vector_engine":"sqlite-vec",
+#    "vector_engine_status":…, "force_sqlite_vec":false, "readonly":false, …}</code></pre>
+
+<!-- ══════════════ 04 ENV ══════════════ -->
+<h2 id="env"><span class="num">04</span>Configuration <code>.env</code> exhaustive</h2>
+
+<p>Toute la configuration passe par des variables d'environnement, lues par <code>backend/config.py</code> (chemins, serveur, pipeline) et directement par le moteur / <code>main.py</code> / <code>db/connection.py</code> pour les options web. Le fichier <code>backend/.env</code> est <strong>versionné, pré-rempli et sans secret</strong> : chaque ligne y est commentée (le <code>#</code> = valeur par défaut active). On décommente uniquement ce que l'on veut changer.</p>
+
+<div class="callout danger"><strong>Règle d'or des secrets.</strong> Le dépôt étant public, <strong>ne jamais écrire de secret dans <code>.env</code></strong> (jeton d'admin, clés LLM). Les secrets vont dans <strong>l'environnement de l'hébergeur</strong> (Render → Environment). Les variables purement locales (chemins, ports) peuvent rester dans <code>.env</code> sans risque.</div>
+
+<h3>Chemins &amp; serveur <span class="badge b-gray">config.py</span></h3>
+<table>
+<tr><th>Variable</th><th>Défaut</th><th>Sémantique / quand la changer</th></tr>
+<tr><td><code>SOURCES_DIR</code></td><td><code>&lt;racine&gt;/sources</code></td><td>PDF sources (arborescence Matière/Niveau). En Docker : <code>/app/sources</code> (corpus embarqué dans l'image).</td></tr>
+<tr><td><code>DATABASES_DIR</code></td><td><code>&lt;racine&gt;/databases</code></td><td>Bibliothèques <code>.sqlite</code> scannées à chaque affichage. En Docker : <code>/data/databases</code> (volume).</td></tr>
+<tr><td><code>PIPELINE_SET_DIR</code></td><td><code>&lt;racine&gt;/pipeline_set</code></td><td>Fichiers de travail / checkpoints du pipeline d'ingestion.</td></tr>
+<tr><td><code>MODELS_DIR</code></td><td><code>&lt;racine&gt;/models</code></td><td>Modèles OCR / embeddings téléchargés au 1<sup>er</sup> lancement (si non offline).</td></tr>
+<tr><td><code>ENGINES_DIR</code></td><td><code>&lt;racine&gt;/engines</code></td><td>Moteurs d'extraction (sci-engine + futurs moteurs).</td></tr>
+<tr><td><code>CONFIG_DB_PATH</code></td><td><code>backend/ragdom_config.sqlite</code></td><td>Base de configuration : clés LLM, réglages, comptes &amp; sessions. En Docker : <code>/data/ragdom_config.sqlite</code>.</td></tr>
+<tr><td><code>BACKEND_HOST</code></td><td><code>0.0.0.0</code></td><td>Interface d'écoute. En IDE, le lanceur force <code>127.0.0.1</code> ; l'image Docker écoute <code>0.0.0.0</code>.</td></tr>
+<tr><td><code>BACKEND_PORT</code></td><td><code>8000</code></td><td>Port souhaité. <code>npm run dev</code> bascule automatiquement s'il est occupé (jusqu'à +19).</td></tr>
+<tr><td><code>FRONTEND_URL</code></td><td><code>http://localhost:5173</code></td><td>Liste d'origines CORS (séparées par des virgules). En single-origin ce n'est utile que pour un frontend hébergé sur une autre origine.</td></tr>
+</table>
+
+<h3>Pipeline &amp; moteur vectoriel <span class="badge b-gray">config.py + sci-engine</span></h3>
+<table>
+<tr><th>Variable</th><th>Défaut</th><th>Sémantique / quand la changer</th></tr>
+<tr><td><code>MAX_RAM_MB</code></td><td><code>2048</code></td><td>Plafond mémoire du pipeline (arbitrage à deux paliers). Baisser sur machine contrainte.</td></tr>
+<tr><td><code>VLM_TIMEOUT_SECONDS</code></td><td><code>30</code></td><td>Timeout des appels VLM (OCR par LLM vision).</td></tr>
+<tr><td><code>MAX_RETRY_COUNT</code></td><td><code>3</code></td><td>Nombre de tentatives sur échec transitoire du pipeline.</td></tr>
+<tr><td><code>OLLAMA_BASE_URL</code></td><td><code>http://localhost:11434</code></td><td>URL du serveur Ollama (LLM local de repli). Sans effet si aucun provider Ollama n'est configuré.</td></tr>
+<tr><td><code>RAGDOM_OFFLINE</code></td><td><code>false</code></td><td>Booléen. <code>true</code> = interdit tout téléchargement de modèles (environnement hermétique) — les couches du moteur basculent sur leurs replis hors-ligne (ex. RapidOCR).</td></tr>
+<tr><td><code>RAGDOM_FORCE_SQLITE_VEC</code></td><td><code>false</code></td><td>Booléen. Mode strict : impose le moteur vectoriel <code>sqlite-vec</code> (échec explicite si indisponible, plutôt que dégradation silencieuse). Persistant aussi via <code>app_settings</code>.</td></tr>
+<tr><td><code>RAGDOM_INTRA_PAGE_WORKERS</code></td><td><code>1</code></td><td>Entier <strong>borné à [1, 3]</strong>. <code>1</code> = séquentiel strict (défaut). <code>2-3</code> = pool de workers par blocs d'une même page (couche <code>layer_2_extract</code> v2). À monter pour accélérer l'extraction sur CPU multi-cœurs.</td></tr>
+<tr><td><code>RAGDOM_VLM_PAGE_OCR</code></td><td><code>auto</code></td><td>OCR de page entière par VLM (Tier 2). <strong>Seule la valeur littérale <code>false</code> désactive</strong> ; toute autre valeur (dont <code>auto</code>) active. En <code>auto</code> : pages scannées → transcription par le provider vision (rotation de clés), repli RapidOCR ; pages natives → seulement si le texte extrait est illisible.</td></tr>
+<tr><td><code>RAGDOM_LOW_MEMORY</code></td><td><code>false</code></td><td>Booléen. <code>true</code> = ne charge <strong>jamais</strong> l'encodeur d'embeddings ONNX (~300 Mo de pic → OOM kill sur hébergement ≤512 Mo). La recherche passe alors en <strong>BM25 seul</strong> ; les bases pré-construites conservent leurs vecteurs pour un futur hébergement plus large. À activer sur Render Free (§05).</td></tr>
+</table>
+
+<h3>Sécurité web <span class="badge b-gray">config.py + access_policy.py</span></h3>
+<table>
+<tr><th>Variable</th><th>Défaut</th><th>Sémantique / quand la changer</th></tr>
+<tr><td><code>RAGDOM_READONLY</code></td><td><code>false</code></td><td>Booléen. <code>true</code> = mode consultation : les routes d'administration <strong>n'existent pas</strong> (404) — seules les lectures (library, search/ask, system-read, auth) répondent. Idéal pour une bibliothèque publique en lecture seule.</td></tr>
+<tr><td><code>RAGDOM_AUTH_TOKEN</code></td><td><code>(vide → None)</code></td><td><strong>Secret.</strong> Si défini, les routes d'administration exigent <code>Authorization: Bearer &lt;jeton&gt;</code> (401 sinon). Sur le web il rend aussi <code>/api/auth/setup</code> protégé : le premier visiteur ne peut pas s'approprier l'instance. <strong>Obligatoire en ligne</strong> si <code>READONLY=false</code>.</td></tr>
+<tr><td><code>RAGDOM_ALLOW_REVEAL</code></td><td><code>true</code></td><td>Booléen. Autorise la lecture <em>en clair</em> d'une clé LLM via <code>POST /api/llm/keys/{id}/reveal</code>. <code>true</code> par défaut (postulat local). <strong>Mettre <code>false</code> sur tout déploiement web</strong> → la route renvoie 403.</td></tr>
+<tr><td><code>RAGDOM_ASK_RATE_PER_MIN</code></td><td><code>0</code></td><td>Entier. Quota de <code>POST /api/search/ask</code> par IP et par minute (fenêtre glissante 60 s en mémoire process). <code>0</code> = désactivé (défaut local). <strong>Mettre &gt; 0 en ligne</strong> (ex. 6-12) pour protéger vos quotas LLM (429 au dépassement).</td></tr>
+<tr><td><code>RAGDOM_SEED_LLM_KEYS</code></td><td><code>(vide)</code></td><td><strong>Secret.</strong> Seed idempotent des clés LLM au démarrage (relu à chaque <code>init_config_db()</code>). Indispensable sur disque éphémère où la config repart de zéro. <strong>Format</strong> : entrées séparées par virgules ou retours ligne, chacune <code>provider:clé</code> ou <code>provider:clé:modèle</code>. Chaque entrée absente est insérée et le provider activé. Ex. : <code>gemini:VOTRE_CLE:gemini-2.5-flash,groq:VOTRE_CLE</code>.</td></tr>
+<tr><td><code>RAGDOM_PUBLISHED_DBS</code></td><td><code>&lt;racine&gt;/databases_publiees</code></td><td>Dossier de bases pré-ingérées. Au démarrage, chaque <code>.sqlite</code> présent y est <strong>copié vers <code>DATABASES_DIR</code> s'il est absent</strong> (copie non destructive, jamais d'écrasement) — la bibliothèque renaît identique à chaque réveil du disque éphémère.</td></tr>
+</table>
+
+<div class="callout"><strong>Booléens :</strong> <code>RAGDOM_READONLY</code>, <code>RAGDOM_ALLOW_REVEAL</code>, <code>RAGDOM_LOW_MEMORY</code>, <code>RAGDOM_OFFLINE</code>, <code>RAGDOM_FORCE_SQLITE_VEC</code> se comparent à <code>"true"</code> (insensible à la casse). <code>RAGDOM_AUTH_TOKEN</code> vide vaut <code>None</code> (aucun contrôle par jeton env). <code>RAGDOM_VLM_PAGE_OCR</code> est une exception : seul <code>false</code> désactive.</div>
+
+<!-- ══════════════ 05 RENDER ══════════════ -->
+<h2 id="render"><span class="num">05</span>Render.com — pas à pas illustré</h2>
+<p>C'est la méthode réellement utilisée pour <code>ragdom.onrender.com</code> : image <strong>Docker</strong>, plan <strong>Free</strong>, région Francfort. Render lit le <code>Dockerfile</code> racine tel quel (aucun <code>render.yaml</code> requis).</p>
+
+<div class="step"><div class="n">1</div><div class="body">
+<h3>Créer le service</h3>
+<p>Dans le tableau de bord Render : <strong>New +</strong> → <strong>Web Service</strong>.</p>
+<div class="mock">
+  <div class="bar"><span class="dot d1"></span><span class="dot d2"></span><span class="dot d3"></span><span class="url">dashboard.render.com/select-repo</span></div>
+  <div class="screen">
+    <div class="rlabel">＋ New</div>
+    <div class="field sel"><span class="val">Web Service</span><span class="tag">← choisir</span></div>
+    <div class="field"><span class="val">Static Site</span><span class="tag">UI seule (non)</span></div>
+    <div class="field"><span class="val">Background Worker · Cron · Postgres…</span><span class="tag">—</span></div>
+  </div>
+</div>
+</div></div>
+
+<div class="step"><div class="n">2</div><div class="body">
+<h3>Connecter le dépôt GitHub public</h3>
+<p>Reliez votre compte GitHub, puis choisissez le dépôt <code>RAGDom</code> et la <strong>branche de travail</strong> (<code>main</code>).</p>
+<div class="mock">
+  <div class="bar"><span class="dot d1"></span><span class="dot d2"></span><span class="dot d3"></span><span class="url">dashboard.render.com/web/new</span></div>
+  <div class="screen">
+    <div class="rlabel">Source code</div>
+    <div class="field sel"><span class="val">github.com/&lt;vous&gt;/RAGDom</span><span class="tag">Connect ✓</span></div>
+    <div class="rlabel" style="margin-top:12px">Branch</div>
+    <div class="field"><span class="val">main</span><span class="tag">▼</span></div>
+  </div>
+</div>
 </div></div>
 
 <div class="step"><div class="n">3</div><div class="body">
-<h3>Déclarer le port : ajouter en TÊTE du fichier <code>README.md</code> du Space</h3>
-<pre><code>---
-title: RAGDom
-sdk: docker
-app_port: 8000
----</code></pre>
-<p class="sub">HF attend le port 7860 par défaut ; cette entête lui indique que RAGDom écoute sur 8000.</p>
+<h3>Runtime Docker · région · plan Free</h3>
+<div class="mock">
+  <div class="bar"><span class="dot d1"></span><span class="dot d2"></span><span class="dot d3"></span><span class="url">dashboard.render.com/web/new · settings</span></div>
+  <div class="screen">
+    <div class="field"><span class="val">Name</span><span class="tag">ragdom</span></div>
+    <div class="field sel"><span class="val">Language / Runtime</span><span class="tag">Docker ✓ (Dockerfile détecté)</span></div>
+    <div class="field"><span class="val">Region</span><span class="tag">Frankfurt (EU Central)</span></div>
+    <div class="field sel"><span class="val">Instance Type</span><span class="tag">Free · 512 MB · 0,1 CPU</span></div>
+    <div class="btn ok">Create Web Service</div>
+  </div>
+</div>
+<p class="sub">Render détecte le <code>Dockerfile</code> et construit l'image (étage 1 : <code>npm run build</code> ; étage 2 : backend + <code>dist/</code> copié). Aucune commande de build/start à saisir : le <code>CMD</code> du Dockerfile lance uvicorn sur <code>0.0.0.0:8000</code>, port qu'<code>EXPOSE 8000</code> déclare.</p>
 </div></div>
 
 <div class="step"><div class="n">4</div><div class="body">
-<h3>Variables d'environnement (Settings → Variables and secrets du Space)</h3>
-<div class="card"><div class="env">
-<code>RAGDOM_READONLY</code><span><code>true</code> pour une bibliothèque de consultation publique · <code>false</code> pour l'atelier complet (alors définis le jeton ↓)</span>
-<code>RAGDOM_AUTH_TOKEN</code><span>(secret) un long jeton aléatoire — requis si READONLY=false : protège ingestion/purge/clés</span>
-<code>RAGDOM_ALLOW_REVEAL</code><span><code>false</code> — TOUJOURS sur le web</span>
-<code>RAGDOM_ASK_RATE_PER_MIN</code><span><code>6</code> — protège tes clés LLM</span>
+<h3>Poser les variables d'environnement</h3>
+<p>Onglet <strong>Environment</strong> du service. Ce sont ces variables — et non le <code>.env</code> du dépôt — qui portent les secrets et les réglages web.</p>
 </div></div>
-</div></div>
+
+<table>
+<tr><th>Variable</th><th>Valeur conseillée</th><th>Pourquoi</th></tr>
+<tr><td><code>RAGDOM_AUTH_TOKEN</code></td><td><span class="badge b-red">OBLIGATOIRE</span> <code>VOTRE_JETON</code> (long, aléatoire)</td><td>Protège l'administration et la création du 1<sup>er</sup> compte. Sans lui, en <code>READONLY=false</code>, l'instance est exposée.</td></tr>
+<tr><td><code>RAGDOM_LOW_MEMORY</code></td><td><code>true</code></td><td>512 Mo : l'encodeur ONNX (~300 Mo de pic) provoque un OOM kill. <code>true</code> → recherche BM25 seule, pas de crash.</td></tr>
+<tr><td><code>RAGDOM_SEED_LLM_KEYS</code></td><td><code>gemini:VOTRE_CLE:gemini-2.5-flash,…</code></td><td>Disque éphémère : la config repart de zéro à chaque boot. Re-seede les clés LLM automatiquement.</td></tr>
+<tr><td><code>RAGDOM_ALLOW_REVEAL</code></td><td><code>false</code></td><td>Interdit la lecture en clair des clés LLM (403). À ne jamais laisser <code>true</code> en ligne.</td></tr>
+<tr><td><code>RAGDOM_ASK_RATE_PER_MIN</code></td><td><code>6</code> à <code>12</code> (&gt; 0)</td><td>Quota <code>/ask</code> par IP/minute (429 au dépassement) → protège vos quotas LLM.</td></tr>
+<tr><td><code>RAGDOM_READONLY</code></td><td><code>false</code> (atelier) · <code>true</code> (vitrine)</td><td><code>true</code> pour une bibliothèque publique en lecture seule (admin en 404).</td></tr>
+</table>
+<p class="sub">Les chemins <code>SOURCES_DIR</code>, <code>DATABASES_DIR</code>, <code>MODELS_DIR</code>, etc. sont déjà posés par le <code>Dockerfile</code> (bloc <code>ENV</code>) — inutile de les redéclarer sur Render.</p>
 
 <div class="step"><div class="n">5</div><div class="body">
-<h3>C'est en ligne</h3>
-<p>Le Space builde l'image (npm run build + backend, ~10 min la première fois) puis sert <code>https://&lt;user&gt;-ragdom.hf.space</code> — l'UI ET l'API sur la même URL. Premier démarrage : les modèles OCR/embeddings se téléchargent automatiquement (<code>RAGDOM_OFFLINE=false</code> par défaut dans l'image).</p>
-<p class="sub">Charger une bibliothèque : ingère localement, puis Vue 3 → Bases → Exporter, et re-upload du <code>.sqlite</code> via l'atelier web (mode non-readonly) — ou commite le fichier dans le Space (dossier monté vers /data via une ligne <code>COPY</code> ajoutée au Dockerfile si tu veux des bases pré-chargées permanentes, immunisées contre les redémarrages).</p>
+<h3>Redéployer — l'autodeploy peut être inopérant</h3>
+<p>Sur ce service, <strong>l'autodeploy sur push n'est pas fiable</strong> : après un <code>git push</code>, le redéploiement doit souvent être déclenché à la main. Deux voies :</p>
+<h4>A. Bouton Manual Deploy</h4>
+<div class="mock">
+  <div class="bar"><span class="dot d1"></span><span class="dot d2"></span><span class="dot d3"></span><span class="url">dashboard.render.com/web/srv-…</span></div>
+  <div class="screen">
+    <div class="rlabel">Service · ragdom</div>
+    <div class="field sel"><span class="val">Manual Deploy ▾</span><span class="tag">Deploy latest commit / Clear cache &amp; deploy</span></div>
+  </div>
+</div>
+<h4>B. Via l'API Render (curl)</h4>
+<pre><code>curl -X POST \
+  -H "Authorization: Bearer $RENDER_API_KEY" \
+  -H "Accept: application/json" \
+  https://api.render.com/v1/services/&lt;VOTRE_SERVICE_ID&gt;/deploys
+# → renvoie un objet deploy (dep-…) ; on peut ensuite poller son statut.</code></pre>
+<p class="sub"><code>&lt;VOTRE_SERVICE_ID&gt;</code> est l'identifiant <code>srv-…</code> visible dans l'URL du service. <code>RENDER_API_KEY</code> se crée dans Account Settings → API Keys. Ne jamais committer cette clé.</p>
 </div></div>
 
-<h2><span class="num">02</span>Render.com — gratuit, URL propre, veille automatique</h2>
-<div class="step"><div class="n">1</div><div class="body"><p><a href="https://render.com" target="_blank" rel="noopener noreferrer">render.com</a> → New → <strong>Web Service</strong> → connecte GitHub → repo <code>RAGDom</code> → <strong>Branch : post-v1</strong>.</p></div></div>
-<div class="step"><div class="n">2</div><div class="body"><p>Language : <strong>Docker</strong> (le Dockerfile racine est détecté) · Instance type : <strong>Free</strong> · même variables d'environnement qu'au §1.4.</p></div></div>
-<div class="step"><div class="n">3</div><div class="body"><p>Deploy → <code>https://ragdom.onrender.com</code>.</p>
-<div class="callout"><strong>Limites du plan Free :</strong> mise en veille après 15 min d'inactivité (premier accès suivant : ~1 min de réveil) · 512 Mo RAM — suffisant pour la <strong>consultation</strong> (readonly), trop juste pour l'ingestion OCR de gros scans → fais l'ingestion en local et publie les .sqlite.</div></div></div>
-
-<h2><span class="num">03</span>Railway — le plus confortable (essai gratuit puis ~5 $/mois)</h2>
-<div class="step"><div class="n">1</div><div class="body"><p><a href="https://railway.app" target="_blank" rel="noopener noreferrer">railway.app</a> → New Project → <strong>Deploy from GitHub repo</strong> → <code>RAGDom</code> → Branch <strong>post-v1</strong>. Le Dockerfile est utilisé automatiquement.</p></div></div>
-<div class="step"><div class="n">2</div><div class="body"><p>Ajoute un <strong>Volume</strong> monté sur <code>/data</code> (clic droit sur le service → Attach Volume) → tes bases, sources et modèles <strong>persistent</strong> entre les redéploiements. Variables du §1.4 + Settings → Networking → <strong>Generate Domain</strong> (port 8000).</p></div></div>
-<div class="step"><div class="n">3</div><div class="body"><p>C'est l'option « je veux le vrai atelier complet sur le web » : RAM configurable, ingestion à distance viable, persistance réelle.</p></div></div>
-
-<h2><span class="num">04</span>Cloudflare — vitrine UI (ton pipeline actuel)</h2>
-<p>Cloudflare Workers/Pages ne peut pas exécuter le backend Python (binaires natifs — voir le schéma §00). Il sert en revanche parfaitement l'<strong>UI seule</strong> :</p>
-<div class="step"><div class="n">1</div><div class="body"><p>Dans ton projet Cloudflare : <strong>Production branch : <code>post-v1</code></strong> (recommandé désormais — c'est la branche web de référence ; <code>main</code> fonctionne aussi pour l'UI). Root directory : <code>frontend</code>. Le <code>wrangler.jsonc</code> livré supprime l'erreur « Vite ≥ 6 » : relance le déploiement, il passe.</p></div></div>
-<div class="step"><div class="n">2</div><div class="body"><p>Variable de build <code>VITE_API_URL=https://&lt;ton-backend&gt;</code> (l'URL HF/Render/Railway du §1-3) — et côté backend, ajoute ton domaine Cloudflare dans <code>FRONTEND_URL</code> (liste CORS). Sans backend : l'UI s'affiche avec l'écran « aucun backend joignable » (normal).</p></div></div>
-<div class="callout ok"><strong>Astuce :</strong> si tu déploies via §1-3, Cloudflare devient optionnel — l'image Docker sert déjà l'UI. Garde Cloudflare seulement si tu veux son CDN devant l'UI.</div>
-
-<h2><span class="num">4bis</span>Cloudflare Containers — le déploiement COMPLET via Cloudflare (GA avril 2026)</h2>
-<p>Vérifié sur la documentation officielle : <strong>Cloudflare Containers est en disponibilité générale depuis le 13/04/2026</strong> — on peut désormais exécuter l'image Docker RAGDom entière (UI + API + moteur) sur le réseau Cloudflare. <strong>Condition : plan Workers Paid (5 $/mois)</strong> — les Containers ne sont pas dans le plan Free — + facturation à l'usage CPU actif (scale-to-zero : un site peu visité coûte quelques centimes).</p>
-<div class="step"><div class="n">1</div><div class="body"><p>Sur ta machine (Docker requis) :</p>
-<pre><code>git clone -b post-v1 https://github.com/amichiamine/RAGDom.git
-cd RAGDom/deploy/cloudflare
-npm install
-npx wrangler deploy</code></pre>
-<p class="sub">Le dossier <code>deploy/cloudflare/</code> du dépôt contient tout : le Worker de routage, la config <code>wrangler.jsonc</code> (containers + Durable Object) et le README détaillé. Wrangler builde l'image, la pousse au registre Cloudflare et publie <code>https://ragdom-web.&lt;compte&gt;.workers.dev</code>.</p></div></div>
-<div class="step"><div class="n">2</div><div class="body"><p>Gabarit : <code>standard</code> (4 GiB / ½ vCPU / 4 GB disque) — confortable pour RAGDom (pic mesuré : 489 Mo). Démarrage à froid : 1-3 s, veille automatique après 2 h sans trafic.</p></div></div>
-<div class="callout danger"><strong>⚠️ Disque éphémère (limite plateforme) :</strong> à chaque mise en veille, le disque du conteneur repart de l'image — les .sqlite uploadés à chaud sont perdus. Parade recommandée : <strong>embarquer les bases dans l'image</strong> (une ligne <code>COPY databases_publiees/*.sqlite /data/databases/</code> dans le Dockerfile — détaillé dans deploy/cloudflare/README.md). La bibliothèque de consultation renaît alors identique à chaque réveil. Cloudflare annonce des « snapshots » pour la persistance native.</div>
-<div class="callout ok"><strong>Verdict :</strong> tu avais raison — Cloudflare peut tout héberger désormais. Choisis-le si tu es déjà dans son écosystème et que le trafic est en rafales (facturation CPU actif imbattable). Reste sur HF Spaces si tu veux du 100 % gratuit, ou Railway si tu veux un disque réellement persistant.</div>
-
-<h2><span class="num">05</span>Sécurité web — les 4 réglages à ne jamais oublier</h2>
-<table>
-<tr><th>Variable</th><th>Consultation publique</th><th>Atelier privé</th><th>Effet</th></tr>
-<tr><td><code>RAGDOM_READONLY</code></td><td><span class="badge b-green">true</span></td><td><span class="badge b-amber">false</span></td><td>true : les routes d'administration <em>n'existent pas</em> (404) — surface d'attaque nulle</td></tr>
-<tr><td><code>RAGDOM_AUTH_TOKEN</code></td><td>—</td><td><span class="badge b-red">OBLIGATOIRE</span></td><td>Bearer requis sur ingestion, purge, clés, curriculum (401 sinon)</td></tr>
-<tr><td><code>RAGDOM_ALLOW_REVEAL</code></td><td><span class="badge b-green">false</span></td><td><span class="badge b-green">false</span></td><td>interdit la lecture en clair des clés LLM (403)</td></tr>
-<tr><td><code>RAGDOM_ASK_RATE_PER_MIN</code></td><td><span class="badge b-blue">6</span></td><td><span class="badge b-blue">12</span></td><td>quota chat RAG par IP/minute (429) — protège tes quotas LLM</td></tr>
-</table>
-
-<h2><span class="num">06</span>Vérification &amp; dépannage</h2>
-<table>
-<tr><th>Test</th><th>Attendu</th></tr>
-<tr><td><code>https://…/api/system/health</code></td><td><code>{"status":"ok", "readonly":…, "vector_engine":"sqlite-vec"}</code></td></tr>
-<tr><td><code>https://…/</code> puis <code>/library</code></td><td>l'UI (single-origin — SPA servie sur toutes les routes)</td></tr>
-<tr><td>Route admin en readonly (ex. <code>POST /api/pipeline/start</code>)</td><td><code>404</code> — comportement voulu</td></tr>
-</table>
-<table>
-<tr><th>Symptôme</th><th>Cause / remède</th></tr>
-<tr><td>Erreur « Vite ≥ 6 » chez Cloudflare</td><td>Ancien commit sans <code>wrangler.jsonc</code> → redéploie depuis post-v1/main à jour</td></tr>
-<tr><td>Build Docker long (~10 min)</td><td>Normal au 1er build (npm + whitelist Python + compilation llama-cpp) ; caché ensuite</td></tr>
-<tr><td>Bases disparues après redémarrage</td><td>Stockage éphémère du plan gratuit → volume persistant (§3) ou ré-upload du .sqlite</td></tr>
-<tr><td>Ingestion qui rame sur plan gratuit</td><td>512 Mo–2 vCPU : ingère en local (86 pages/min mesurées) et publie la base finie</td></tr>
-<tr><td>UI Cloudflare : « aucun backend joignable »</td><td><code>VITE_API_URL</code> absent au build, ou domaine manquant dans <code>FRONTEND_URL</code> (CORS)</td></tr>
-</table>
-
-<h2><span class="num">07</span>Contenu exact de la branche <code>post-v1</code></h2>
-<div class="card">
-<p><span class="badge b-blue">= tout main</span> backend 48 routes (47/47 tests) · moteur sci-engine 9 couches · frontend pixel-perfect complet (6 onglets, Splash, CurriculumStudio, ChunkEditor, Telemetry, Lifecycle, ImportModal, Palette) · build validé (tsc 0 erreur) · docs</p>
-<p><span class="badge b-green">+ exclusif post-v1</span></p>
-<ul style="margin:.4em 0 .2em 1.3em;color:var(--text)">
-<li><strong>Lot Web-Ready</strong> : <code>RAGDOM_READONLY</code>, auth Bearer, rate-limit /ask, verrou /reveal, CORS multi-origines, <code>health.readonly</code> (6 tests)</li>
-<li><strong>Single-origin</strong> : FastAPI sert l'UI compilée (SPA fallback) — une URL pour tout</li>
-<li><strong>Dockerfile tout-en-un</strong> + <code>backend/requirements.txt</code> (whitelist extraite de tech_specs §8)</li>
-<li><strong>Phase 6 (D4-B)</strong> : parallélisme intra-page borné <code>layer_2_extract_v2</code> (flag <code>RAGDOM_INTRA_PAGE_WORKERS</code>, off par défaut)</li>
-</ul>
+<h3>Contraintes du plan Free &amp; parades réelles</h3>
+<div class="grid">
+  <div class="card"><span class="badge b-amber">512 Mo RAM</span><p>L'encodeur d'embeddings ne tient pas. <strong>Parade :</strong> <code>RAGDOM_LOW_MEMORY=true</code> → recherche <strong>BM25 seule</strong> en ligne, aucune régression fonctionnelle sur la consultation.</p></div>
+  <div class="card"><span class="badge b-amber">Veille après 15 min</span><p>Le service s'endort sans trafic ; le premier accès suivant met ~1 min à réveiller l'instance. <strong>Parade :</strong> accepter la latence, ou pinger périodiquement.</p></div>
+  <div class="card"><span class="badge b-amber">Disque éphémère</span><p>Au redémarrage, le disque repart de l'image. <strong>Parades câblées</strong> (ci-dessous) : corpus dans l'image, bases pré-ingérées seedées au boot, clés LLM re-seedées.</p></div>
 </div>
 
-<footer>RAGDom V3.5 · Guide de déploiement web · 2026-08-21 (rév. Containers GA) · dépôt : github.com/amichiamine/RAGDom (branche post-v1) · réf. technique : docs/ragdom/02_walkthroughs/phase7_deploiement_web.md</footer>
+<h4>Comment RAGDom survit à un disque éphémère</h4>
+<ol>
+  <li><strong>Corpus embarqué dans l'image.</strong> Le <code>Dockerfile</code> fait <code>COPY sources/ sources/</code> et pose <code>SOURCES_DIR=/app/sources</code> : les PDF du dépôt font partie de l'image, persistants aux redémarrages.</li>
+  <li><strong>Bases pré-ingérées via release GitHub.</strong> Les <code>.sqlite</code> volumineux (&gt; 100 Mo, interdits dans le dépôt) sont téléchargés au <em>build</em> depuis une release GitHub vers <code>databases_publiees/</code> :
+    <pre><code># Dockerfile (extrait)
+RUN mkdir -p databases_publiees \
+ && curl -fsSL -o databases_publiees/&lt;base&gt;.sqlite \
+    https://github.com/&lt;vous&gt;/RAGDom/releases/download/&lt;tag&gt;/&lt;base&gt;.sqlite \
+ || echo 'bases publiées non téléchargées (release absente) — démarrage à vide.'</code></pre>
+    Puis, au démarrage, <code>main.py</code> copie tout <code>.sqlite</code> de <code>databases_publiees/</code> vers <code>DATABASES_DIR</code> s'il est absent → la bibliothèque renaît pré-chargée à chaque réveil.</li>
+  <li><strong>Clés LLM re-seedées à chaque boot</strong> via <code>RAGDOM_SEED_LLM_KEYS</code> (voir §04) : la config repart de zéro, mais les clés sont réinsérées et le provider réactivé automatiquement.</li>
+</ol>
+
+<!-- ══════════════ 06 DOCKER GENERIQUE ══════════════ -->
+<h2 id="docker"><span class="num">06</span>Docker générique (tout hébergeur)</h2>
+<p>La même image tourne sur n'importe quel hébergeur de conteneurs (VPS, Fly.io, Railway, Koyeb, Coolify…) ou en local avec Docker installé.</p>
+
+<div class="step"><div class="n">1</div><div class="body">
+<h3>Construire l'image</h3>
+<pre><code>docker build -t ragdom .</code></pre>
+<p class="sub">Étage 1 (<code>node:20-alpine</code>) : <code>npm run build</code>. Étage 2 (<code>python:3.11-slim</code>) : installe la whitelist <code>requirements.txt</code> (<code>llama-cpp-python</code> exclu de l'image web), applique le post-install OpenCV headless, copie le backend, les moteurs, <code>sources/</code>, les bases publiées et <code>dist/</code>.</p>
+</div></div>
+
+<div class="step"><div class="n">2</div><div class="body">
+<h3>Lancer le conteneur</h3>
+<pre><code>docker run -p 8000:8000 \
+  -e RAGDOM_AUTH_TOKEN=VOTRE_JETON \
+  -e RAGDOM_ALLOW_REVEAL=false \
+  -e RAGDOM_ASK_RATE_PER_MIN=6 \
+  -e RAGDOM_LOW_MEMORY=true \
+  -e RAGDOM_SEED_LLM_KEYS=gemini:VOTRE_CLE:gemini-2.5-flash \
+  -v ragdom_data:/data \
+  ragdom
+# → http://localhost:8000 sert l'UI ET l'API (single-origin).</code></pre>
+<p class="sub">Le volume <code>/data</code> est <strong>optionnel</strong> mais recommandé hors plan gratuit : il persiste <code>databases/</code>, <code>pipeline_set/</code>, <code>models/</code> et <code>ragdom_config.sqlite</code> entre les redémarrages (chemins déjà posés par le <code>Dockerfile</code> sous <code>/data</code>). Sans volume, on retombe sur le modèle « bases publiées seedées au boot » du §05.</p>
+</div></div>
+
+<!-- ══════════════ 07 CORPUS ══════════════ -->
+<h2 id="corpus"><span class="num">07</span>Publier son propre corpus</h2>
+<p>Le workflow réel pour mettre en ligne <em>vos</em> bibliothèques, sans ingérer sur le serveur :</p>
+
+<div class="step"><div class="n">1</div><div class="body">
+<h3>Ingérer localement</h3>
+<p>Faites tourner le pipeline sur votre poste (idéal : plein d'RAM, embeddings actifs). La bibliothèque produite est un fichier <code>.sqlite</code> unique dans <code>databases/</code>.</p>
+</div></div>
+
+<div class="step"><div class="n">2</div><div class="body">
+<h3>Choisir le canal de publication selon la taille</h3>
+<div class="grid">
+  <div class="card"><span class="badge b-green">&lt; 100 Mo</span><h4>Dépôt direct</h4><p>Déposez le <code>.sqlite</code> dans <code>databases_publiees/</code> et committez-le. Au prochain build/boot, il sera seedé vers <code>DATABASES_DIR</code>.</p></div>
+  <div class="card"><span class="badge b-amber">&gt; 100 Mo</span><h4>Release GitHub</h4><p>GitHub refuse les fichiers &gt; 100 Mo dans le dépôt. Publiez le <code>.sqlite</code> en <strong>asset de release</strong> (assets jusqu'à 2 Go).</p></div>
+</div>
+</div></div>
+
+<div class="step"><div class="n">3</div><div class="body">
+<h3>Référencer la release dans le Dockerfile</h3>
+<p>Ajoutez (ou adaptez) une ligne <code>curl</code> dans le bloc <em>bases publiées</em> du <code>Dockerfile</code>, pointant vers l'URL de téléchargement de votre asset :</p>
+<pre><code>RUN curl -fsSL -o databases_publiees/&lt;ma_base&gt;.sqlite \
+    https://github.com/&lt;vous&gt;/RAGDom/releases/download/&lt;tag&gt;/&lt;ma_base&gt;.sqlite</code></pre>
+<p class="sub">Au build, l'asset est téléchargé dans l'image ; au démarrage, <code>main.py</code> le copie vers <code>DATABASES_DIR</code> s'il est absent. La copie est <strong>non destructive</strong> : une base déjà présente n'est jamais écrasée.</p>
+</div></div>
+
+<!-- ══════════════ 08 DEPANNAGE ══════════════ -->
+<h2 id="depannage"><span class="num">08</span>Dépannage</h2>
+<table>
+<tr><th>Symptôme</th><th>Cause</th><th>Remède</th></tr>
+<tr><td>Le conteneur redémarre / est tué (OOM) sur Render Free</td><td>512 Mo : chargement de l'encodeur d'embeddings ONNX (~300 Mo de pic)</td><td>Poser <code>RAGDOM_LOW_MEMORY=true</code> → recherche BM25 seule, pas de chargement de l'encodeur.</td></tr>
+<tr><td><code>401</code> sur une action d'administration</td><td>Jeton absent/incorrect, ou un compte existe et la session est requise</td><td>Se connecter via <code>/login</code>, ou envoyer <code>Authorization: Bearer VOTRE_JETON</code> égal à <code>RAGDOM_AUTH_TOKEN</code>.</td></tr>
+<tr><td>Route d'administration en <code>404</code> alors qu'elle devrait exister</td><td><code>RAGDOM_READONLY=true</code> : l'admin n'existe pas (surface nulle)</td><td>Passer <code>RAGDOM_READONLY=false</code> pour l'atelier complet (puis définir <code>RAGDOM_AUTH_TOKEN</code>).</td></tr>
+<tr><td><code>403</code> sur <code>/api/llm/keys/{id}/reveal</code></td><td><code>RAGDOM_ALLOW_REVEAL=false</code> (attendu sur le web)</td><td>Comportement voulu en ligne. Pour révéler en local uniquement : <code>RAGDOM_ALLOW_REVEAL=true</code>.</td></tr>
+<tr><td>Chat RAG en <code>429</code></td><td>Quota <code>RAGDOM_ASK_RATE_PER_MIN</code> atteint pour cette IP</td><td>Attendre une minute, ou relever la valeur si l'usage légitime le justifie.</td></tr>
+<tr><td>Provider Gemini renvoie <code>429</code></td><td>Quota côté fournisseur épuisé (jour/minute)</td><td>Ajouter plusieurs clés (rotation), choisir un modèle moins coûteux (<code>:modèle</code> dans le seed), attendre la réinitialisation du quota.</td></tr>
+<tr><td>Provider renvoie <code>403</code> partout</td><td>Projet Google banni / clé invalide</td><td>Régénérer la clé sur un projet valide ; retirer la clé bannie du seed.</td></tr>
+<tr><td>Un <code>git push</code> ne redéploie rien sur Render</td><td>Autodeploy silencieux / inopérant sur ce service</td><td>Manual Deploy (bouton) ou <code>POST /v1/services/{id}/deploys</code> via l'API (§05.5).</td></tr>
+<tr><td>Premier accès très lent (~1 min)</td><td>Réveil depuis la veille (Free : sommeil après 15 min sans trafic)</td><td>Normal. Accepter la latence, ou pinger périodiquement le service.</td></tr>
+<tr><td>Bibliothèque vide après un restart</td><td>Disque éphémère : <code>DATABASES_DIR</code> repart de zéro</td><td>Embarquer les bases dans l'image (<code>databases_publiees/</code> + release GitHub, §05/§07), ou monter un volume persistant <code>/data</code> (§06).</td></tr>
+<tr><td>UI absente, seul l'API répond</td><td><code>frontend/dist</code> introuvable (build non fait)</td><td><code>cd frontend &amp;&amp; npm run build</code>, ou pointer <code>RAGDOM_UI_DIST</code> vers un build existant.</td></tr>
+</table>
+
+<h3>Vérifications rapides</h3>
+<table>
+<tr><th>Test</th><th>Attendu</th></tr>
+<tr><td><code>GET /api/system/health</code></td><td><code>{"status":"ok", "vector_engine":"sqlite-vec", "readonly":…, "force_sqlite_vec":…}</code></td></tr>
+<tr><td><code>GET /</code> puis une route SPA (ex. <code>/library</code>)</td><td>L'UI (single-origin — fallback SPA sur toute route sans extension)</td></tr>
+<tr><td><code>GET /api/system/databases</code></td><td>Liste des <code>.sqlite</code> scannés dans <code>DATABASES_DIR</code> (avec métriques)</td></tr>
+</table>
+
+<footer>
+  RAGDom <strong>V3.12</strong> · Guide de déploiement web (local · Docker · Render) · mis à jour le <strong>2026-08-22</strong><br>
+  Références vérifiées dans le dépôt : <code>backend/main.py</code>, <code>backend/config.py</code>, <code>backend/.env</code>, <code>backend/core/access_policy.py</code>, <code>backend/api/routes_auth.py</code>, <code>backend/db/connection.py</code>, <code>scripts/dev-backend.mjs</code>, <code>package.json</code>, <code>Dockerfile</code>. Aucun secret réel n'apparaît dans ce document (placeholders : <code>VOTRE_JETON</code>, <code>VOTRE_CLE</code>, <code>VOTRE_SERVICE_ID</code>).
+</footer>
 
 </div>
 </body>

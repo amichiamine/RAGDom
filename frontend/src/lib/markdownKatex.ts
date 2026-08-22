@@ -138,7 +138,7 @@ function transformStructuredBlocks(text: string, opts?: RenderOptions): string {
       `<div class="visual-math-body">${content.trim()}</div></div>`,
   )
 
-  // Images Markdown & assets asset://figures/
+  // Images Markdown & assets asset://figures/ · asset://artifacts/{id}
   out = out.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (_m, alt: string, src: string) => {
     if (src.startsWith('asset://figures/')) {
       const figFile = src.replace('asset://figures/', '')
@@ -147,6 +147,17 @@ function transformStructuredBlocks(text: string, opts?: RenderOptions): string {
         `<div class="svg-figure-wrapper" data-figure="${alt}">` +
         `<img src="${actualSrc}" alt="${alt}" />` +
         `<div><small>📐 ${alt}</small></div></div>`
+      )
+    }
+    // Repli HTML pour asset://artifacts/{id} lorsque le rendu React natif n'est PAS
+    // utilisé (pas d'artifactResolver fourni) : on sert le binaire original par id.
+    if (src.startsWith('asset://artifacts/')) {
+      const artifactId = src.replace('asset://artifacts/', '')
+      const actualSrc = opts?.resolveAsset ? opts.resolveAsset(artifactId) : artifactId
+      return (
+        `<div class="svg-figure-wrapper" data-artifact="${artifactId}">` +
+        `<img src="${actualSrc}" alt="${alt}" />` +
+        `<div><small>🖼️ ${alt}</small></div></div>`
       )
     }
     return `<div class="svg-figure-wrapper"><img src="${src}" alt="${alt}" /><br><small>🖼️ ${alt}</small></div>`
@@ -239,4 +250,50 @@ export function renderMarkdownWithKaTeX(raw: string, opts?: RenderOptions): stri
       'mathvariant', 'displaystyle', 'scriptlevel', 'encoding', 'width', 'height',
     ],
   })
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// 4. Découpage du markdown sur les ancres `asset://artifacts/{id}`
+//    (architecture « segments texte + composants React intercalés »).
+//    Utilisé par MarkdownKatex quand un `artifactResolver` est fourni : chaque
+//    segment texte est rendu par le pipeline KaTeX, chaque segment artefact par
+//    <ArtifactRenderer> (bascule interactive structuré/original). Les figures
+//    (`asset://figures/…`) restent traitées in-HTML par le pipeline ci-dessus.
+// ──────────────────────────────────────────────────────────────────────────
+export type MarkdownSegment =
+  | { kind: 'markdown'; text: string }
+  | { kind: 'artifact'; id: string; caption: string }
+
+/** Ancre image dont la cible est `asset://artifacts/{id}` — capture caption + id. */
+const ARTIFACT_ANCHOR_RE = /!\[([^\]]*)\]\(asset:\/\/artifacts\/([^)\s]+)\)/g
+
+/** Vrai si le markdown contient au moins une ancre `asset://artifacts/{id}`. */
+export function hasArtifactAnchors(raw: string): boolean {
+  if (!raw) return false
+  ARTIFACT_ANCHOR_RE.lastIndex = 0
+  return ARTIFACT_ANCHOR_RE.test(raw)
+}
+
+/**
+ * Découpe le markdown brut en une liste de segments alternant texte et ancres
+ * artefact. Ne consomme QUE les ancres `asset://artifacts/{id}` ; tout le reste
+ * (y compris `asset://figures/…`) demeure dans les segments markdown.
+ */
+export function splitMarkdownOnArtifactAnchors(raw: string): MarkdownSegment[] {
+  if (!raw) return []
+  const segments: MarkdownSegment[] = []
+  let lastIndex = 0
+  ARTIFACT_ANCHOR_RE.lastIndex = 0
+  let m: RegExpExecArray | null
+  while ((m = ARTIFACT_ANCHOR_RE.exec(raw)) !== null) {
+    if (m.index > lastIndex) {
+      segments.push({ kind: 'markdown', text: raw.slice(lastIndex, m.index) })
+    }
+    segments.push({ kind: 'artifact', caption: m[1] ?? '', id: m[2] })
+    lastIndex = m.index + m[0].length
+  }
+  if (lastIndex < raw.length) {
+    segments.push({ kind: 'markdown', text: raw.slice(lastIndex) })
+  }
+  return segments
 }

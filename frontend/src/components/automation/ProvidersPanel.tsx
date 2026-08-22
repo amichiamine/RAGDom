@@ -4,6 +4,7 @@ import type { LlmKey, LlmProvider, LlmSetting } from '@/types'
 import { useLanguage } from '@/contexts/LanguageContext'
 import { useToast } from '@/components/common/Toast'
 import { Spinner, ErrorBanner } from '@/components/common/Feedback'
+import MakeDocsPanel from '@/components/automation/MakeDocsPanel'
 
 /**
  * V3.7 — Panneau UNIFIÉ « 🔌 Fournisseurs LLM ». Une seule carte pleine largeur,
@@ -60,6 +61,8 @@ export default function ProvidersPanel() {
   // Saisie inline « ajouter une clé » par provider + verrou d'action.
   const [draftKey, setDraftKey] = useState<Record<string, string>>({})
   const [busyProvider, setBusyProvider] = useState<string | null>(null)
+  // Documentation Make.com (contrat + prompts) : modale de consultation (LECTURE seule).
+  const [makeDocsOpen, setMakeDocsOpen] = useState(false)
 
   const load = useCallback(() => {
     setLoading(true); setError(null)
@@ -271,6 +274,18 @@ export default function ProvidersPanel() {
                 {/* Corps déplié */}
                 {isOpen && (
                   <div className="provider-body">
+                    {/* Make.com : accès à la doc (contrat scénario + prompts) — bouton discret */}
+                    {p === 'make' && (
+                      <div className="provider-section">
+                        <button
+                          type="button"
+                          className="btn btn-sm btn-outline-secondary"
+                          onClick={() => setMakeDocsOpen(true)}
+                        >
+                          <i className="fa-solid fa-file-lines" /> {t('automation.make_docs.title')}
+                        </button>
+                      </div>
+                    )}
                     {/* Clés */}
                     <div className="provider-section">
                       <div className="provider-section-title">{t('providers.keys_title')}</div>
@@ -382,6 +397,8 @@ export default function ProvidersPanel() {
           })}
         </div>
       )}
+
+      <MakeDocsPanel open={makeDocsOpen} onClose={() => setMakeDocsOpen(false)} />
     </div>
   )
 }
