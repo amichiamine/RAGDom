@@ -251,12 +251,13 @@ export interface BenchmarkAggregates { avg_latency_ms: number; avg_confidence: n
 export interface AppSettings { vec_distance_threshold: number; bm25_score_threshold: number; force_sqlite_vec: boolean; }
 export interface EngineManifest { id: string; label: string; version: string; accent: string; families_tier1: string[]; status: 'active' | 'inactive'; } // V3.4
 
-// ── Studio de validation live ────────────────────────────────────────────────
-// Les unions restent ouvertes via les champs metadata : le moteur peut ajouter
-// une inspection sans forcer le client à inventer ou à perdre des données.
+// ── Studio de validation live — contrat exact routes_validation.py ───────────
 export type ValidationScopeKind =
   | 'database' | 'document' | 'toc' | 'chapter' | 'course' | 'title'
   | 'page' | 'page_range' | 'selection';
+export type ValidationScopeType =
+  | 'base' | 'document' | 'toc' | 'chapter' | 'course' | 'title'
+  | 'page' | 'page_range' | 'page_selection';
 
 export interface ValidationScope {
   db: string;
@@ -266,89 +267,107 @@ export interface ValidationScope {
   page_start?: number;
   page_end?: number;
   page_numbers?: number[];
-  chunk_ids?: string[];
+}
+
+export interface ValidationScopeDTO {
+  scope_type: ValidationScopeType;
+  document_id: string | null;
+  toc_id: string | null;
+  page: number | null;
+  page_start: number | null;
+  page_end: number | null;
+  pages: number[] | null;
+}
+
+export interface ValidationScopeTarget {
+  document_id: string;
+  toc_id: string | null;
+  pages: number[];
+  page_start: number;
+  page_end: number;
+  total_pages: number;
+}
+
+export interface ValidationScopeResolutionResponse {
+  scope_type: ValidationScopeType;
+  targets: ValidationScopeTarget[];
+  page_count: number;
 }
 
 export interface ValidationScopeResolved extends ValidationScope {
-  database_label?: string;
-  document_title?: string;
-  toc_title?: string;
   page_count: number;
   page_numbers: number[];
+  targets: ValidationScopeTarget[];
 }
 
-export interface ValidationRunOptions {
-  working_copy: boolean;
-  preserve_human_edits: boolean;
-}
-
-export interface ValidationPreviewRequest {
-  scope: ValidationScope;
-  options: ValidationRunOptions;
-}
-
-export interface ValidationPreviewImpact {
-  pages: number;
-  chunks: number | null;
-  artifacts: number | null;
-  toc_entries: number | null;
-  curriculum_entries: number | null;
-  benchmarks: number | null;
-  human_edits_preserved: number | null;
-}
-
+export interface ValidationPreviewRequest { scope: ValidationScope; }
 export interface ValidationPreview {
-  preview_id: string;
-  created_at: string;
-  expires_at?: string | null;
   scope: ValidationScopeResolved;
-  options: ValidationRunOptions;
-  impact: ValidationPreviewImpact;
-  warnings: string[];
   runnable: boolean;
-  summary: string;
+}
+
+export interface ValidationRunRequest {
+  scope: ValidationScope;
+  label?: string | null;
+  embedding_profile_id?: string | null;
 }
 
 export type ValidationRunStatus =
-  | 'READY' | 'QUEUED' | 'RUNNING' | 'COMPLETED' | 'FAILED' | 'CANCELLED'
-  | 'ACCEPTED' | 'REJECTED';
+  | 'DRAFT' | 'RUNNING' | 'READY' | 'ACCEPTED' | 'REJECTED' | 'CANCELLED' | 'FAILED';
 export type ValidationPageStatus =
-  | 'READY' | 'PENDING' | 'RUNNING' | 'COMPLETED' | 'FAILED' | 'SKIPPED'
-  | 'CANCELLED' | 'ACCEPTED' | 'REJECTED';
-export type ValidationDecisionKind = 'accept' | 'reject' | 'restore';
-export type ValidationDecisionTarget = 'run' | 'page';
+  | 'PENDING' | 'PROCESSING' | 'READY' | 'ACCEPTED' | 'REJECTED' | 'CANCELLED' | 'FAILED';
 
-export interface ValidationRunRequest extends ValidationPreviewRequest {
-  preview_id: string;
+export interface ValidationRunCreateResponse {
+  id: string;
+  status: 'READY';
+  page_count: number;
+  scope_type: ValidationScopeType;
+  official_mutated: false;
+}
+
+export interface ValidationRunListItemResponse {
+  id: string;
+  document_id: string | null;
+  scope_type: ValidationScopeType;
+  status: ValidationRunStatus;
+  label: string | null;
+  created_at: string;
+  updated_at: string;
+  page_count: number;
+}
+
+export interface ValidationRunPageSummaryResponse {
+  document_id: string;
+  page_number: number;
+  status: ValidationPageStatus;
+  updated_at: string;
+}
+
+export interface ValidationRunDetailResponse {
+  id: string;
+  document_id: string | null;
+  scope_type: ValidationScopeType;
+  scope: ValidationScopeDTO;
+  status: ValidationRunStatus;
+  label: string | null;
+  embedding_profile_id: string | null;
+  created_at: string;
+  updated_at: string;
+  accepted_at: string | null;
+  rejected_at: string | null;
+  pages: ValidationRunPageSummaryResponse[];
 }
 
 export interface ValidationRunSummary {
   id: string;
   status: ValidationRunStatus;
   scope: ValidationScopeResolved;
-  options: ValidationRunOptions;
+  label: string | null;
   created_at: string;
-  started_at: string | null;
-  completed_at: string | null;
+  updated_at: string;
   pages_total: number;
-  pages_completed: number;
-  pages_failed: number;
+  pages_ready: number;
   progress: number;
-  working_copy_id: string | null;
-  snapshot_before_id: string | null;
-  snapshot_after_id: string | null;
-  decision?: ValidationDecisionKind | null;
-  error?: string | null;
-}
-
-export interface ValidationMetricSet {
-  latency_ms?: number | null;
-  confidence?: number | null;
-  ram_peak_mb?: number | null;
-  chunks?: number;
-  artifacts?: number;
-  errors?: number;
-  [metric: string]: number | string | boolean | null | undefined;
 }
 
 export interface ValidationMetricDiff {
@@ -357,129 +376,138 @@ export interface ValidationMetricDiff {
   after: number | string | boolean | null;
   delta: number | null;
 }
-
-export interface ValidationMarkdownDiff {
-  before: string;
-  after: string;
-  unified?: string | null;
-}
-
+export interface ValidationMarkdownDiff { before: string; after: string; }
 export interface ValidationArtifactDiff {
   artifact_id: string;
   change: 'added' | 'removed' | 'changed' | 'unchanged';
   before: Artifact | null;
   after: Artifact | null;
 }
-
 export interface ValidationDiff {
   markdown: ValidationMarkdownDiff | null;
   artifacts: ValidationArtifactDiff[];
   metrics: ValidationMetricDiff[];
 }
 
-export interface ValidationInspectionError {
-  code?: string | null;
-  message: string;
-  layer?: string | null;
-  details?: string | null;
-}
-
+export interface ValidationInspectionError { message: string; }
 export interface ValidationInspection {
-  scan_url?: string | null;
-  scan_thumb_url?: string | null;
   chunks: Chunk[];
   artifacts: Artifact[];
   toc: TocNode[];
   curriculum: {
-    terms?: CurriculumTerm[];
-    programs?: CurriculumProgram[];
-    assessments?: Assessment[];
-    links?: ContentLink[];
+    terms: CurriculumTerm[];
+    programs: CurriculumProgram[];
+    assessments: Assessment[];
+    links: ContentLink[];
   } | null;
   benchmarks: BenchmarkRow[];
   errors: ValidationInspectionError[];
 }
 
-export interface ValidationPage {
-  run_id: string;
-  document_id?: string;
+export interface ValidationWorkingPagePayload {
+  document_id: string;
+  page_number: number;
+  chunks: Array<Chunk & Record<string, unknown>>;
+  artifacts: Array<Artifact & { raw_binary?: unknown } & Record<string, unknown>>;
+}
+export interface ValidationWorkingPageResponse {
+  id: string;
+  document_id: string;
   page_number: number;
   status: ValidationPageStatus;
-  started_at?: string | null;
-  completed_at?: string | null;
-  source_snapshot_id?: string | null;
-  result_snapshot_id?: string | null;
-  metrics_before?: ValidationMetricSet | null;
-  metrics_after?: ValidationMetricSet | null;
-  inspection?: ValidationInspection | null;
-  diff?: ValidationDiff | null;
-  decision?: ValidationDecisionKind | null;
-  error?: string | null;
-}
-
-export interface ValidationWorkingCopy {
-  id: string;
-  run_id: string;
-  db: string;
-  source_snapshot_id: string;
-  status: 'active' | 'accepted' | 'rejected' | 'restored';
-  created_at: string;
+  baseline: ValidationWorkingPagePayload;
+  working: ValidationWorkingPagePayload;
+  error_log: string | null;
   updated_at: string;
 }
 
-export interface ValidationSnapshot {
-  id: string;
+export interface ValidationPage extends ValidationRunPageSummaryResponse {
   run_id: string;
-  working_copy_id: string | null;
-  kind: 'before' | 'after' | 'restore';
-  created_at: string;
-  checksum?: string | null;
-  page_numbers: number[];
-}
-
-export interface ValidationDecision {
-  id: string;
-  run_id: string;
-  target: ValidationDecisionTarget;
-  page_number?: number | null;
-  decision: ValidationDecisionKind;
-  created_at: string;
-  message?: string | null;
+  inspection?: ValidationInspection | null;
+  diff?: ValidationDiff | null;
+  error?: string | null;
 }
 
 export interface ValidationRun extends ValidationRunSummary {
   pages: ValidationPage[];
-  working_copy?: ValidationWorkingCopy | null;
-  snapshots?: ValidationSnapshot[];
-  decisions?: ValidationDecision[];
-  diff?: ValidationDiff | null;
-  events_cursor?: string | null;
+  accepted_at: string | null;
+  rejected_at: string | null;
+  embedding_profile_id: string | null;
 }
 
-export type ValidationEventType =
-  | 'run_update' | 'page_update' | 'inspection_update' | 'diff_ready'
-  | 'decision' | 'completed' | 'cancelled' | 'error' | 'heartbeat';
-
-export interface ValidationEvent {
-  id?: string;
-  type: ValidationEventType;
+export interface ValidationPageDiffResponse {
   run_id: string;
-  page_number?: number;
-  status?: ValidationRunStatus | ValidationPageStatus;
-  progress?: number;
-  message?: string;
-  timestamp?: string;
-  run?: ValidationRun;
-  page?: ValidationPage;
-  error?: string;
+  document_id: string;
+  page_number: number;
+  diff: {
+    changed: boolean;
+    baseline_sha256: string;
+    working_sha256: string;
+    changes: Array<{ field: string; before: unknown; after: unknown }>;
+  };
+}
+export interface ValidationRunDiffResponse {
+  run_id: string;
+  changed_pages: number;
+  pages: Array<{ document_id: string; page_number: number; diff: ValidationPageDiffResponse['diff'] }>;
+}
+
+export interface ValidationSnapshotCreateResponse {
+  id: string;
+  run_id: string;
+  snapshot_type: 'logical' | 'physical';
+  page_count: number;
+  official_mutated: false;
+}
+
+export type ValidationEmbeddingPooling = 'cls' | 'mean' | 'max' | 'last_token' | 'none';
+export interface ValidationEmbeddingProfileRequest {
+  model_name: string;
+  model_version: string;
+  pooling: ValidationEmbeddingPooling;
+  dimensions: number;
+  normalized: boolean;
+  metadata?: Record<string, unknown>;
+}
+export interface ValidationEmbeddingProfile extends Omit<ValidationEmbeddingProfileRequest, 'metadata'> {
+  id: string;
+  metadata: Record<string, unknown>;
+}
+export interface ValidationEmbeddingAssignRequest {
+  db: string;
+  document_id: string;
+  profile_id: string;
+  confirm_reindex?: boolean;
+}
+export interface ValidationEmbeddingDiagnosticDocument {
+  document_id: string;
+  title: string;
+  profile: Omit<ValidationEmbeddingProfile, 'metadata'> | null;
+  vector_count: number;
+  inferred_dimensions: number[];
+  compatible: boolean;
+  action: 'register_or_reindex_explicitly' | null;
+}
+export interface ValidationEmbeddingDiagnostic {
+  engine: string;
+  documents: ValidationEmbeddingDiagnosticDocument[];
+  silent_reindex_performed: false;
+}
+export interface ValidationReport {
+  schema: 'ragdom.validation-report.v1';
+  run: ValidationRunDetailResponse;
+  diff: ValidationRunDiffResponse;
+  events: Array<{
+    id: string;
+    page_number: number | null;
+    event_type: string;
+    payload: Record<string, unknown>;
+    created_at: string;
+  }>;
+  benchmark_ids: string[];
 }
 
 export interface ValidationRunListResponse {
   data: ValidationRunSummary[];
   pagination: { page: number; limit: number; total: number; total_pages: number };
-}
-
-export interface ValidationDecisionRequest {
-  decision: ValidationDecisionKind;
-  page_number?: number;
 }

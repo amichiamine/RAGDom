@@ -27,22 +27,30 @@ export default function ValidationInspector({ inspection, db, documentId, pageNu
     { key: 'benchmarks', icon: Gauge, count: inspection?.benchmarks.length },
     { key: 'errors', icon: CircleAlert, count: inspection?.errors.length },
   ], [inspection])
+  const moveTab = (key: string) => {
+    const current = tabs.findIndex(tab => tab.key === active)
+    const direction = key === 'ArrowRight' ? 1 : key === 'ArrowLeft' ? -1 : 0
+    if (!direction) return
+    const next = tabs[(current + direction + tabs.length) % tabs.length].key
+    setActive(next)
+    window.requestAnimationFrame(() => document.getElementById(`validation-tab-${next}`)?.focus())
+  }
 
   if (!inspection) return <p className="validation-empty">{t('validation.inspection.empty')}</p>
-  const scanUrl = inspection.scan_url ?? (documentId ? api.library.getPageScanUrl(db, documentId, pageNumber) : null)
+  const scanUrl = documentId ? api.library.getPageScanUrl(db, documentId, pageNumber) : null
 
   return (
     <section aria-labelledby="validation-inspection-title">
       <h4 id="validation-inspection-title">{t('validation.inspection.title')}</h4>
       <div className="validation-subtabs" role="tablist" aria-label={t('validation.inspection.title')}>
         {tabs.map(({ key, icon: Icon, count }) => (
-          <button key={key} role="tab" aria-selected={active === key} className={active === key ? 'active' : ''} onClick={() => setActive(key)}>
+          <button key={key} id={`validation-tab-${key}`} type="button" role="tab" aria-selected={active === key} aria-controls="validation-inspection-panel" tabIndex={active === key ? 0 : -1} className={active === key ? 'active' : ''} onClick={() => setActive(key)} onKeyDown={event => { if (event.key === 'ArrowRight' || event.key === 'ArrowLeft') { event.preventDefault(); moveTab(event.key) } }}>
             <Icon size={14} /> {t(`validation.inspection.${key}`)} {count != null && <span className="badge badge-subtle">{count}</span>}
           </button>
         ))}
       </div>
 
-      <div className="validation-inspection-panel" role="tabpanel">
+      <div id="validation-inspection-panel" className="validation-inspection-panel" role="tabpanel" aria-labelledby={`validation-tab-${active}`} tabIndex={0}>
         {active === 'scan' && (scanUrl
           ? <img className="validation-scan" src={scanUrl} alt={`${t('library.scan')} ${pageNumber}`} loading="lazy" />
           : <Empty />)}
@@ -62,7 +70,7 @@ export default function ValidationInspector({ inspection, db, documentId, pageNu
           ? <div className="validation-table-wrap"><table className="data-table"><thead><tr><th>{t('library.page')}</th><th>{t('common.engine')}</th><th>{t('validation.metrics.latency')}</th><th>{t('validation.metrics.confidence')}</th><th>RAM</th></tr></thead><tbody>{inspection.benchmarks.map(row => <tr key={row.id}><td>{row.page_number}</td><td>{row.engine_used}</td><td>{row.execution_time_ms} ms</td><td>{row.confidence_score != null ? `${(row.confidence_score * 100).toFixed(1)}%` : '—'}</td><td>{row.ram_peak_mb ?? '—'}</td></tr>)}</tbody></table></div>
           : <Empty />)}
         {active === 'errors' && (inspection.errors.length
-          ? <div className="validation-stack">{inspection.errors.map((error, index) => <article className="validation-error-card" key={`${error.code}-${index}`}><strong>{error.code ?? error.layer ?? t('status.error')}</strong><p>{error.message}</p>{error.details && <pre>{error.details}</pre>}</article>)}</div>
+          ? <div className="validation-stack">{inspection.errors.map((error, index) => <article className="validation-error-card" key={`${index}-${error.message}`}><strong>{t('status.error')}</strong><p>{error.message}</p></article>)}</div>
           : <Empty />)}
       </div>
     </section>
