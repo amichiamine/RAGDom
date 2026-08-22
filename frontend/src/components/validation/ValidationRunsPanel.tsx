@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { Ban, Check, RotateCcw, X, RefreshCw, Timer, ChevronLeft, ChevronRight } from 'lucide-react'
 import { api } from '@/lib/api'
+import { isValidationRunTerminal, readValidationDeepLink, updateValidationDeepLink } from '@/lib/validation'
 import { useLanguage } from '@/contexts/LanguageContext'
 import { useToast } from '@/components/common/Toast'
 import ValidationInspector from './ValidationInspector'
@@ -16,7 +17,6 @@ interface Props {
 }
 
 const PAGE_SIZE = 20
-const TERMINAL = new Set(['ACCEPTED', 'REJECTED', 'CANCELLED', 'FAILED'])
 
 export default function ValidationRunsPanel({ activeDb, readonly, createdRun }: Props) {
   const { t } = useLanguage()
@@ -32,21 +32,13 @@ export default function ValidationRunsPanel({ activeDb, readonly, createdRun }: 
   const [confirmAcceptOpen, setConfirmAcceptOpen] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const validationDb = searchParams.get('db') || activeDb
-  const runId = searchParams.get('run')
-  const pageParam = Number(searchParams.get('page')) || null
-  const documentParam = searchParams.get('doc')
+  const { db: validationDb, runId, pageNumber: pageParam, documentId: documentParam } = readValidationDeepLink(searchParams, activeDb)
 
   const updateDeepLink = useCallback((nextRunId: string | null, pageNumber?: number | null, documentId?: string | null, db?: string | null) => {
-    setSearchParams(previous => {
-      const next = new URLSearchParams(previous)
-      next.set('tab', 'validation')
-      if (db) next.set('db', db)
-      if (nextRunId) next.set('run', nextRunId); else next.delete('run')
-      if (pageNumber != null) next.set('page', String(pageNumber)); else next.delete('page')
-      if (documentId) next.set('doc', documentId); else next.delete('doc')
-      return next
-    }, { replace: true })
+    setSearchParams(
+      previous => updateValidationDeepLink(previous, nextRunId, pageNumber, documentId, db),
+      { replace: true },
+    )
   }, [setSearchParams])
 
   const showError = useCallback((cause: unknown, notify = true) => {
@@ -114,7 +106,7 @@ export default function ValidationRunsPanel({ activeDb, readonly, createdRun }: 
   // routes_validation.py n'expose pas de flux SSE. Le repli contractuel interroge
   // uniquement le run profond lié par l'URL, sans recompter les événements globaux.
   useEffect(() => {
-    if (!runId || (run && TERMINAL.has(run.status))) return
+    if (!runId || (run && isValidationRunTerminal(run.status))) return
     const timer = window.setInterval(() => { void loadRun(runId, true) }, 5000)
     return () => window.clearInterval(timer)
   }, [loadRun, run, runId])
@@ -176,7 +168,7 @@ export default function ValidationRunsPanel({ activeDb, readonly, createdRun }: 
               <div><div className="validation-run-title"><h3>{run.label ?? run.scope.db}</h3><StatusBadge status={run.status} /></div><code dir="ltr">{run.id}</code></div>
               <div className="validation-actions">
                 <span className="badge badge-subtle"><Timer size={12} />{t('validation.runs.polling')}</span>
-                {!TERMINAL.has(run.status) && <button type="button" className="btn btn-sm btn-outline-danger" onClick={() => void mutate('cancel')} disabled={readonly || mutating}><Ban size={14} /> {t('buttons.cancel')}</button>}
+                {!isValidationRunTerminal(run.status) && <button type="button" className="btn btn-sm btn-outline-danger" onClick={() => void mutate('cancel')} disabled={readonly || mutating}><Ban size={14} /> {t('buttons.cancel')}</button>}
               </div>
             </header>
             <div className="validation-progress" role="progressbar" aria-label={t('validation.runs.progress')} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(run.progress)}><span style={{ width: `${Math.min(100, Math.max(0, run.progress))}%` }} /></div>
@@ -187,7 +179,7 @@ export default function ValidationRunsPanel({ activeDb, readonly, createdRun }: 
             {selectedPage && (
               <>
                 <div className="validation-page-heading"><h4>{t('library.page')} {selectedPage.page_number}</h4><StatusBadge status={selectedPage.status} /></div>
-                {!TERMINAL.has(run.status) && <div className="validation-decision-bar" aria-label={t('validation.decisions.title')}>
+                {!isValidationRunTerminal(run.status) && <div className="validation-decision-bar" aria-label={t('validation.decisions.title')}>
                   <button type="button" className="btn btn-sm btn-outline-warning" onClick={() => void mutate('restore', 'page')} disabled={readonly || mutating}><RotateCcw size={14} /> {t('validation.decisions.restore_page')}</button>
                 </div>}
                 <ValidationDiffView diff={selectedPage.diff} db={run.scope.db} />
@@ -195,7 +187,7 @@ export default function ValidationRunsPanel({ activeDb, readonly, createdRun }: 
               </>
             )}
 
-            {!TERMINAL.has(run.status) && (
+            {!isValidationRunTerminal(run.status) && (
               <div className="validation-decision-bar validation-run-decisions">
                 <strong>{t('validation.decisions.run_title')}</strong>
                 {run.status === 'READY' && <button type="button" className="btn btn-sm btn-success" onClick={() => setConfirmAcceptOpen(true)} disabled={readonly || mutating}><Check size={14} /> {t('validation.decisions.accept_run')}</button>}

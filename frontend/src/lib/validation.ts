@@ -59,6 +59,40 @@ export function isValidationScopeValid(scope: ValidationScope): boolean {
   return Boolean(scope.page_numbers?.length)
 }
 
+export interface ValidationDeepLink {
+  db: string | null
+  runId: string | null
+  pageNumber: number | null
+  documentId: string | null
+}
+
+export function readValidationDeepLink(searchParams: URLSearchParams, activeDb: string | null): ValidationDeepLink {
+  const rawPage = searchParams.get('page')
+  const parsedPage = rawPage === null ? Number.NaN : Number(rawPage)
+  return {
+    db: searchParams.get('db') || activeDb,
+    runId: searchParams.get('run'),
+    pageNumber: Number.isInteger(parsedPage) && parsedPage > 0 ? parsedPage : null,
+    documentId: searchParams.get('doc'),
+  }
+}
+
+export function updateValidationDeepLink(
+  searchParams: URLSearchParams,
+  runId: string | null,
+  pageNumber?: number | null,
+  documentId?: string | null,
+  db?: string | null,
+): URLSearchParams {
+  const next = new URLSearchParams(searchParams)
+  next.set('tab', 'validation')
+  if (db) next.set('db', db)
+  if (runId) next.set('run', runId); else next.delete('run')
+  if (pageNumber != null) next.set('page', String(pageNumber)); else next.delete('page')
+  if (documentId) next.set('doc', documentId); else next.delete('doc')
+  return next
+}
+
 export function isValidationRunTerminal(status: ValidationRunStatus): boolean {
   return status === 'ACCEPTED' || status === 'REJECTED' || status === 'CANCELLED' || status === 'FAILED'
 }
