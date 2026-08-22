@@ -92,7 +92,7 @@ export default function EvaluationsTab({ curriculum, activeDb, documentId, docum
     <div>
       <div className="d-flex-header">
         <div>
-          <h4 className="tab-title"><FileText size={20} style={{ color: 'var(--info)' }} /> بنك الفروض والامتحانات الرسمية الشاملة ({totalAggregate} نموذجاً)</h4>
+          <h4 className="tab-title"><FileText size={20} style={{ color: 'var(--info)' }} /> {t('curriculum_ui.evaluations_heading')} ({totalAggregate})</h4>
           <small className="text-muted" dir="auto">مواضيع كاملة بعرض 100% مع ميزة المعاينة المتوازية للحل والسلّم عند الطلب</small>
         </div>
       </div>
@@ -102,7 +102,7 @@ export default function EvaluationsTab({ curriculum, activeDb, documentId, docum
         <>
           {filtered.length === 0 && (
             <div className="content-box" style={{ textAlign: 'center', color: 'var(--text-muted)' }} dir="auto">
-              لا توجد نماذج مطابقة للمعايير الحالية.
+              {t('curriculum_ui.no_matches')}
             </div>
           )}
           {filtered.map((ev, i) => (

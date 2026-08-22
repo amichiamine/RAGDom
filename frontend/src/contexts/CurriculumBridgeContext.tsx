@@ -2,6 +2,7 @@ import {
   createContext, useCallback, useContext, useEffect, useMemo, useRef, useState,
   type ReactNode, type CSSProperties,
 } from 'react'
+import { useSearchParams } from 'react-router-dom'
 
 /** Les 6 onglets du workspace curriculum (pixel-perfect, §5.2.4). */
 export type TabKey = 'matrix' | 'programme' | 'cours' | 'exercices' | 'evaluations' | 'scans'
@@ -46,6 +47,7 @@ export function CurriculumBridgeProvider({
   children: ReactNode
   initialTab?: TabKey
 }) {
+  const [searchParams, setSearchParams] = useSearchParams()
   const [activeTab, setActiveTab] = useState<TabKey>(initialTab)
   const [trimFilter, setTrim] = useState(0)
   const [searchQuery, setSearchQuery] = useState('')
@@ -57,12 +59,33 @@ export function CurriculumBridgeProvider({
 
   useEffect(() => () => { if (highlightTimer.current) window.clearTimeout(highlightTimer.current) }, [])
 
-  const switchTab = useCallback((tab: TabKey) => setActiveTab(tab), [])
+  const syncUrl = useCallback((tab: TabKey, page?: number | null) => {
+    setSearchParams(previous => {
+      const next = new URLSearchParams(previous)
+      next.set('tab', tab)
+      if (page != null) next.set('page', String(page))
+      else if (tab !== 'scans') next.delete('page')
+      return next
+    }, { replace: true })
+  }, [setSearchParams])
+
+  const switchTab = useCallback((tab: TabKey) => {
+    setActiveTab(tab)
+    syncUrl(tab)
+  }, [syncUrl])
+
+  useEffect(() => {
+    const linkedTab = searchParams.get('tab') as TabKey | null
+    const valid: TabKey[] = ['matrix', 'programme', 'cours', 'exercices', 'evaluations', 'scans']
+    if (linkedTab && valid.includes(linkedTab) && linkedTab !== activeTab) setActiveTab(linkedTab)
+  }, [activeTab, searchParams])
 
   const clearHighlight = useCallback(() => setHighlightedId(null), [])
 
   const jumpTo = useCallback((tab: TabKey, targetId: string) => {
     setActiveTab(tab)
+    const scanPage = tab === 'scans' ? Number(targetId.match(/^scan_(\d+)$/)?.[1]) : null
+    syncUrl(tab, Number.isFinite(scanPage) ? scanPage : null)
     setExpandedIds(prev => {
       if (prev.has(targetId)) return prev
       const next = new Set(prev)
@@ -72,17 +95,19 @@ export function CurriculumBridgeProvider({
     setHighlightedId(targetId)
     if (highlightTimer.current) window.clearTimeout(highlightTimer.current)
     highlightTimer.current = window.setTimeout(() => setHighlightedId(null), HIGHLIGHT_MS)
-  }, [])
+  }, [syncUrl])
 
   const filterExercicesByCours = useCallback((coursId: string) => {
     setExoFilter({ coursId })
     setActiveTab('exercices')
-  }, [])
+    syncUrl('exercices')
+  }, [syncUrl])
 
   const filterExercicesByPage = useCallback((page: number) => {
     setExoFilter({ page })
     setActiveTab('exercices')
-  }, [])
+    syncUrl('exercices', page)
+  }, [syncUrl])
 
   /**
    * Pont corrigé→énoncé (navigation relationnelle bidirectionnelle) : bascule sur
@@ -93,6 +118,7 @@ export function CurriculumBridgeProvider({
   const jumpToExercise = useCallback((chunkId: string) => {
     setExoFilter(null)
     setActiveTab('exercices')
+    syncUrl('exercices')
     const targetId = `exo_${chunkId}`
     setExpandedIds(prev => {
       if (prev.has(targetId)) return prev
@@ -103,7 +129,7 @@ export function CurriculumBridgeProvider({
     setHighlightedId(targetId)
     if (highlightTimer.current) window.clearTimeout(highlightTimer.current)
     highlightTimer.current = window.setTimeout(() => setHighlightedId(null), HIGHLIGHT_MS)
-  }, [])
+  }, [syncUrl])
 
   const setTrimFilter = useCallback((trim: number) => setTrim(trim), [])
   const setSearch = useCallback((q: string) => setSearchQuery(q), [])

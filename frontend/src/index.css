@@ -189,6 +189,10 @@ h1,h2,h3,h4,h5,h6 { font-family: var(--font-heading); font-weight:700; color: va
 .app-sidebar.show-sidebar { transform: translateX(0); }
 .app-workspace { flex-grow: 1; margin-right: 0; transition: margin-right 0.3s cubic-bezier(0.4,0,0.2,1); min-width: 0; display: flex; flex-direction: column; }
 .app-workspace.with-sidebar { margin-right: var(--sidebar-width); }
+@media (max-width: 992px) {
+  .app-workspace.with-sidebar { margin-right: 0; }
+  .app-sidebar { width: min(var(--sidebar-width), 92vw); }
+}
 .workspace-topbar {
   position: sticky; top: 0; z-index: 1020; background: var(--topbar-bg);
   backdrop-filter: blur(12px); border-bottom: 1px solid var(--border-color);
@@ -1108,6 +1112,14 @@ footer { border-top: 1px solid var(--border-color); padding: 30px 0; margin-top:
 .validation-page-heading { margin: 16px 0 10px; }
 .validation-page-heading h4 { margin: 0; }
 .validation-run-decisions { margin-top: 22px; padding-top: 16px; border-top: 1px solid var(--border-color); }
+.validation-confirm-summary { display: grid; gap: 8px; margin: 16px 0; }
+.validation-confirm-summary > div { display: flex; justify-content: space-between; gap: 16px; padding-bottom: 8px; border-bottom: 1px solid var(--border-color); }
+.validation-confirm-summary dt, .validation-confirm-summary dd { margin: 0; }
+.validation-confirm-summary dd { font-weight: 800; text-align: end; }
+.validation-confirm-targets { max-height: 180px; overflow: auto; padding-inline-start: 22px; }
+.automation-readonly-scope { border: 0; padding: 0; margin: 0; min-width: 0; }
+.automation-readonly-banner { display: flex; align-items: center; gap: 10px; border-color: var(--warning); background: color-mix(in srgb, var(--warning) 9%, var(--bg-surface)); }
+.automation-readonly-banner span { color: var(--text-muted); }
 .validation-subtabs { display: flex; gap: 6px; overflow-x: auto; padding: 6px 0 12px; }
 .validation-subtabs button { white-space: nowrap; display: inline-flex; align-items: center; gap: 5px; padding: 7px 10px; border: 1px solid var(--border-color); border-radius: 9px; background: var(--bg-card-inner); color: var(--text-sub); cursor: pointer; }
 .validation-subtabs button.active { color: #fff; background: var(--primary); border-color: var(--primary); }

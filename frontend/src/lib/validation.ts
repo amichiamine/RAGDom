@@ -60,7 +60,7 @@ export function isValidationScopeValid(scope: ValidationScope): boolean {
 }
 
 export function isValidationRunTerminal(status: ValidationRunStatus): boolean {
-  return status === 'ACCEPTED' || status === 'REJECTED' || status === 'CANCELLED'
+  return status === 'ACCEPTED' || status === 'REJECTED' || status === 'CANCELLED' || status === 'FAILED'
 }
 
 export function validationRunProgress(run: Pick<ValidationRunDetailResponse, 'status' | 'pages'>): number {

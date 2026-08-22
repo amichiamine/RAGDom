@@ -6,6 +6,7 @@ import {
 } from 'lucide-react'
 import type { DatabaseInfo, CurriculumAggregates } from '@/types'
 import { useTheme } from '@/contexts/ThemeContext'
+import { useLanguage } from '@/contexts/LanguageContext'
 import { useCurriculumBridge, type TabKey } from '@/contexts/CurriculumBridgeContext'
 
 interface Props {
@@ -22,29 +23,22 @@ interface Props {
   curriculumAvailable: boolean
 }
 
-/** Filtres trimestre 360° (libellés + emojis normatifs, §5.2.2). */
-const TRIM_OPTIONS: { value: number; label: string }[] = [
-  { value: 0, label: 'جميع الفصول (360°)' },
-  { value: 1, label: 'الفصل الأول 🍂' },
-  { value: 2, label: 'الفصل الثاني ❄️' },
-  { value: 3, label: 'الفصل الثالث 🌸' },
-]
-
-/** Les 6 boutons de navigation (icône lucide + couleur + libellé arabe normatif). */
-const NAV_ITEMS: { tab: TabKey; icon: ReactNode; label: string; color: string }[] = [
-  { tab: 'matrix', icon: <Network size={17} />, label: 'المصفوفة الشاملة 360°', color: 'var(--warning)' },
-  { tab: 'programme', icon: <GraduationCap size={17} />, label: 'المنهاج والتدرج السنوي', color: 'var(--success)' },
-  { tab: 'cours', icon: <BookOpen size={17} />, label: 'مستودع الدروس', color: 'var(--primary)' },
-  { tab: 'exercices', icon: <PenTool size={17} />, label: 'بنك التمارين', color: 'var(--danger)' },
-  { tab: 'evaluations', icon: <FilePen size={17} />, label: 'الفروض والاختبارات', color: 'var(--info)' },
-  { tab: 'scans', icon: <Images size={17} />, label: 'المستودع البصري', color: 'var(--warning)' },
+const NAV_ITEMS: { tab: TabKey; icon: ReactNode; color: string }[] = [
+  { tab: 'matrix', icon: <Network size={17} />, color: 'var(--warning)' },
+  { tab: 'programme', icon: <GraduationCap size={17} />, color: 'var(--success)' },
+  { tab: 'cours', icon: <BookOpen size={17} />, color: 'var(--primary)' },
+  { tab: 'exercices', icon: <PenTool size={17} />, color: 'var(--danger)' },
+  { tab: 'evaluations', icon: <FilePen size={17} />, color: 'var(--info)' },
+  { tab: 'scans', icon: <Images size={17} />, color: 'var(--warning)' },
 ]
 
 export default function CurriculumSidebar({
   open, onClose, databases, activeDb, onSelectDb, aggregates, pageBounds, onPageJump, curriculumAvailable,
 }: Props) {
   const { theme, toggleTheme } = useTheme()
+  const { t } = useLanguage()
   const { activeTab, switchTab, trimFilter, setTrimFilter, searchQuery, setSearch } = useCurriculumBridge()
+  const trimOptions = [0, 1, 2, 3].map(value => ({ value, label: t(`curriculum_ui.term_${value}`) }))
 
   const [dbMenuOpen, setDbMenuOpen] = useState(false)
   const [trimMenuOpen, setTrimMenuOpen] = useState(false)
@@ -81,7 +75,7 @@ export default function CurriculumSidebar({
     }
   }, [aggregates, curriculumAvailable])
 
-  const activeTrimLabel = TRIM_OPTIONS.find(o => o.value === trimFilter)?.label ?? TRIM_OPTIONS[0].label
+  const activeTrimLabel = trimOptions.find(o => o.value === trimFilter)?.label ?? trimOptions[0].label
 
   const submitPageJump = () => {
     const n = Number(pageInput)
@@ -91,7 +85,7 @@ export default function CurriculumSidebar({
   }
 
   return (
-    <aside className={`app-sidebar ${open ? 'show-sidebar' : ''}`} dir="rtl">
+    <aside className={`app-sidebar ${open ? 'show-sidebar' : ''}`}>
       {/* Header */}
       <div style={{ padding: 20, borderBottom: '1px solid rgba(255,255,255,0.08)', display: 'flex', alignItems: 'center', gap: 12 }}>
         <div style={{ width: 40, height: 40, borderRadius: 12, background: 'var(--engine-accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', flexShrink: 0 }}>
@@ -99,7 +93,7 @@ export default function CurriculumSidebar({
         </div>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontWeight: 800, color: '#fff' }}>RAGDom Hub</div>
-          <div style={{ fontSize: '0.72rem', color: '#94a3b8' }}>المنظومة البيداغوجية الشاملة</div>
+          <div style={{ fontSize: '0.72rem', color: '#94a3b8' }}>{t('curriculum_ui.tagline')}</div>
         </div>
         <button className="modal-close" style={{ color: '#94a3b8' }} onClick={onClose} aria-label="close">
           <X size={18} />
@@ -115,13 +109,13 @@ export default function CurriculumSidebar({
             onClick={() => { setDbMenuOpen(o => !o); setTrimMenuOpen(false) }}
           >
             <span style={{ display: 'flex', alignItems: 'center', gap: 8, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              <Database size={15} /> {activeDb ?? 'اختر قاعدة'}
+              <Database size={15} /> {activeDb ?? t('db.select')}
             </span>
             <ChevronDown size={15} />
           </button>
           {dbMenuOpen && (
             <div className="dropdown-menu" style={{ position: 'absolute', insetInlineStart: 0, insetInlineEnd: 0, marginTop: 6, maxHeight: 320, overflowY: 'auto' }}>
-              {databases.length === 0 && <div className="dropdown-item" style={{ color: 'var(--text-muted)' }}>لا توجد قواعد</div>}
+              {databases.length === 0 && <div className="dropdown-item" style={{ color: 'var(--text-muted)' }}>{t('curriculum_ui.no_databases')}</div>}
               {databases.map(d => {
                 const m = d.metrics
                 const built = (m?.indexed_page_count ?? 0) > 0
@@ -134,7 +128,7 @@ export default function CurriculumSidebar({
                   >
                     <span style={{ flex: 1, textAlign: 'start', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.filename}</span>
                     <span className={`badge ${built ? 'badge-success' : 'badge-secondary'} font-num`}>
-                      {built ? `${m.indexed_page_count} ص` : 'قريباً'}
+                      {built ? `${m.indexed_page_count} ${t('curriculum_ui.page_short')}` : t('curriculum_ui.soon')}
                     </span>
                   </button>
                 )
@@ -150,14 +144,14 @@ export default function CurriculumSidebar({
             style={{ width: '100%', justifyContent: 'space-between', background: 'var(--sidebar-bg-secondary)', color: '#fff', border: '1px solid var(--success)', opacity: curriculumAvailable ? 1 : 0.5, cursor: curriculumAvailable ? 'pointer' : 'not-allowed' }}
             onClick={() => { if (!curriculumAvailable) return; setTrimMenuOpen(o => !o); setDbMenuOpen(false) }}
             disabled={!curriculumAvailable}
-            title={curriculumAvailable ? undefined : 'التصفية حسب الفصل تتطلب بناء المنهاج لهذه القاعدة'}
+            title={curriculumAvailable ? undefined : t('curriculum_ui.filter_requires')}
           >
             <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}><CalendarRange size={15} /> {activeTrimLabel}</span>
             <ChevronDown size={15} />
           </button>
           {curriculumAvailable && trimMenuOpen && (
             <div className="dropdown-menu" style={{ position: 'absolute', insetInlineStart: 0, insetInlineEnd: 0, marginTop: 6 }}>
-              {TRIM_OPTIONS.map(o => (
+              {trimOptions.map(o => (
                 <button
                   key={o.value}
                   className={`dropdown-item ${o.value === trimFilter ? 'active' : ''}`}
@@ -176,7 +170,7 @@ export default function CurriculumSidebar({
           <input
             className="form-input"
             style={{ background: 'var(--sidebar-bg-secondary)', color: '#fff', borderColor: 'rgba(255,255,255,0.15)', paddingInlineStart: 36, paddingInlineEnd: localSearch ? 36 : 14 }}
-            placeholder="بحث في كل الأقسام…"
+            placeholder={t('hero.search_placeholder')}
             value={localSearch}
             onChange={e => setLocalSearch(e.target.value)}
             aria-label="master search"
@@ -194,7 +188,7 @@ export default function CurriculumSidebar({
 
         {/* Page Jumper (préfixe ص, bornes = manifeste scans) */}
         <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-          <span style={{ color: '#94a3b8', fontWeight: 800, fontSize: '0.9rem' }}>ص</span>
+          <span style={{ color: '#94a3b8', fontWeight: 800, fontSize: '0.9rem' }}>{t('curriculum_ui.page_short')}</span>
           <input
             type="number"
             className="form-input font-num"
@@ -221,7 +215,7 @@ export default function CurriculumSidebar({
             >
               <span style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                 <span style={{ color: activeTab === item.tab ? '#fff' : item.color, display: 'inline-flex' }}>{item.icon}</span>
-                {item.label}
+                {t(`curriculum_ui.tabs.${item.tab}`)}
               </span>
               {badgeCounts[item.tab] !== null && (
                 <span className="badge badge-subtle font-num">{badgeCounts[item.tab]}</span>
@@ -236,17 +230,17 @@ export default function CurriculumSidebar({
         {/* Accès direct aux studios Recherche / Sondage (Mode Repli) */}
         <div style={{ display: 'flex', gap: 8 }}>
           <Link to="/library?classic=1&tab=search" className="btn btn-outline-primary btn-sm rounded-pill" style={{ flex: 1, justifyContent: 'center' }}>
-            <Search size={14} /> بحث
+            <Search size={14} /> {t('search.run')}
           </Link>
           <Link to="/library?classic=1&tab=ask" className="btn btn-outline-info btn-sm rounded-pill" style={{ flex: 1, justifyContent: 'center' }}>
-            <MessageSquare size={14} /> استفسار
+            <MessageSquare size={14} /> {t('library.ask_studio')}
           </Link>
         </div>
         <button className="btn btn-sm" style={{ background: 'var(--sidebar-bg-secondary)', color: '#fff', border: '1px solid rgba(255,255,255,0.15)', justifyContent: 'center' }} onClick={toggleTheme}>
-          {theme === 'dark' ? <><Sun size={15} /> الوضع النهاري</> : <><Moon size={15} /> الوضع الليلي</>}
+          {theme === 'dark' ? <><Sun size={15} /> {t('theme.light')}</> : <><Moon size={15} /> {t('theme.dark')}</>}
         </button>
-        <Link to="/automation" className="btn btn-outline-success btn-sm rounded-pill">مركز الأتمتة</Link>
-        <Link to="/" className="btn btn-primary btn-sm rounded-pill">لوحة القيادة</Link>
+        <Link to="/automation" className="btn btn-outline-success btn-sm rounded-pill">{t('nav.automation')}</Link>
+        <Link to="/" className="btn btn-primary btn-sm rounded-pill">{t('nav.dashboard')}</Link>
       </div>
     </aside>
   )

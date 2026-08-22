@@ -27,7 +27,17 @@ const ARTIFACT_TYPES: string[] = [
   'smiles_chem',
 ]
 
-const ACCEPT = '.svg,.png,.webp,.csv,.json,.glb'
+const ACCEPT_BY_TYPE: Record<string, string> = {
+  pdb_protein: '.pdb',
+  cif_crystal: '.cif,.mmcif',
+  cad_3d_model: '.glb,.gltf',
+  bim_ifc_slice: '.ifc',
+  geojson_map: '.geojson,.json',
+  dicom_slice: '.dcm,.dicom',
+  fasta_sequence: '.fasta,.fa,.fna,.faa',
+  genbank_record: '.gb,.gbk,.genbank',
+  smiles_chem: '.smi,.smiles,.txt',
+}
 const MAX_BYTES = 50 * 1024 * 1024
 
 /** §7.11 ArtifactImportModal — import Tier 3 (FormData → POST /library/artifacts/import). */
@@ -52,6 +62,11 @@ export default function ArtifactImportModal({ db, documents, open, onClose, onIm
 
   const submit = async () => {
     if (!file) { toast.error('Sélectionnez un fichier'); return }
+    const acceptedExtensions = ACCEPT_BY_TYPE[artifactType].split(',')
+    if (!acceptedExtensions.some(extension => file.name.toLowerCase().endsWith(extension))) {
+      toast.error(`Extension incompatible avec ${artifactType} (${ACCEPT_BY_TYPE[artifactType]})`)
+      return
+    }
     if (file.size > MAX_BYTES) { toast.error('Fichier > 50 Mo'); return }
     if (!documentId) { toast.error('Document requis'); return }
     if (!pageNumber || Number.isNaN(Number(pageNumber))) { toast.error('Page invalide'); return }
@@ -105,12 +120,12 @@ export default function ArtifactImportModal({ db, documents, open, onClose, onIm
     >
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 14 }}>
         <div>
-          <label className="artifact-field-label">Fichier ({ACCEPT})</label>
+          <label className="artifact-field-label">Fichier ({ACCEPT_BY_TYPE[artifactType]})</label>
           <input
             ref={fileRef}
             className="form-input"
             type="file"
-            accept={ACCEPT}
+            accept={ACCEPT_BY_TYPE[artifactType]}
             onChange={e => setFile(e.target.files?.[0] ?? null)}
           />
           {file && <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: 4 }}>{file.name} · {(file.size / 1024).toFixed(0)} Ko</div>}

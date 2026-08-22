@@ -51,7 +51,9 @@ async function handleUnauthorized(): Promise<void> {
   // Ne pas boucler si on est déjà sur /login.
   if (typeof window !== 'undefined' && window.location.pathname === '/login') return
   try {
-    const me = await fetch(`${BASE_URL}/auth/me`, { headers: { 'Content-Type': 'application/json', ...authHeaders() } }).then(r => r.json() as Promise<AuthState>)
+    const response = await fetch(`${BASE_URL}/auth/me`, { headers: { 'Content-Type': 'application/json', ...authHeaders() } })
+    if (!response.ok) return
+    const me = await response.json() as AuthState
     if (me.auth_required && !me.authenticated) {
       lastAuthRedirect = Date.now()
       setAdminToken(null)
@@ -84,20 +86,44 @@ function humanizeApiError(detail: unknown, status: number): string {
   return `HTTP ${status}`
 }
 
-async function request<T>(endpoint: string, options?: RequestInit): Promise<T> {
+async function checkedResponse(endpoint: string, options?: RequestInit, jsonContent = true): Promise<Response> {
   const res = await fetch(`${BASE_URL}${endpoint}`, {
     ...options,
-    // headers fusionnés EN DERNIER : Content-Type ne doit jamais être écrasé
-    // par un spread d'options (cause du bug 422 « Input should be a valid dictionary »).
-    headers: { 'Content-Type': 'application/json', ...authHeaders(), ...options?.headers },
+    headers: {
+      ...(jsonContent ? { 'Content-Type': 'application/json' } : {}),
+      ...authHeaders(),
+      ...options?.headers,
+    },
   })
   if (!res.ok) {
-    // /auth/* gère ses propres 401 (login/setup échoués) : ne pas intercepter.
-    if (res.status === 401 && !endpoint.startsWith('/auth/')) { void handleUnauthorized() }
+    if (res.status === 401 && !endpoint.startsWith('/auth/')) void handleUnauthorized()
     const error = await res.json().catch(() => ({ detail: res.statusText }))
     throw new Error(humanizeApiError(error.detail, res.status))
   }
-  return res.json()
+  return res
+}
+
+async function request<T>(endpoint: string, options?: RequestInit): Promise<T> {
+  return (await checkedResponse(endpoint, options)).json()
+}
+
+async function requestForm<T>(endpoint: string, formData: FormData): Promise<T> {
+  return (await checkedResponse(endpoint, { method: 'POST', body: formData }, false)).json()
+}
+
+async function download(endpoint: string, fallbackFilename: string): Promise<void> {
+  const response = await checkedResponse(endpoint, undefined, false)
+  const blob = await response.blob()
+  const disposition = response.headers.get('content-disposition')
+  const filename = disposition?.match(/filename\*?=(?:UTF-8''|\")?([^";]+)/i)?.[1]
+  const objectUrl = URL.createObjectURL(blob)
+  const anchor = document.createElement('a')
+  anchor.href = objectUrl
+  anchor.download = filename ? decodeURIComponent(filename) : fallbackFilename
+  document.body.appendChild(anchor)
+  anchor.click()
+  anchor.remove()
+  URL.revokeObjectURL(objectUrl)
 }
 
 function withDb(endpoint: string, db: string, params?: Record<string, string>): string {
@@ -139,10 +165,11 @@ export const api = {
     testVectorEngine: () => request<{ success: boolean; engine: string; message: string }>('/system/vector-engine/test', { method: 'POST' }),
     // ── AJOUTS V3.2 / V3.4 (§7.14) ──
     getSources: () => request<{ tree: SourceNode[] }>('/system/sources'),
-    uploadSource: (formData: FormData) => fetch(`${BASE_URL}/system/sources/upload`, { method: 'POST', headers: authHeaders(), body: formData }).then(r => r.json()),
+    uploadSource: (formData: FormData) => requestForm('/system/sources/upload', formData),
     createSourceFolder: (relPath: string) => request('/system/sources/folder', { method: 'POST', body: JSON.stringify({ rel_path: relPath }) }),
     deleteSource: (relPath: string) => request(`/system/sources?rel_path=${encodeURIComponent(relPath)}`, { method: 'DELETE' }),
-    getDatabaseExportUrl: (filename: string) => `${BASE_URL}/system/databases/${encodeURIComponent(filename)}/export`,
+    downloadDatabaseExport: (filename: string) =>
+      download(`/system/databases/${encodeURIComponent(filename)}/export`, filename),
     duplicateDatabase: (filename: string, newName: string) => request(`/system/databases/${encodeURIComponent(filename)}/duplicate`, { method: 'POST', body: JSON.stringify({ new_name: newName }) }),
     deleteDatabase: (filename: string) => request(`/system/databases/${encodeURIComponent(filename)}`, { method: 'DELETE', body: JSON.stringify({ confirm: filename }) }),
     getSettings: () => request<{ settings: AppSettings }>('/system/settings'),
@@ -160,14 +187,14 @@ export const api = {
       request<Facets>(withDb('/library/facets', db)),
     getCurriculum: (db: string) =>
       request<CurriculumPayload>(withDb('/library/curriculum', db)), // V3.1 — D1-B
-    getChunks: (db: string, documentId: string, page = 1, filters?: { pedagogical_type?: string; page_start?: number; page_end?: number; toc_id?: string; term_index?: number }) =>
+    getChunks: (db: string, documentId: string, apiPage = 1, filters?: { pedagogical_type?: string; page_start?: number; page_end?: number; toc_id?: string; term_index?: number }) =>
       // VÉRITÉ backend (routes_library.py `chunks`) : { data:[…], pagination:{page,limit,total,total_pages} }.
       // Certaines versions ajoutent aussi `chunks` (alias) ; on lit `data` EN PREMIER (source canonique)
       // et on retombe sur `chunks` — sinon `first.chunks` était undefined → chargements infinis/vides.
       // On normalise en exposant `chunks` + `total_pages` à plat pour ne casser aucun consommateur.
       request<{ data?: Chunk[]; chunks?: Chunk[]; pagination?: { page: number; limit: number; total: number; total_pages: number } }>(withDb('/library/chunks', db, {
         document_id: documentId,
-        page: String(page),
+        page: String(apiPage),
         ...(filters?.pedagogical_type ? { pedagogical_type: filters.pedagogical_type } : {}),
         ...(filters?.page_start != null ? { page_start: String(filters.page_start) } : {}),
         ...(filters?.page_end != null ? { page_end: String(filters.page_end) } : {}),
@@ -211,7 +238,7 @@ export const api = {
       request<{ data: BenchmarkRow[]; aggregates: BenchmarkAggregates; pagination: unknown }>(
         withDb('/library/benchmarks', db, { ...(documentId ? { document_id: documentId } : {}), page: String(page), limit: String(limit) })),
     importArtifact: (db: string, formData: FormData) =>
-      fetch(`${BASE_URL}${withDb('/library/artifacts/import', db)}`, { method: 'POST', body: formData }).then(r => r.json()),
+      requestForm(withDb('/library/artifacts/import', db), formData),
   },
   search: {
     hybrid: (db: string, query: string, topK = 5, filters?: Record<string, string>) =>

@@ -1,4 +1,4 @@
-import { ReactNode, useEffect, useRef } from 'react'
+import { ReactNode, useEffect, useId, useRef } from 'react'
 import { cn } from '@/lib/utils'
 
 interface Props {
@@ -14,15 +14,17 @@ interface Props {
 export default function Modal({ open, title, onClose, children, footer, size = 'default' }: Props) {
   const dialogRef = useRef<HTMLDivElement>(null)
   const triggerRef = useRef<HTMLElement | null>(null)
+  const titleId = useId()
 
   useEffect(() => {
     if (!open) return
     triggerRef.current = document.activeElement as HTMLElement
     const dialog = dialogRef.current
     const focusable = dialog?.querySelectorAll<HTMLElement>(
-      'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+      'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
     )
-    focusable?.[0]?.focus()
+    if (focusable?.length) focusable[0].focus()
+    else dialog?.focus()
 
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') { e.preventDefault(); onClose(); return }
@@ -49,9 +51,11 @@ export default function Modal({ open, title, onClose, children, footer, size = '
         className={cn('modal-dialog', 'modal-dialog-centered', size === 'xl' && 'modal-xl')}
         role="dialog"
         aria-modal="true"
+        aria-labelledby={titleId}
+        tabIndex={-1}
       >
         <div className="modal-header">
-          <div className="modal-title">{title}</div>
+          <div id={titleId} className="modal-title">{title}</div>
           <button className="modal-close" onClick={onClose} aria-label="close"><i className="fa-solid fa-xmark" /></button>
         </div>
         <div>{children}</div>

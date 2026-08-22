@@ -160,7 +160,7 @@ export default function ExercicesTab({ curriculum, activeDb, documentId, documen
       {/* Header : titre + compteur agrégat + statut filtre + filtres trimestre + فتح/طي الحلول */}
       <div className="d-flex-header">
         <div>
-          <h4 className="tab-title"><PenLine size={20} style={{ color: 'var(--danger)' }} /> بنك التمارين والأنشطة المحلولة ({totalAggregate} تمريناً)</h4>
+          <h4 className="tab-title"><PenLine size={20} style={{ color: 'var(--danger)' }} /> {t('curriculum_ui.exercises_heading')} ({totalAggregate})</h4>
           <small className="text-muted" id="exoFilterStatus" role="status" aria-live="polite" dir="auto">{statusText}</small>
         </div>
         <div className="d-flex" style={{ gap: 8, flexWrap: 'wrap' }}>

@@ -47,6 +47,7 @@ const PEDAGOGICAL_LABEL: Record<PedagogicalType, string> = {
  * MarkdownKatex, mode côte-à-côte fluide (texte 100% ↔ 50/50 + rail de scans).
  */
 export default function CoursTab({ curriculum, toc, documentId, documents, activeDb }: Props) {
+  const { t } = useLanguage()
   const { searchQuery, trimFilter, expandedIds, toggleExpanded, expandAll } = useCurriculumBridge()
 
   const model = useMemo<CurriculumModel>(
@@ -70,29 +71,29 @@ export default function CoursTab({ curriculum, toc, documentId, documents, activ
   const openScanModal = useCallback((page: number, docId: string) => setModal({ page, documentId: docId }), [])
 
   return (
-    <div dir="rtl">
+    <div>
       {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12, marginBottom: 16 }}>
         <div>
           <h4 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
-            <BookOpen size={20} style={{ color: 'var(--primary)' }} /> مستودع الدروس والمفاهيم العلمية (KaTeX + وثائق الكتاب عند الطلب)
+            <BookOpen size={20} style={{ color: 'var(--primary)' }} /> {t('curriculum_ui.courses_heading')}
           </h4>
           <small style={{ color: 'var(--text-muted)' }}>
-            محتوى كامل بعرض الشاشة مع إمكانية استدعاء صفحات الكتاب الأصلية جنباً إلى جنب
+            {t('curriculum_ui.courses_subtitle')}
           </small>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
           <button className="btn btn-sm btn-outline-primary rounded-pill" onClick={openAll}>
-            <ChevronsDown size={15} /> فتح كل الدروس
+            <ChevronsDown size={15} /> {t('curriculum_ui.open_all_courses')}
           </button>
           <button className="btn btn-sm btn-outline-primary rounded-pill" onClick={collapseAll}>
-            <ChevronsUp size={15} /> طي الكل
+            <ChevronsUp size={15} /> {t('curriculum_ui.collapse_all')}
           </button>
         </div>
       </div>
 
       {visible.length === 0 && (
-        <div className="alert-secondary-box">لا توجد دروس مطابقة للتصفية الحالية.</div>
+        <div className="alert-secondary-box">{t('curriculum_ui.no_courses')}</div>
       )}
 
       {visible.map(c => (
