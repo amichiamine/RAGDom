@@ -8,10 +8,16 @@ Embeddings : fastembed/paraphrase-multilingual-MiniLM-L12-v2 (384d) — None si
 modèle indisponible (RAGDOM_OFFLINE), la recherche FTS restant opérationnelle.
 Python 3.9+.
 """
+import math
 import os
 import re
 import struct
+import sys
 import time
+import warnings
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "..", "backend"))
+from core.embedding_profile import CURRENT_PROFILE, runtime_profile  # noqa: E402
 
 # Ordinaux arabes → indices (typographie réelle des sujets algériens :
 # « التمرين الأول » plutôt que « تمرين رقم 1 »). Mapping linguistique générique.
@@ -62,6 +68,11 @@ _PATTERNS = [
 ]
 _H2_RE = re.compile(r"\n(?=##?#?\s)")
 _embedder = {"tried": False, "model": None, "name": None}
+_FASTEMBED_MEAN_WARNING = (
+    "The model %s now uses mean pooling instead of CLS embedding. "
+    "In order to preserve the previous behaviour, consider either pinning fastembed version to 0.5.1 or "
+    "using `add_custom_model` functionality." % CURRENT_PROFILE.model_name
+)
 
 
 def _qualify(text: str):
@@ -87,6 +98,35 @@ def _qualify(text: str):
     return None, None
 
 
+def _create_fastembed_model(text_embedding_cls):
+    """Construit le modèle mean attendu et ne filtre que son avis de migration connu."""
+    if CURRENT_PROFILE.pooling != "mean":
+        raise RuntimeError("Le pipeline courant exige explicitement pooling=mean")
+    # Dans fastembed 0.7.4 ce modèle est enregistré dans PooledEmbedding, dont le
+    # post-traitement est mean_pooling. Refuser de démarrer plutôt que deviner.
+    try:
+        from fastembed.text.pooled_embedding import PooledEmbedding
+        registered = {item.model for item in PooledEmbedding._list_supported_models()}  # noqa: SLF001
+        if CURRENT_PROFILE.model_name not in registered:
+            raise RuntimeError("Modèle courant absent du registre FastEmbed mean pooling")
+    except ImportError:
+        pass  # Le faux TextEmbedding injecté par un test ne charge pas fastembed.
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", message="^%s$" % re.escape(_FASTEMBED_MEAN_WARNING),
+                                category=UserWarning)
+        return text_embedding_cls(CURRENT_PROFILE.model_name)
+
+
+def _normalized(values):
+    vector = [float(value) for value in values[:CURRENT_PROFILE.dimensions]]
+    if len(vector) != CURRENT_PROFILE.dimensions:
+        raise ValueError("Dimension d'embedding inattendue : %d" % len(vector))
+    norm = math.sqrt(sum(value * value for value in vector))
+    if norm == 0.0:
+        raise ValueError("Embedding nul non normalisable")
+    return [value / norm for value in vector]
+
+
 def _get_embedder():
     if _embedder["tried"]:
         return _embedder["model"]
@@ -101,16 +141,13 @@ def _get_embedder():
     except Exception:  # noqa: BLE001 — fastembed absent : FTS seul
         _embedder["model"] = None
         return _embedder["model"]
-    # Modèle principal (multilingue FR/AR/EN) puis repli mono-lingue plus léger
-    # (tech_specs §3.2) avant d'abandonner la recherche vectorielle.
-    for model_name in ("sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
-                       "sentence-transformers/all-MiniLM-L6-v2"):
-        try:
-            _embedder["model"] = TextEmbedding(model_name)
-            _embedder["name"] = model_name
-            return _embedder["model"]
-        except Exception:  # noqa: BLE001 — hors-ligne / modèle absent : essaie le repli
-            _embedder["model"] = None
+    # Aucun modèle de repli ne peut partager le même espace vectoriel. Si le
+    # modèle contractuel est indisponible, la recherche reste strictement BM25.
+    try:
+        _embedder["model"] = _create_fastembed_model(TextEmbedding)
+        _embedder["name"] = CURRENT_PROFILE.model_name
+    except Exception:  # noqa: BLE001 — hors-ligne / modèle absent : FTS seul
+        _embedder["model"] = None
     return _embedder["model"]
 
 
@@ -219,8 +256,9 @@ def run(ctx: dict) -> dict:
         embedding_blob = None
         if embedder is not None:
             try:
-                vector = next(iter(embedder.embed(["passage: " + text[:2000]])))
-                embedding_blob = struct.pack("<384f", *vector[:384])  # Float32 LE, L2 par fastembed
+                payload = CURRENT_PROFILE.passage_prefix + text[:CURRENT_PROFILE.passage_max_characters]
+                vector = _normalized(next(iter(embedder.embed([payload]))))
+                embedding_blob = struct.pack("<384f", *vector)
             except Exception:  # noqa: BLE001
                 embedding_blob = None
         chunk_rows.append({
@@ -231,13 +269,7 @@ def run(ctx: dict) -> dict:
 
     profile = None
     if embedder is not None and any(row["embedding_vector"] is not None for row in chunk_rows):
-        try:
-            import importlib.metadata as _metadata
-            version = _metadata.version("fastembed")
-        except Exception:  # noqa: BLE001
-            version = "unknown"
-        profile = {"model_name": _embedder.get("name") or "unknown", "model_version": version,
-                   "pooling": "mean", "dimensions": 384, "normalized": True}
+        profile = runtime_profile(embedder).storage_payload()
     ctx.update(chunks=chunk_rows, embedding_profile=profile,
                qualification_latency_ms=int((time.perf_counter() - started) * 1000))
     ctx.setdefault("latencies", {})["layer_3_qualify"] = ctx["qualification_latency_ms"]

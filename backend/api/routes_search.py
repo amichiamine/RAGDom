@@ -7,13 +7,16 @@ Mode fts5-fallback : BM25 seul. /ask : ZÉRO appel LLM si aucun chunk éligible.
 Python 3.9+.
 """
 import concurrent.futures
+import math
 import struct
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 from core import engine_registry
+from core.embedding_profile import (CURRENT_PROFILE, active_vector_profiles,
+                                    compatibility_reasons, runtime_profile)
 from db import connection as db
 from llm import key_manager
 
@@ -58,20 +61,33 @@ def _eligible_ranks(rows, threshold: float) -> dict:
     return ranked
 
 
-def _query_embedding(text: str) -> Optional[bytes]:
+def _query_embedding_result(text: str) -> Tuple[Optional[bytes], object]:
+    profile = CURRENT_PROFILE
     try:
         active = engine_registry.active_engine()
         layer3 = engine_registry.load_layer(active["id"], "layer_3_qualify")
         embedder = layer3._get_embedder()  # noqa: SLF001 — singleton du moteur
         if embedder is None:
-            return None
-        vector = next(iter(embedder.embed(["query: " + text])))
-        return struct.pack("<384f", *vector[:384])
+            return None, profile
+        profile = runtime_profile(embedder)
+        raw = next(iter(embedder.embed([profile.query_prefix + text])))
+        vector = [float(value) for value in raw[:profile.dimensions]]
+        if len(vector) != profile.dimensions:
+            return None, profile
+        norm = math.sqrt(sum(value * value for value in vector))
+        if norm == 0.0:
+            return None, profile
+        normalized = [value / norm for value in vector]
+        return struct.pack("<384f", *normalized), profile
     except Exception:  # noqa: BLE001 — la recherche FTS reste opérationnelle
-        return None
+        return None, profile
 
 
-def _hybrid_search(db_name: str, body: SearchBody) -> List[dict]:
+def _query_embedding(text: str) -> Optional[bytes]:
+    return _query_embedding_result(text)[0]
+
+
+def _hybrid_search_detailed(db_name: str, body: SearchBody) -> Tuple[List[dict], dict]:
     conn = db.get_connection(db_name)
     try:
         vec_t, bm25_t = _thresholds()
@@ -95,17 +111,49 @@ def _hybrid_search(db_name: str, body: SearchBody) -> List[dict]:
         # Sinon un rang vectoriel hors seuil peut inverser un résultat BM25 valide.
         bm25_rank = _eligible_ranks(bm25_rows, bm25_t)
 
-        # ── Passe vectorielle (si mode hybride + embedding disponible) ──
+        # ── Passe vectorielle uniquement si le contrat DB est prouvé compatible ──
         vec_rank = {}
-        embedding = _query_embedding(body.query) if db.vector_state()["engine"] == "sqlite-vec" else None
-        if embedding is not None:
+        vector_state = db.vector_state()
+        profiles, vector_count, unassigned = active_vector_profiles(conn)
+        query_profile = CURRENT_PROFILE
+        reasons = []
+        embedding = None
+        if vector_count == 0:
+            reasons.append("no_persisted_vectors")
+        elif vector_state["engine"] != "sqlite-vec" or vector_state.get("status") != "ready":
+            reasons.append("vector_engine_unavailable")
+        elif unassigned:
+            reasons.append("vectors_without_embedding_profile")
+        elif len(profiles) == 0:
+            reasons.append("embedding_profile_missing")
+        elif len(profiles) > 1:
+            reasons.append("multiple_active_embedding_profiles")
+        else:
+            embedding, query_profile = _query_embedding_result(body.query)
+            reasons.extend(compatibility_reasons(profiles[0], query_profile))
+            if embedding is None:
+                reasons.append("query_embedder_unavailable")
+        if not reasons and embedding is not None:
             try:
                 vec_rows = conn.execute(
                     "SELECT chunk_id, distance FROM vec_chunks WHERE embedding MATCH ?"
                     " ORDER BY distance LIMIT 20", (embedding,)).fetchall()
                 vec_rank = _eligible_ranks(vec_rows, vec_t)
-            except Exception:  # noqa: BLE001 — table vec absente en fallback
+            except Exception:  # noqa: BLE001 — table vec absente/corrompue : BM25 explicite
                 vec_rank = {}
+                reasons.append("vector_query_failed")
+        diagnostic = {
+            "mode": "hybrid" if not reasons else "bm25",
+            "vector_used": not reasons,
+            "fallback_triggered": bool(reasons),
+            "reasons": reasons,
+            "query_profile": query_profile.contract(),
+            "database_profile": profiles[0] if len(profiles) == 1 else None,
+            "active_profile_count": len(profiles),
+            "vector_count": vector_count,
+            "unassigned_vector_count": unassigned,
+            "vector_engine": vector_state,
+        }
 
         # ── Fusion RRF k=60 + seuils réels (V3.1) ──
         results = []
@@ -133,15 +181,20 @@ def _hybrid_search(db_name: str, body: SearchBody) -> List[dict]:
                            "content_markdown": row[4][:1200], "pedagogical_type": row[5],
                            "rrf_score": round(rrf, 5), "bm25_rank": b_rank, "vec_rank": v_rank,
                            "database_filename": db_name})
-        return output
+        return output, diagnostic
     finally:
         conn.close()
+
+
+def _hybrid_search(db_name: str, body: SearchBody) -> List[dict]:
+    return _hybrid_search_detailed(db_name, body)[0]
 
 
 @router.post("/hybrid")
 def hybrid(body: SearchBody, db_name: str = Query(alias="db")):
     try:
-        return {"results": _hybrid_search(db_name, body)}
+        results, diagnostic = _hybrid_search_detailed(db_name, body)
+        return {"results": results, "embedding_diagnostic": diagnostic}
     except ValueError as exc:
         raise HTTPException(400, str(exc))
     except FileNotFoundError as exc:
@@ -152,15 +205,21 @@ def hybrid(body: SearchBody, db_name: str = Query(alias="db")):
 def hybrid_multi(body: MultiBody):
     """Requêtes parallèles par base + seconde passe RRF globale (tech_specs §3.5)."""
     with concurrent.futures.ThreadPoolExecutor(max_workers=min(4, len(body.databases) or 1)) as pool:
-        futures = {pool.submit(_hybrid_search, name, body): name for name in body.databases}
-        merged = []
+        futures = {pool.submit(_hybrid_search_detailed, name, body): name for name in body.databases}
+        merged, diagnostics = [], []
         for future in concurrent.futures.as_completed(futures):
+            db_name = futures[future]
             try:
-                merged.extend(future.result())
-            except Exception:  # noqa: BLE001 — une base en échec n'annule pas les autres
-                continue
+                results, diagnostic = future.result()
+                merged.extend(results)
+                diagnostics.append({"database_filename": db_name, **diagnostic})
+            except Exception as exc:  # noqa: BLE001 — une base en échec n'annule pas les autres
+                diagnostics.append({"database_filename": db_name, "mode": "unavailable",
+                                    "vector_used": False, "fallback_triggered": True,
+                                    "reasons": ["database_search_failed"], "detail": str(exc)})
     merged.sort(key=lambda r: r["rrf_score"], reverse=True)
-    return {"results": merged[: body.top_k]}
+    diagnostics.sort(key=lambda item: item["database_filename"])
+    return {"results": merged[: body.top_k], "embedding_diagnostics": diagnostics}
 
 
 @router.post("/ask")
