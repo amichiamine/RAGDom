@@ -28,6 +28,7 @@ export default function ScopeSelector({ databases, activeDb, value, onChange, di
   const { t } = useLanguage()
   const [documents, setDocuments] = useState<Document[]>([])
   const [toc, setToc] = useState<TocNode[]>([])
+  const [loadError, setLoadError] = useState<string | null>(null)
   const flatToc = useMemo(() => flatten(toc), [toc])
   const selectedDocument = documents.find(d => d.id === value.document_id)
 
@@ -36,22 +37,34 @@ export default function ScopeSelector({ databases, activeDb, value, onChange, di
   }, [activeDb, onChange, value.db])
 
   useEffect(() => {
-    if (!value.db) { setDocuments([]); return }
+    if (!value.db) { setDocuments([]); setLoadError(null); return }
     let cancelled = false
+    setLoadError(null)
     api.library.getDocuments(value.db, 1, 250)
       .then(r => { if (!cancelled) setDocuments(r.data ?? []) })
-      .catch(() => { if (!cancelled) setDocuments([]) })
+      .catch(cause => {
+        if (!cancelled) {
+          setDocuments([])
+          setLoadError(cause instanceof Error ? cause.message : t('common.error_generic'))
+        }
+      })
     return () => { cancelled = true }
-  }, [value.db])
+  }, [t, value.db])
 
   useEffect(() => {
     if (!value.db || !value.document_id) { setToc([]); return }
     let cancelled = false
+    setLoadError(null)
     api.library.getToc(value.db, value.document_id)
       .then(r => { if (!cancelled) setToc(r.toc ?? []) })
-      .catch(() => { if (!cancelled) setToc([]) })
+      .catch(cause => {
+        if (!cancelled) {
+          setToc([])
+          setLoadError(cause instanceof Error ? cause.message : t('common.error_generic'))
+        }
+      })
     return () => { cancelled = true }
-  }, [value.db, value.document_id])
+  }, [t, value.db, value.document_id])
 
   const setDb = (db: string) => onChange({ db, kind: 'database' })
   const setDocument = (documentId: string) => onChange(documentId
@@ -134,6 +147,7 @@ export default function ScopeSelector({ databases, activeDb, value, onChange, di
         )}
       </div>
       {needsDocument && !value.document_id && <p className="validation-inline-error" role="alert">{t('validation.scope.document_required')}</p>}
+      {loadError && <p className="validation-inline-error" role="alert">{loadError}</p>}
     </fieldset>
   )
 }

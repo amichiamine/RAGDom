@@ -456,6 +456,17 @@
   },
   "validation": {
     "readonly": "Read-only — mutations disabled",
+    "status": {
+      "DRAFT": "Draft",
+      "RUNNING": "Running",
+      "PENDING": "Pending",
+      "PROCESSING": "Processing",
+      "READY": "Ready",
+      "FAILED": "Failed",
+      "ACCEPTED": "Accepted",
+      "REJECTED": "Rejected",
+      "CANCELLED": "Cancelled"
+    },
     "scope": {
       "title": "Universal scope",
       "database": "Database",
@@ -491,6 +502,7 @@
     },
     "metrics": {
       "pages": "pages",
+      "targets": "targets",
       "chunks": "chunks",
       "artifacts": "artifacts",
       "human_preserved": "protected edits",
@@ -499,11 +511,13 @@
     },
     "runs": {
       "title": "Persistent runs",
-      "hint": "Server history and targeted live state.",
+      "hint": "Server history and targeted refresh for the open run.",
       "refresh": "Refresh",
       "empty": "No saved validation run.",
       "select": "Select a run.",
-      "polling": "Fallback polling",
+      "polling": "Targeted refresh",
+      "pagination": "Run pagination",
+      "progress": "Validation progress",
       "cancelled": "Cancellation requested.",
       "direct": "Direct write",
       "pages": "Run pages"
@@ -547,7 +561,8 @@
       "restore_run": "Restore run",
       "accept_done": "Acceptance saved.",
       "reject_done": "Rejection saved.",
-      "restore_done": "Restore requested."
+      "restore_done": "Working copy restored.",
+      "cancel_done": "Validation cancelled."
     }
   }
 }

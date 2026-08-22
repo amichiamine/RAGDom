@@ -38,7 +38,11 @@ export default function AutomationView() {
   // ── Onglet actif dans l'URL (?tab=) pour être partageable ; défaut = 1er ──
   const [searchParams, setSearchParams] = useSearchParams()
   const rawTab = searchParams.get('tab') as TabKey | null
-  const activeTab: TabKey = rawTab && TAB_ORDER.includes(rawTab) ? rawTab : 'ingestion'
+  const activeTab: TabKey = rawTab && TAB_ORDER.includes(rawTab)
+    ? rawTab
+    : searchParams.has('run')
+      ? 'validation'
+      : 'ingestion'
   const setActiveTab = useCallback((tab: TabKey) => {
     setSearchParams(prev => {
       const next = new URLSearchParams(prev)
@@ -46,6 +50,15 @@ export default function AutomationView() {
       return next
     }, { replace: true })
   }, [setSearchParams])
+
+  // Les liens du Studio portent la base afin qu'un run puisse être rouvert après
+  // rechargement sans dépendre de l'état mémoire du DatabaseContext.
+  useEffect(() => {
+    const linkedDb = searchParams.get('db')
+    if (linkedDb && linkedDb !== activeDb && databases.some(database => database.filename === linkedDb)) {
+      setActiveDb(linkedDb)
+    }
+  }, [activeDb, databases, searchParams, setActiveDb])
 
   // ── Garde d'authentification (V3.6) : au montage, si l'atelier exige une
   // session et qu'aucune n'est active → /login. Seule cette vue est protégée. ──
@@ -199,7 +212,16 @@ export default function AutomationView() {
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
               <label style={{ fontWeight: 700 }}>{t('db.select')}</label>
-              <select className="form-select" style={{ maxWidth: 260 }} value={activeDb ?? ''} onChange={e => setActiveDb(e.target.value)}>
+              <select className="form-select" style={{ maxWidth: 260 }} value={activeDb ?? ''} aria-label={t('db.select')} onChange={e => {
+                const db = e.target.value
+                setActiveDb(db)
+                setSearchParams(previous => {
+                  const next = new URLSearchParams(previous)
+                  next.set('db', db)
+                  next.delete('run'); next.delete('page'); next.delete('doc')
+                  return next
+                }, { replace: true })
+              }}>
                 {databases.map(d => <option key={d.filename} value={d.filename}>{d.filename}</option>)}
               </select>
             </div>

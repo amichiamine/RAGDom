@@ -456,6 +456,17 @@
   },
   "validation": {
     "readonly": "Lecture seule — mutations désactivées",
+    "status": {
+      "DRAFT": "Brouillon",
+      "RUNNING": "En cours",
+      "PENDING": "En attente",
+      "PROCESSING": "Traitement",
+      "READY": "Prêt",
+      "FAILED": "Échec",
+      "ACCEPTED": "Accepté",
+      "REJECTED": "Rejeté",
+      "CANCELLED": "Annulé"
+    },
     "scope": {
       "title": "Périmètre universel",
       "database": "Base",
@@ -491,6 +502,7 @@
     },
     "metrics": {
       "pages": "pages",
+      "targets": "cibles",
       "chunks": "chunks",
       "artifacts": "artefacts",
       "human_preserved": "éditions protégées",
@@ -499,11 +511,13 @@
     },
     "runs": {
       "title": "Exécutions persistantes",
-      "hint": "Historique serveur et état live ciblé.",
+      "hint": "Historique serveur et actualisation ciblée du run ouvert.",
       "refresh": "Actualiser",
       "empty": "Aucune validation enregistrée.",
       "select": "Sélectionnez une exécution.",
-      "polling": "Polling de repli",
+      "polling": "Actualisation ciblée",
+      "pagination": "Pagination des exécutions",
+      "progress": "Progression de la validation",
       "cancelled": "Annulation demandée.",
       "direct": "Écriture directe",
       "pages": "Pages du run"
@@ -547,7 +561,8 @@
       "restore_run": "Restaurer le run",
       "accept_done": "Acceptation enregistrée.",
       "reject_done": "Rejet enregistré.",
-      "restore_done": "Restauration demandée."
+      "restore_done": "Copie de travail restaurée.",
+      "cancel_done": "Validation annulée."
     }
   }
 }
