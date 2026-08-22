@@ -1,5 +1,9 @@
 # JOURNAL des passes (le plus récent en premier)
 
+## 2026-08-22 12:10 — Passe finale : consultation visuelle + consignation
+- Vérification navigateur directe du live V4.0 : texte+KaTeX+SVG in-situ+comparateurs
+  +galerie+badges opérationnels, 0 erreur console. Voir BILAN_FINAL.md (limites
+  honnêtes + procédure de reprise). Fin de mandat sur budget.
 ## 2026-08-22 11:15 — V4.0 : MULTIMODAL STRUCTURÉ PORTABLE (contrat consolidé 7 messages)
 - Qualifieur VLM toutes familles (artifact_qualifier.py) : geometry/dessins libres/
   opérations posées (LaTeX array)/diagrammes états-structures/organigrammes (Mermaid)/
