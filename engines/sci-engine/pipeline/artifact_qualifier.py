@@ -45,13 +45,33 @@ _RC_TABLE = {"renderer": "tanstack-table", "pagination": True, "pageSize": 20}
 _RC_CHEM = {"renderer": "ketcher", "readOnly": True}
 _RC_CODE = {"renderer": "shiki", "lang": "text", "theme": "github-dark"}
 _RC_DENSE = {"renderer": "openseadragon", "tileSources": None, "showNavigator": True}
+# ── Familles PARAMÉTRIQUES (V5, extension §12) : le front redessine NATIVEMENT la
+#    figure à partir de paramètres (toujours net) au lieu d'un SVG copié. Le
+#    raw_data porte le JSON de paramètres SÉRIALISÉ ; le render_config nomme le
+#    renderer paramétrique et rappelle la sémantique de la figure. ──
+_RC_NUMBER_LINE = {"renderer": "param-number-line", "interactive": False}
+_RC_DECIMAL_GRID = {"renderer": "param-decimal-grid", "interactive": False}
 
 _SVG_MAX_BYTES = 200 * 1024  # SVG autonome < 200 Ko (garde-fou UI)
 _SVG_RE = re.compile(r"<svg\b[^>]*>.*</svg>", re.S | re.I)
 
 _VALID_TYPES = {"geometry", "drawing", "operation", "diagram", "flowchart",
-                "plot", "matrix", "table", "chemistry", "code", "photo", "other"}
+                "plot", "matrix", "table", "chemistry", "code", "photo", "other",
+                "number_line", "decimal_grid"}
 _VALID_SEMANTICS = {"demonstration", "illustration", "exercise_support"}
+
+# ── Bornes de validation des familles paramétriques (constantes nommées) ──
+# Droite graduée : nb max de points/segments (garde-fou charge front), longueur
+# max d'un label (labels courts type "A", "3/10").
+_NL_MAX_POINTS = 40
+_NL_MAX_SEGMENTS = 20
+_LABEL_MAX_LEN = 16
+# Grille décimale : bornes rows/cols (1..20 — au-delà, illisible / suspect).
+_GRID_MIN_DIM = 1
+_GRID_MAX_DIM = 20
+_GRID_MAX_CELLS = 60  # nb max de bandes/cellules décrites (garde-fou)
+# Palette FERMÉE partagée par les cellules de grille (contrat front strict).
+_PARAM_COLORS = {"blue", "red", "green", "orange", "purple", "gray"}
 
 # ── Sanitation LaTeX (bug production : délimiteurs embarqués + commandes mutilées) ──
 # (a) Délimiteurs mathématiques en tête/queue à retirer : le renderer frontend
@@ -109,12 +129,24 @@ _PROMPT = (
     "STRICTEMENT par UN SEUL objet JSON, sans texte avant ni après, sans balise "
     "Markdown, au format EXACT :\n"
     '{"type":"geometry|drawing|operation|diagram|flowchart|plot|matrix|table|'
-    'chemistry|code|photo|other",'
+    'chemistry|code|number_line|decimal_grid|photo|other",'
     '"semantic":"demonstration|illustration|exercise_support|null",'
     '"caption_ar":"légende courte en arabe",'
     '"svg":null,"latex":null,"mermaid":null,"plotly_json":null,"markdown":null,'
-    '"smiles":null,"code":null,"lang":null}\n'
+    '"smiles":null,"code":null,"lang":null,"number_line":null,"decimal_grid":null}\n'
     "Règles de TYPE :\n"
+    "- number_line (DROITE/DEMI-DROITE GRADUÉE : axe avec graduations régulières et "
+    "points placés) → \"number_line\" : "
+    '{"min":0,"max":4,"step":1,"points":[{"label":"A","value":2.4}],'
+    '"highlight_segments":[[1.6,2.0]]} '
+    "— min<max, step>0, chaque value dans [min,max], labels TRÈS courts ; "
+    "highlight_segments OPTIONNEL (paires [début,fin] dans [min,max]).\n"
+    "- decimal_grid (GRILLE de représentation décimale : quadrillage 10×10, ou "
+    "bandes, coloriés pour illustrer des fractions/décimaux) → \"decimal_grid\" : "
+    '{"rows":10,"cols":10,"cells":[{"count":30,"color":"blue","label":"3/10"},'
+    '{"count":5,"color":"red","label":"5/100"}]} '
+    "— rows/cols entre 1 et 20 ; chaque count>=0 et <= rows*cols ; "
+    "color dans {blue,red,green,orange,purple,gray} ; label court OPTIONNEL.\n"
     "- geometry / drawing (y compris DESSIN LIBRE démonstratif) → \"svg\" : "
     "reproduction FIDÈLE (traits, points, labels, FLÈCHES et ANNOTATIONS comprises) "
     "en SVG autonome (<svg ...>...</svg> avec viewBox ; texte arabe autorisé).\n"
@@ -203,6 +235,132 @@ def _valid_plotly(payload):
     return json.dumps(obj, ensure_ascii=False)
 
 
+def _as_number(value):
+    """Convertit en float un nombre (int/float/str numérique). None si impossible
+    ou non fini (NaN/inf exclus — un paramètre non fini casse le rendu front)."""
+    if isinstance(value, bool):  # bool est un int en Python : on l'exclut
+        return None
+    if isinstance(value, (int, float)):
+        f = float(value)
+    elif isinstance(value, str):
+        try:
+            f = float(value.strip())
+        except (ValueError, AttributeError):
+            return None
+    else:
+        return None
+    # Rejette NaN / ±inf (f != f est vrai uniquement pour NaN).
+    if f != f or f in (float("inf"), float("-inf")):
+        return None
+    return f
+
+
+def _short_label(value):
+    """Label court accepté (str non vide ≤ _LABEL_MAX_LEN). None sinon."""
+    if not isinstance(value, str):
+        return None
+    label = value.strip()
+    if not label or len(label) > _LABEL_MAX_LEN:
+        return None
+    return label
+
+
+def _valid_number_line(payload):
+    """Valide + NORMALISE une droite graduée. Renvoie le JSON sérialisé (dict
+    normalisé : nombres coercés, points/segments filtrés) ou None si invalide.
+
+    Règles STRICTES : min<max ; step>0 ; chaque point.value dans [min,max] avec un
+    label court ; highlight_segments (optionnel) = paires [a,b] ordonnées dans
+    [min,max]. Au moins UN point valide requis (sinon rien à placer)."""
+    obj = payload
+    if isinstance(payload, str):
+        try:
+            obj = json.loads(payload)
+        except (ValueError, TypeError):
+            return None
+    if not isinstance(obj, dict):
+        return None
+    lo, hi, step = _as_number(obj.get("min")), _as_number(obj.get("max")), _as_number(obj.get("step"))
+    if lo is None or hi is None or step is None:
+        return None
+    if not (lo < hi) or step <= 0:
+        return None
+    raw_points = obj.get("points")
+    if not isinstance(raw_points, list) or not raw_points:
+        return None
+    points = []
+    for p in raw_points[:_NL_MAX_POINTS]:
+        if not isinstance(p, dict):
+            continue
+        value = _as_number(p.get("value"))
+        label = _short_label(p.get("label"))
+        if value is None or label is None or not (lo <= value <= hi):
+            continue
+        points.append({"label": label, "value": value})
+    if not points:
+        return None
+    normalized = {"min": lo, "max": hi, "step": step, "points": points}
+    # highlight_segments OPTIONNEL : paires [a,b] valides uniquement.
+    raw_segments = obj.get("highlight_segments")
+    if isinstance(raw_segments, list) and raw_segments:
+        segments = []
+        for seg in raw_segments[:_NL_MAX_SEGMENTS]:
+            if not isinstance(seg, (list, tuple)) or len(seg) != 2:
+                continue
+            a, b = _as_number(seg[0]), _as_number(seg[1])
+            if a is None or b is None or not (lo <= a <= b <= hi):
+                continue
+            segments.append([a, b])
+        if segments:
+            normalized["highlight_segments"] = segments
+    return json.dumps(normalized, ensure_ascii=False)
+
+
+def _valid_decimal_grid(payload):
+    """Valide + NORMALISE une grille de représentation décimale. Renvoie le JSON
+    sérialisé (dict normalisé) ou None si invalide.
+
+    Règles STRICTES : rows/cols entiers dans [1,20] ; chaque cellule a un count
+    entier 0..rows*cols, une color dans la palette fermée, un label court
+    OPTIONNEL. Au moins UNE cellule valide requise."""
+    obj = payload
+    if isinstance(payload, str):
+        try:
+            obj = json.loads(payload)
+        except (ValueError, TypeError):
+            return None
+    if not isinstance(obj, dict):
+        return None
+    rows, cols = _as_number(obj.get("rows")), _as_number(obj.get("cols"))
+    if rows is None or cols is None or rows != int(rows) or cols != int(cols):
+        return None
+    rows, cols = int(rows), int(cols)
+    if not (_GRID_MIN_DIM <= rows <= _GRID_MAX_DIM) or not (_GRID_MIN_DIM <= cols <= _GRID_MAX_DIM):
+        return None
+    capacity = rows * cols
+    raw_cells = obj.get("cells")
+    if not isinstance(raw_cells, list) or not raw_cells:
+        return None
+    cells = []
+    for c in raw_cells[:_GRID_MAX_CELLS]:
+        if not isinstance(c, dict):
+            continue
+        count = _as_number(c.get("count"))
+        color = c.get("color")
+        if count is None or count != int(count) or not (0 <= int(count) <= capacity):
+            continue
+        if not isinstance(color, str) or color.strip().lower() not in _PARAM_COLORS:
+            continue
+        cell = {"count": int(count), "color": color.strip().lower()}
+        label = _short_label(c.get("label"))
+        if label is not None:
+            cell["label"] = label
+        cells.append(cell)
+    if not cells:
+        return None
+    return json.dumps({"rows": rows, "cols": cols, "cells": cells}, ensure_ascii=False)
+
+
 def _clean(value):
     return value.strip() if isinstance(value, str) and value.strip() else None
 
@@ -245,9 +403,18 @@ def _map_result(parsed):
     code = _clean(parsed.get("code"))
     lang = _clean(parsed.get("lang"))
     plotly = _valid_plotly(parsed.get("plotly_json"))
+    # Familles paramétriques (V5) : validées + normalisées (None si invalide →
+    # la branche n'est pas prise, repli familles existantes puis dense).
+    number_line = _valid_number_line(parsed.get("number_line"))
+    decimal_grid = _valid_decimal_grid(parsed.get("decimal_grid"))
 
     new_type = raw_data = base_rc = None
-    if art_type in ("geometry", "drawing") and _valid_svg(svg):
+    if art_type == "number_line" and number_line:
+        # raw_data = paramètres SÉRIALISÉS ; le front redessine nativement.
+        new_type, raw_data, base_rc = "number_line", number_line, _RC_NUMBER_LINE
+    elif art_type == "decimal_grid" and decimal_grid:
+        new_type, raw_data, base_rc = "decimal_grid", decimal_grid, _RC_DECIMAL_GRID
+    elif art_type in ("geometry", "drawing") and _valid_svg(svg):
         new_type, raw_data, base_rc = "geometry_vector", svg, _RC_GEOMETRY
     elif art_type == "diagram" and _valid_svg(svg) and not mermaid:
         new_type, raw_data, base_rc = "geometry_vector", svg, _RC_GEOMETRY

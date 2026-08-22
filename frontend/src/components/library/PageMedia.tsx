@@ -144,54 +144,62 @@ export default function PageMedia({ db, documentId, page, embeddedIds, onLoaded 
           const binaryUrl = a.has_binary ? api.library.getArtifactBinaryUrl(db, a.id) : undefined
           const isEmbedded = embedded.has(a.id)
 
-          return (
-            <figure key={a.id} className="page-media-item" style={{ margin: 0, background: 'var(--bg-card-inner)', border: '1px solid var(--border-color)', borderRadius: 12, padding: 12 }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
-                {/* Badge de TYPE de la galerie affiché uniquement pour l'entrée « intégrée
-                    au texte » (ArtifactRenderer n'est pas monté ici) ; sinon le badge
-                    type + état de rendu est porté in-situ par ArtifactRenderer (F4). */}
-                {isEmbedded ? (
+          // Entrée « intégrée au texte » : ArtifactRenderer n'est PAS monté (doublon
+          // évité), on garde l'ancien cadre léger de contrôle (badge type + zoom).
+          if (isEmbedded) {
+            return (
+              <figure key={a.id} className="page-media-item" style={{ margin: 0, background: 'var(--bg-card-inner)', border: '1px solid var(--border-color)', borderRadius: 12, padding: 12 }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
                   <span className="badge badge-secondary" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }} dir="auto">
                     <ImageIcon size={12} /> {badge}
                   </span>
-                ) : <span />}
-                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-                  {isEmbedded && (
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
                     <span className="badge badge-subtle" dir="auto" title={t('library.media_embedded_in_text')}>
                       {t('library.media_embedded_in_text')}
                     </span>
-                  )}
-                  {binaryUrl && (
-                    <button
-                      type="button"
-                      className="btn btn-sm btn-outline-secondary"
-                      onClick={() => setModal({ src: binaryUrl, title: a.caption ?? badge })}
-                      title={t('library.media_zoom')}
-                    >
-                      <Maximize2 size={12} /> {t('library.media_zoom')}
-                    </button>
-                  )}
-                </span>
-              </div>
-
-              {isEmbedded ? (
+                    {binaryUrl && (
+                      <button
+                        type="button"
+                        className="btn btn-sm btn-outline-secondary"
+                        onClick={() => setModal({ src: binaryUrl, title: a.caption ?? badge })}
+                        title={t('library.media_zoom')}
+                      >
+                        <Maximize2 size={12} /> {t('library.media_zoom')}
+                      </button>
+                    )}
+                  </span>
+                </div>
                 <div style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.82rem', padding: '6px 0' }} dir="auto">
                   {t('library.media_embedded_in_text')}
                 </div>
-              ) : (
-                <ArtifactRenderer
-                  artifact={a}
-                  fallbackImageUrl={binaryUrl}
-                  onEnlarge={(src, title) => setModal({ src, title })}
-                />
-              )}
+              </figure>
+            )
+          }
 
-              {!isEmbedded && a.caption && (
-                <figcaption dir="auto" style={{ marginTop: 8, fontSize: '0.82rem', color: 'var(--text-muted)', textAlign: 'center' }}>
-                  {a.caption}
-                </figcaption>
+          // Cas standard : le CADRE DIDACTIQUE (ArtifactRenderer, variant `card`)
+          // EST le conteneur visible — pas de double bordure ni de caption dupliquée
+          // (la caption devient le titre du bandeau). Bouton « agrandir » discret au-dessus.
+          return (
+            <div key={a.id} className="page-media-item" style={{ margin: 0 }}>
+              {binaryUrl && (
+                <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 6 }}>
+                  <button
+                    type="button"
+                    className="btn btn-sm btn-outline-secondary"
+                    onClick={() => setModal({ src: binaryUrl, title: a.caption ?? badge })}
+                    title={t('library.media_zoom')}
+                  >
+                    <Maximize2 size={12} /> {t('library.media_zoom')}
+                  </button>
+                </div>
               )}
-            </figure>
+              <ArtifactRenderer
+                artifact={a}
+                fallbackImageUrl={binaryUrl}
+                onEnlarge={(src, title) => setModal({ src, title })}
+                variant="card"
+              />
+            </div>
           )
         })}
       </div>

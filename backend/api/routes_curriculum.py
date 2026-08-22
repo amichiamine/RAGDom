@@ -28,6 +28,47 @@ def _table(kind: str):
     return _TABLES[kind]
 
 
+class BuildBody(BaseModel):
+    """Génération AUTOMATIQUE du curriculum sur un corpus EXISTANT (V5).
+
+    document_id optionnel : None = toute la base. Idempotent et non-destructif
+    (ne reconstruit que les lignes d'origine auto ; préserve les lignes saisies
+    à la main via CurriculumStudio)."""
+    db: str
+    document_id: Optional[str] = None
+
+
+# ⚠ Déclarée AVANT les routes /{kind} : sinon POST /build serait capturé par
+# create_item (@router.post("/{kind}")) avec kind="build" (résolution par ordre).
+@router.post("/build")
+def build(body: BuildBody):
+    """Peuple DÉTERMINISTIQUEMENT (zéro LLM) les tables curriculum depuis le TOC
+    et les chunks typés déjà en base, puis renvoie les comptes obtenus.
+
+    Charge le builder depuis le moteur actif (même mécanisme que le finalize de
+    l'orchestrateur). 400 si aucun moteur actif / couche absente ; 400/404 si la
+    base est invalide/introuvable (wrapper commun get_connection_or_http)."""
+    from core import engine_registry  # import local : db/ reste utilisable hors HTTP
+
+    manifest = engine_registry.active_engine()
+    if manifest is None:
+        raise HTTPException(400, "Aucun moteur actif — génération curriculum impossible")
+    try:
+        builder = engine_registry.load_layer(manifest["id"], "curriculum_builder")
+    except FileNotFoundError:
+        raise HTTPException(400, "curriculum_builder absent du moteur %s" % manifest["id"])
+    conn = db.get_connection_or_http(body.db)
+    try:
+        counts = builder.build_curriculum(conn, body.document_id)
+        return {"built": True, "document_id": body.document_id, "counts": counts}
+    except HTTPException:
+        raise
+    except Exception as exc:  # noqa: BLE001 — erreur de build → 400 explicite (jamais 500)
+        raise HTTPException(400, "Génération curriculum en échec : %s" % exc)
+    finally:
+        conn.close()
+
+
 @router.get("/{kind}")
 def list_items(kind: str, db_name: str = Query(alias="db")):
     table, columns = _table(kind)

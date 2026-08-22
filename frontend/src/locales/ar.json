@@ -146,7 +146,21 @@
     "nav_goto_solution": "← الحل المرتبط",
     "nav_goto_scan": "مسح ص {page}",
     "range_single_page": "ص {page}",
-    "range_pages": "ص {start} - {end}"
+    "range_pages": "ص {start} - {end}",
+    "didactic_family_geometry_vector": "شكل هندسي",
+    "didactic_family_matrix": "صيغة رياضية",
+    "didactic_family_data_table": "جدول بيانات",
+    "didactic_family_flowchart": "مخطط منطقي",
+    "didactic_family_signal_waveform": "إشارة",
+    "didactic_family_smiles_chem": "صيغة كيميائية",
+    "didactic_family_code_snippet": "مقتطف شيفرة",
+    "didactic_family_number_line": "مستقيم مدرج",
+    "didactic_family_decimal_grid": "شبكة عشرية",
+    "didactic_family_dense_illustration": "رسم توضيحي",
+    "didactic_family_other": "عنصر بصري",
+    "didactic_note_demonstration": "سند برهان",
+    "didactic_note_illustration": "توضيح الدرس",
+    "didactic_note_exercise_support": "سند تمرين"
   },
   "search": {
     "placeholder": "ابحث في هذه القاعدة...",

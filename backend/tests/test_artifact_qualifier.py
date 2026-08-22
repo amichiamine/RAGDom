@@ -148,6 +148,115 @@ def test_map_code_defaults_lang_text():
     assert json.loads(r["render_config_json"])["lang"] == "text"
 
 
+# ── Familles PARAMÉTRIQUES (V5, extension §12) ───────────────────────────────
+def test_map_number_line_valid():
+    fn = _gen({"type": "number_line", "semantic": "exercise_support", "caption_ar": "مستقيم",
+               "number_line": {"min": 0, "max": 4, "step": 1,
+                               "points": [{"label": "A", "value": 2.4},
+                                          {"label": "B", "value": 1.0}],
+                               "highlight_segments": [[1.6, 2.0]]}})
+    r = q.qualify_visual_artifact(b"w", fn)
+    assert r["artifact_type"] == "number_line"
+    rc = json.loads(r["render_config_json"])
+    assert rc["renderer"] == "param-number-line" and rc["semantic"] == "exercise_support"
+    data = json.loads(r["raw_data"])  # raw_data = paramètres SÉRIALISÉS
+    assert data["min"] == 0 and data["max"] == 4 and data["step"] == 1
+    assert {p["label"] for p in data["points"]} == {"A", "B"}
+    assert data["highlight_segments"] == [[1.6, 2.0]]
+
+
+def test_map_number_line_filters_out_of_range_points_and_bad_segments():
+    fn = _gen({"type": "number_line", "caption_ar": "م",
+               "number_line": {"min": 0, "max": 10, "step": 2,
+                               "points": [{"label": "A", "value": 3},
+                                          {"label": "HORS", "value": 99}],  # hors [0,10] → filtré
+                               "highlight_segments": [[8, 3], [2, 4]]}})  # 1re paire mal ordonnée
+    r = q.qualify_visual_artifact(b"w", fn)
+    assert r["artifact_type"] == "number_line"
+    data = json.loads(r["raw_data"])
+    assert [p["label"] for p in data["points"]] == ["A"]  # le point hors plage est retiré
+    assert data["highlight_segments"] == [[2, 4]]         # seule la paire valide survit
+
+
+def test_map_number_line_invalid_min_max_falls_back():
+    # min >= max → droite non structurable → repli (dense conservé ou None).
+    fn = _gen({"type": "number_line", "caption_ar": "x",
+               "number_line": {"min": 5, "max": 2, "step": 1,
+                               "points": [{"label": "A", "value": 3}]}})
+    r = q.qualify_visual_artifact(b"w", fn)
+    assert r is None or r["artifact_type"] is None
+
+
+def test_map_number_line_invalid_step_falls_back():
+    fn = _gen({"type": "number_line", "caption_ar": "x",
+               "number_line": {"min": 0, "max": 4, "step": 0,  # step <= 0 → invalide
+                               "points": [{"label": "A", "value": 2}]}})
+    r = q.qualify_visual_artifact(b"w", fn)
+    assert r is None or r["artifact_type"] is None
+
+
+def test_map_number_line_no_valid_point_falls_back():
+    fn = _gen({"type": "number_line", "caption_ar": "x",
+               "number_line": {"min": 0, "max": 4, "step": 1, "points": []}})  # aucun point
+    r = q.qualify_visual_artifact(b"w", fn)
+    assert r is None or r["artifact_type"] is None
+
+
+def test_map_decimal_grid_valid():
+    fn = _gen({"type": "decimal_grid", "semantic": "illustration", "caption_ar": "شبكة",
+               "decimal_grid": {"rows": 10, "cols": 10,
+                                "cells": [{"count": 30, "color": "blue", "label": "3/10"},
+                                          {"count": 5, "color": "red", "label": "5/100"}]}})
+    r = q.qualify_visual_artifact(b"w", fn)
+    assert r["artifact_type"] == "decimal_grid"
+    rc = json.loads(r["render_config_json"])
+    assert rc["renderer"] == "param-decimal-grid" and rc["semantic"] == "illustration"
+    data = json.loads(r["raw_data"])
+    assert data["rows"] == 10 and data["cols"] == 10
+    assert data["cells"][0] == {"count": 30, "color": "blue", "label": "3/10"}
+
+
+def test_map_decimal_grid_filters_invalid_cells():
+    # count > capacité (5) et couleur hors palette → cellules rejetées ; 1 valide reste.
+    fn = _gen({"type": "decimal_grid", "caption_ar": "ش",
+               "decimal_grid": {"rows": 2, "cols": 2,
+                                "cells": [{"count": 99, "color": "blue"},   # > 4 → rejet
+                                          {"count": 2, "color": "pink"},    # couleur invalide
+                                          {"count": 3, "color": "green"}]}})  # valide
+    r = q.qualify_visual_artifact(b"w", fn)
+    assert r["artifact_type"] == "decimal_grid"
+    data = json.loads(r["raw_data"])
+    assert data["cells"] == [{"count": 3, "color": "green"}]
+
+
+def test_map_decimal_grid_invalid_dims_falls_back():
+    # rows hors [1,20] → grille non structurable → repli.
+    fn = _gen({"type": "decimal_grid", "caption_ar": "x",
+               "decimal_grid": {"rows": 50, "cols": 10,
+                                "cells": [{"count": 3, "color": "blue"}]}})
+    r = q.qualify_visual_artifact(b"w", fn)
+    assert r is None or r["artifact_type"] is None
+
+
+def test_map_decimal_grid_no_valid_cell_falls_back():
+    fn = _gen({"type": "decimal_grid", "caption_ar": "x",
+               "decimal_grid": {"rows": 10, "cols": 10,
+                                "cells": [{"count": -1, "color": "blue"}]}})  # count < 0
+    r = q.qualify_visual_artifact(b"w", fn)
+    assert r is None or r["artifact_type"] is None
+
+
+def test_param_family_invalid_but_caption_keeps_dense():
+    # Paramètres invalides MAIS caption/sémantique utiles → dense conservé, caption gardée,
+    # sémantique fusionnée (repli exactement comme photo/other).
+    fn = _gen({"type": "number_line", "semantic": "illustration", "caption_ar": "صورة",
+               "number_line": {"min": 0, "max": 0, "step": 1, "points": []}})  # min==max invalide
+    r = q.qualify_visual_artifact(b"w", fn)
+    assert r is not None and r["artifact_type"] is None
+    assert r["caption"] == "صورة"
+    assert json.loads(r["render_config_json"])["semantic"] == "illustration"
+
+
 def test_photo_keeps_dense_but_updates_caption_and_semantic():
     fn = _gen({"type": "photo", "semantic": "illustration", "caption_ar": "صورة واقعية"})
     r = q.qualify_visual_artifact(b"w", fn)

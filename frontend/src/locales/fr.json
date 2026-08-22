@@ -146,7 +146,21 @@
     "nav_goto_solution": "→ Corrigé lié",
     "nav_goto_scan": "Scan p. {page}",
     "range_single_page": "p. {page}",
-    "range_pages": "p. {start} – {end}"
+    "range_pages": "p. {start} – {end}",
+    "didactic_family_geometry_vector": "Figure géométrique",
+    "didactic_family_matrix": "Formule mathématique",
+    "didactic_family_data_table": "Tableau de données",
+    "didactic_family_flowchart": "Schéma logique",
+    "didactic_family_signal_waveform": "Signal",
+    "didactic_family_smiles_chem": "Formule chimique",
+    "didactic_family_code_snippet": "Extrait de code",
+    "didactic_family_number_line": "Droite graduée",
+    "didactic_family_decimal_grid": "Grille décimale",
+    "didactic_family_dense_illustration": "Illustration",
+    "didactic_family_other": "Élément visuel",
+    "didactic_note_demonstration": "Support de démonstration",
+    "didactic_note_illustration": "Illustration du cours",
+    "didactic_note_exercise_support": "Support d'exercice"
   },
   "search": {
     "placeholder": "Rechercher dans cette base...",

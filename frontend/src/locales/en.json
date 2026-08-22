@@ -146,7 +146,21 @@
     "nav_goto_solution": "→ Linked solution",
     "nav_goto_scan": "Scan p. {page}",
     "range_single_page": "p. {page}",
-    "range_pages": "p. {start} – {end}"
+    "range_pages": "p. {start} – {end}",
+    "didactic_family_geometry_vector": "Geometric figure",
+    "didactic_family_matrix": "Mathematical formula",
+    "didactic_family_data_table": "Data table",
+    "didactic_family_flowchart": "Logic diagram",
+    "didactic_family_signal_waveform": "Signal",
+    "didactic_family_smiles_chem": "Chemical formula",
+    "didactic_family_code_snippet": "Code snippet",
+    "didactic_family_number_line": "Number line",
+    "didactic_family_decimal_grid": "Decimal grid",
+    "didactic_family_dense_illustration": "Illustration",
+    "didactic_family_other": "Visual element",
+    "didactic_note_demonstration": "Demonstration support",
+    "didactic_note_illustration": "Course illustration",
+    "didactic_note_exercise_support": "Exercise support"
   },
   "search": {
     "placeholder": "Search this database...",

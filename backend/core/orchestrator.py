@@ -250,6 +250,11 @@ class PipelineOrchestrator:
                         conn, doc_id, native_toc=self._native_toc_cache.get(doc_id))
                     if built:
                         logger.info("Sommaire dérivé des titres pour %s : %d entrées", doc_id, built)
+                    # Curriculum AUTOMATIQUE (V5) : peuplement déterministe (zéro LLM)
+                    # des tables curriculum depuis le TOC + chunks typés fraîchement
+                    # finalisés. Dégradation gracieuse TOTALE : jamais un crash ici ne
+                    # tue la file (le curriculum est OPTIONNEL). Flag RAGDOM_AUTO_CURRICULUM.
+                    self._maybe_build_curriculum(db_name, manifest["id"], doc_id, conn)
                 artifacts = conn.execute(
                     "SELECT COUNT(*) FROM scientific_artifacts WHERE document_id IN (%s)"
                     % ",".join("?" * len(docs)), docs).fetchone()[0] if docs else 0
@@ -258,6 +263,29 @@ class PipelineOrchestrator:
                                             "success": (stats[0] or 0) == stats[1]})
         finally:
             conn.close()
+
+    def _maybe_build_curriculum(self, db_name: str, engine_id: str, doc_id: str, conn) -> None:
+        """Génère AUTOMATIQUEMENT le curriculum au finalize (V5), derrière le flag
+        RAGDOM_AUTO_CURRICULUM (défaut « true » — auto activé, désactivable).
+
+        Dégradation gracieuse ABSOLUE : couche curriculum absente, base sans TOC,
+        erreur SQL… rien ne remonte (le curriculum est OPTIONNEL). Réutilise la
+        connexion du finalize (le builder ouvre/commit sa propre transaction)."""
+        if os.environ.get("RAGDOM_AUTO_CURRICULUM", "true").strip().lower() == "false":
+            return
+        try:
+            builder = engine_registry.load_layer(engine_id, "curriculum_builder")
+        except FileNotFoundError:
+            logger.warning("curriculum_builder absent du moteur %s — curriculum auto ignoré", engine_id)
+            return
+        except Exception:  # noqa: BLE001 — chargement moteur cassé : jamais fatal
+            logger.exception("Chargement curriculum_builder en échec — curriculum auto ignoré")
+            return
+        try:
+            counts = builder.build_curriculum(conn, doc_id)
+            logger.info("Curriculum auto %s : %s", doc_id, counts)
+        except Exception:  # noqa: BLE001 — une exception ne tue JAMAIS la file
+            logger.exception("build_curriculum en échec (document %s) — file préservée", doc_id)
 
     def _next_job(self, db_name: str) -> Optional[dict]:
         conn = db.get_connection(db_name)

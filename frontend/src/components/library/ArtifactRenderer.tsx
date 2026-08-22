@@ -9,6 +9,10 @@ import type { Artifact } from '@/types'
 import { useLanguage } from '@/contexts/LanguageContext'
 import MarkdownKatex from '@/components/library/MarkdownKatex'
 import { stripMathDelimiters, renderKatexStrict } from '@/lib/markdownKatex'
+import {
+  NumberLine, DecimalGrid, validateNumberLine, validateDecimalGrid,
+  type NumberLineParams, type DecimalGridParams,
+} from '@/components/library/ParametricFigures'
 
 // Types de `plotly.js-dist-min` (bundle sans types) : déclarés dans le shim
 // ambiant `@/plotly-shim.d.ts`. Un `declare module` inline ici produirait TS2665
@@ -20,6 +24,13 @@ interface Props {
   fallbackImageUrl?: string
   /** Callback d'agrandissement (clic sur le rendu) — piloté par le parent (→ ImageModal). */
   onEnlarge?: (src: string, title: string) => void
+  /**
+   * Densité de la composition didactique (MISSION 1) :
+   *  - `card` (défaut) : cadre titré complet (bandeau coloré + corps + pied) — galerie.
+   *  - `inline` : variante discrète (bordure fine + titre en légende compacte) pour
+   *    les ancres in-situ dans le flux du cours, sans alourdir la lecture.
+   */
+  variant?: 'card' | 'inline'
 }
 
 /**
@@ -33,11 +44,13 @@ interface Props {
 type Family =
   | 'geometry_vector' | 'matrix' | 'data_table'
   | 'flowchart' | 'signal_waveform' | 'smiles_chem' | 'code_snippet'
+  | 'number_line' | 'decimal_grid'
   | 'dense_illustration' | 'other'
 
 /** Familles rendues nativement (éligibles au comparateur structuré/original). */
 const NATIVE: ReadonlySet<Family> = new Set<Family>([
   'geometry_vector', 'matrix', 'data_table', 'flowchart', 'signal_waveform',
+  'number_line', 'decimal_grid',
 ])
 
 /**
@@ -61,6 +74,8 @@ const RENDERER_TO_FAMILY: Record<string, Family> = {
   shiki: 'code_snippet',
   ketcher: 'smiles_chem',
   openseadragon: 'dense_illustration',
+  'param-number-line': 'number_line',
+  'param-decimal-grid': 'decimal_grid',
 }
 
 /** État de rendu EFFECTIF (calculé sur le rendu réel, pas sur artifact_type — F3). */
@@ -114,9 +129,34 @@ function resolveFamily(renderer: string | undefined, type: string): Family {
 }
 
 /** Sémantique i18n (برهان / توضيح / سند تمرين) depuis render_config_json.semantic. */
-function readSemantic(s: string | undefined): 'demonstration' | 'illustration' | 'exercise_support' | null {
+type Semantic = 'demonstration' | 'illustration' | 'exercise_support'
+function readSemantic(s: string | undefined): Semantic | null {
   if (s === 'demonstration' || s === 'illustration' || s === 'exercise_support') return s
   return null
+}
+
+/**
+ * Palette pédagogique du bandeau didactique (MISSION 1) — pilotée par la
+ * sémantique. Teintes translucides posées sur les tokens de thème (dual clair/
+ * sombre géré par --bg-*), à l'image des badges existants (rgba sur base) :
+ *  - demonstration → « preuve » (indigo)
+ *  - illustration  → neutre (cyan)
+ *  - exercise_support → « exercice » (ambre)
+ *  - défaut (sans sémantique) → ardoise.
+ */
+interface SemanticTint {
+  /** Couleur d'accent pleine (texte du titre, filet, badge). */
+  accent: string
+  /** Fond translucide du bandeau. */
+  bandBg: string
+  /** Bordure translucide (bandeau + cadre inline). */
+  border: string
+}
+const SEMANTIC_TINT: Record<Semantic | 'default', SemanticTint> = {
+  demonstration: { accent: '#6366f1', bandBg: 'rgba(99,102,241,0.12)', border: 'rgba(99,102,241,0.35)' },
+  illustration: { accent: '#06b6d4', bandBg: 'rgba(6,182,212,0.12)', border: 'rgba(6,182,212,0.32)' },
+  exercise_support: { accent: '#f59e0b', bandBg: 'rgba(245,158,11,0.12)', border: 'rgba(245,158,11,0.35)' },
+  default: { accent: '#64748b', bandBg: 'rgba(100,116,139,0.10)', border: 'var(--border-color)' },
 }
 
 /**
@@ -133,6 +173,8 @@ function arabicTypeBadge(family: Family): string {
     case 'signal_waveform': return 'إشارة'
     case 'smiles_chem': return 'صيغة كيميائية'
     case 'code_snippet': return 'شيفرة'
+    case 'number_line': return 'مستقيم مدرج'
+    case 'decimal_grid': return 'شبكة عشرية'
     case 'dense_illustration': return 'رسم'
     default: return 'رسم'
   }
@@ -143,6 +185,8 @@ function sourceLangHint(family: Family): string {
   switch (family) {
     case 'flowchart': return 'mermaid'
     case 'signal_waveform': return 'json'
+    case 'number_line': return 'json'
+    case 'decimal_grid': return 'json'
     case 'smiles_chem': return 'smiles'
     case 'code_snippet': return 'code'
     default: return ''
@@ -439,7 +483,7 @@ function DataTableView({ parsed, isRtl }: { parsed: ParsedTable; isRtl: boolean 
  *  - comparateur (المهيكل / الأصل / مقارنة) pour les familles natives + has_binary ;
  *  - dégradation gracieuse ABSOLUE : toute exception de rendu → repli image + badge « أصل ».
  */
-export default function ArtifactRenderer({ artifact, fallbackImageUrl, onEnlarge }: Props) {
+export default function ArtifactRenderer({ artifact, fallbackImageUrl, onEnlarge, variant = 'card' }: Props) {
   const { t, isRtl } = useLanguage()
   const type = (artifact.artifact_type || '').toLowerCase()
   const cfg = useMemo(() => parseRenderConfig(artifact.render_config_json), [artifact.render_config_json])
@@ -480,15 +524,29 @@ export default function ArtifactRenderer({ artifact, fallbackImageUrl, onEnlarge
   }, [family, rawData, hasRawData, looksLatex])
   const hasTable = family === 'data_table' && hasRawData && !looksLatex
 
+  // number_line / decimal_grid → params JSON dans raw_data. Parse défensif
+  // (JSON.parse try/catch) + validation de forme minimale ; invalide → null,
+  // ce qui provoque le repli image comme les autres familles natives.
+  const numberLineParams = useMemo<NumberLineParams | null>(() => {
+    if (family !== 'number_line' || !hasRawData) return null
+    try { return validateNumberLine(JSON.parse(rawData)) } catch { return null }
+  }, [family, rawData, hasRawData])
+  const decimalGridParams = useMemo<DecimalGridParams | null>(() => {
+    if (family !== 'decimal_grid' || !hasRawData) return null
+    try { return validateDecimalGrid(JSON.parse(rawData)) } catch { return null }
+  }, [family, rawData, hasRawData])
+
   // mermaid / plotly : rendu asynchrone → état remonté par le composant enfant.
   const [mermaidOk, setMermaidOk] = useState<boolean | null>(null)
   const [plotlyOk, setPlotlyOk] = useState<boolean | null>(null)
 
-  // Éligibilité au rendu natif « synchrone » (svg/katex/table) — connu immédiatement.
+  // Éligibilité au rendu natif « synchrone » (svg/katex/table/paramétriques) — connu immédiatement.
   const nativeSyncOk =
     !!katexHtml ||
     (family === 'geometry_vector' && !!svgHtml) ||
-    hasTable
+    hasTable ||
+    !!numberLineParams ||
+    !!decimalGridParams
 
   // Familles à rendu asynchrone (mermaid/plotly) : tentées si raw_data présent.
   const isAsyncNative = (family === 'flowchart' || family === 'signal_waveform') && hasRawData
@@ -543,6 +601,12 @@ export default function ArtifactRenderer({ artifact, fallbackImageUrl, onEnlarge
     if (hasTable) {
       // Repli markdown si le parsing tanstack échoue (raw_data non-GFM).
       return <div className="page-media-table"><MarkdownKatex lazy raw={rawData} /></div>
+    }
+    if (family === 'number_line' && numberLineParams) {
+      return <NumberLine params={numberLineParams} />
+    }
+    if (family === 'decimal_grid' && decimalGridParams) {
+      return <DecimalGrid params={decimalGridParams} />
     }
     if (family === 'flowchart' && hasRawData) {
       return <MermaidView raw={rawData} isRtl={isRtl} onState={setMermaidOk} onEnlarge={enlarge} />
@@ -695,57 +759,183 @@ export default function ArtifactRenderer({ artifact, fallbackImageUrl, onEnlarge
         ? { label: t('library.render_state_viewer_missing'), className: 'badge-warning' }
         : { label: t('library.render_state_original'), className: 'badge-subtle' }
 
+  // ── MISSION 1 : composition didactique (cadre titré) ──────────────────────
+  // Caption RÉELLE (distincte du repli artifact_type utilisé pour alt/enlarge).
+  const realCaption = (artifact.caption ?? '').trim()
+  const hasCaption = realCaption.length > 0
+  // Libellé de famille i18n (bandeau quand pas de caption).
+  const familyLabel = t(`library.didactic_family_${family}`)
+  // Un artefact SANS caption NI sémantique (ex. crops CV pas encore qualifiés)
+  // garde un cadre MINIMAL sobre : pas de bandeau titré (juste badges + corps).
+  const isMinimal = !hasCaption && !semantic
+
+  // Titre du bandeau : caption si présente, sinon libellé i18n de la famille.
+  const frameTitle = hasCaption ? realCaption : familyLabel
+  // Pied : la caption sert de phrase d'explication SI elle n'a pas servi de titre.
+  // Si la caption EST le titre, le pied porte le libellé didactique de la
+  // sémantique (ex. « سند تمرين ») — jamais de doublon titre = pied.
+  const frameFooter: string | null = isMinimal
+    ? null
+    : hasCaption
+      ? (semantic ? t(`library.didactic_note_${semantic}`) : null)
+      : null // sans caption, le titre = libellé famille ; pas de pied redondant
+
+  const tint = SEMANTIC_TINT[semantic ?? 'default']
+  const isInline = variant === 'inline'
+
+  // Badges (type + état + sémantique) — réutilisés dans le bandeau/légende.
+  const badgesGroup = (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+      <span className="badge badge-secondary artifact-type-badge" dir="auto">
+        <ImageIcon size={12} /> {typeBadge}
+      </span>
+      <span className={`badge ${stateBadge.className} artifact-render-state-badge`} dir="auto" title={stateBadge.label}>
+        {stateBadge.label}
+      </span>
+      {semanticLabel && (
+        <span
+          className={`badge artifact-semantic-badge artifact-semantic-${semantic}`}
+          dir="auto"
+          style={{ background: tint.bandBg, color: tint.accent, border: `1px solid ${tint.border}` }}
+        >
+          {semanticLabel}
+        </span>
+      )}
+    </span>
+  )
+
+  // Comparateur (familles natives + binaire) — inchangé, réutilisé dans le bandeau.
+  const comparator = canCompare ? (
+    <div className="artifact-view-toggle" role="group" style={{ display: 'inline-flex', gap: 4 }}>
+      <button
+        type="button"
+        className={`btn btn-sm ${view === 'structured' ? 'btn-primary' : 'btn-outline-secondary'}`}
+        onClick={() => setView('structured')}
+        style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}
+        dir="auto"
+      >
+        <Layers size={12} /> {t('library.media_structured')}
+      </button>
+      <button
+        type="button"
+        className={`btn btn-sm ${view === 'original' ? 'btn-primary' : 'btn-outline-secondary'}`}
+        onClick={() => setView('original')}
+        style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}
+        dir="auto"
+      >
+        <ImageIcon size={12} /> {t('library.media_original')}
+      </button>
+      <button
+        type="button"
+        className={`btn btn-sm ${view === 'compare' ? 'btn-primary' : 'btn-outline-secondary'}`}
+        onClick={() => setView('compare')}
+        style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}
+        dir="auto"
+      >
+        <GitCompare size={12} /> {t('library.media_compare')}
+      </button>
+    </div>
+  ) : null
+
+  // ── Variante INLINE (discrète, in-situ) : filet d'accent + titre en légende ─
+  if (isInline) {
+    const inlineWrap: CSSProperties = {
+      background: 'var(--bg-card-inner)',
+      border: '1px solid var(--border-color)',
+      borderInlineStart: `3px solid ${isMinimal ? 'var(--border-color)' : tint.accent}`,
+      borderRadius: 10,
+      padding: 12,
+      margin: 0,
+    }
+    return (
+      <figure className="artifact-didactic artifact-didactic-inline" style={inlineWrap}>
+        {!isMinimal && (
+          <figcaption
+            className="artifact-didactic-inline-title"
+            dir="auto"
+            style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
+              flexWrap: 'wrap', marginBottom: 8,
+            }}
+          >
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+              <span
+                style={{ fontSize: '0.82rem', fontWeight: 700, color: tint.accent, overflow: 'hidden', textOverflow: 'ellipsis' }}
+              >
+                {frameTitle}
+              </span>
+            </span>
+            {badgesGroup}
+          </figcaption>
+        )}
+        {isMinimal && (
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>{badgesGroup}</div>
+        )}
+        {comparator && <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>{comparator}</div>}
+        {body}
+        {frameFooter && (
+          <figcaption
+            dir="auto"
+            style={{ marginTop: 8, fontSize: '0.78rem', color: 'var(--text-muted)', textAlign: isRtl ? 'right' : 'left' }}
+          >
+            {frameFooter}
+          </figcaption>
+        )}
+      </figure>
+    )
+  }
+
+  // ── Variante CARD (bandeau titré complet) : galerie ────────────────────────
+  const bandStyle: CSSProperties = {
+    display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10,
+    flexWrap: 'wrap', margin: '-14px -14px 12px', padding: '10px 14px',
+    background: isMinimal ? 'transparent' : tint.bandBg,
+    borderBottom: isMinimal ? '1px solid var(--border-color)' : `1px solid ${tint.border}`,
+    borderStartStartRadius: 12, borderStartEndRadius: 12,
+  }
+
   return (
-    <div style={wrapStyle}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
-        {/* Groupe gauche : type + état de rendu (+ sémantique). */}
-        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-          <span className="badge badge-secondary artifact-type-badge" dir="auto">
-            <ImageIcon size={12} /> {typeBadge}
-          </span>
-          <span className={`badge ${stateBadge.className} artifact-render-state-badge`} dir="auto" title={stateBadge.label}>
-            {stateBadge.label}
-          </span>
-          {semanticLabel && (
-            <span className={`badge artifact-semantic-badge artifact-semantic-${semantic}`} dir="auto">
-              {semanticLabel}
+    <figure className="artifact-didactic artifact-didactic-card" style={wrapStyle}>
+      {/* Bandeau supérieur : titre (+ filet d'accent) à gauche · badges + comparateur à droite. */}
+      <div className="artifact-didactic-band" style={bandStyle}>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 10, minWidth: 0, flex: '1 1 auto' }}>
+          {!isMinimal && (
+            <span
+              aria-hidden="true"
+              style={{ width: 4, alignSelf: 'stretch', minHeight: 18, borderRadius: 3, background: tint.accent, flexShrink: 0 }}
+            />
+          )}
+          {!isMinimal && (
+            <span
+              className="artifact-didactic-title"
+              dir="auto"
+              title={frameTitle}
+              style={{ fontSize: '0.92rem', fontWeight: 700, color: 'var(--text-heading)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+            >
+              {frameTitle}
             </span>
           )}
+          {isMinimal && badgesGroup}
         </span>
-        {/* Groupe droite : comparateur (familles natives + binaire). */}
-        {canCompare && (
-          <div className="artifact-view-toggle" role="group" style={{ display: 'inline-flex', gap: 4 }}>
-            <button
-              type="button"
-              className={`btn btn-sm ${view === 'structured' ? 'btn-primary' : 'btn-outline-secondary'}`}
-              onClick={() => setView('structured')}
-              style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}
-              dir="auto"
-            >
-              <Layers size={12} /> {t('library.media_structured')}
-            </button>
-            <button
-              type="button"
-              className={`btn btn-sm ${view === 'original' ? 'btn-primary' : 'btn-outline-secondary'}`}
-              onClick={() => setView('original')}
-              style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}
-              dir="auto"
-            >
-              <ImageIcon size={12} /> {t('library.media_original')}
-            </button>
-            <button
-              type="button"
-              className={`btn btn-sm ${view === 'compare' ? 'btn-primary' : 'btn-outline-secondary'}`}
-              onClick={() => setView('compare')}
-              style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}
-              dir="auto"
-            >
-              <GitCompare size={12} /> {t('library.media_compare')}
-            </button>
-          </div>
-        )}
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          {!isMinimal && badgesGroup}
+          {comparator}
+        </span>
       </div>
+
+      {/* Corps : rendu INCHANGÉ (structuré/original/comparer). */}
       {body}
-    </div>
+
+      {/* Pied : phrase d'explication (caption) ou libellé didactique de la sémantique. */}
+      {frameFooter && (
+        <figcaption
+          className="artifact-didactic-footer"
+          dir="auto"
+          style={{ marginTop: 12, paddingTop: 10, borderTop: '1px dashed var(--border-color)', fontSize: '0.82rem', color: 'var(--text-muted)', textAlign: isRtl ? 'right' : 'left', lineHeight: 1.7 }}
+        >
+          {frameFooter}
+        </figcaption>
+      )}
+    </figure>
   )
 }
