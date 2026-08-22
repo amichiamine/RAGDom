@@ -7,6 +7,9 @@ import os
 import sqlite3
 import struct
 import sys
+import threading
+import time
+import types
 
 import pytest
 from fastapi import HTTPException
@@ -484,3 +487,187 @@ def test_historical_chapter_and_folder_confinement_guards():
     outside = client.post("/api/pipeline/start", json={"source_path": "/tmp", "mode": "folder",
                                                        "target_db": TEST_DB})
     assert outside.status_code == 400
+
+
+def test_reprocess_transaction_blocks_concurrent_writer_and_rollback_preserves_it(monkeypatch):
+    """Reproduit la perte historique : backup, écriture tierce, purge, restore whole-db."""
+    from api import routes_pipeline
+    with open("/tmp/d1.pdf", "wb") as stream:
+        stream.write(b"source")
+    entered = threading.Event()
+    release = threading.Event()
+    writer_done = threading.Event()
+    original = routes_pipeline.orchestrator.enqueue_batch
+
+    def failing_enqueue(*args, **kwargs):
+        entered.set()
+        assert release.wait(5)
+        raise RuntimeError("enqueue failed under transaction")
+
+    def concurrent_writer():
+        assert entered.wait(5)
+        conn = db.get_connection(TEST_DB)
+        try:
+            conn.execute("INSERT INTO documents (id,title,filename,source_path,total_pages)"
+                         " VALUES ('concurrent','Concurrent','c.pdf','/tmp/c.pdf',1)")
+            conn.commit()
+        finally:
+            conn.close()
+        writer_done.set()
+
+    monkeypatch.setattr(routes_pipeline.orchestrator, "enqueue_batch", failing_enqueue)
+    writer = threading.Thread(target=concurrent_writer)
+    writer.start()
+    response = {}
+
+    def invoke_reprocess():
+        try:
+            routes_pipeline.reprocess(routes_pipeline.ReprocessBody(
+                db=TEST_DB, scope="page", document_id="d1", page=1))
+        except Exception as exc:  # attendu : provoque le rollback de purge + enqueue
+            response["error"] = exc
+
+    request = threading.Thread(target=invoke_reprocess)
+    request.start()
+    assert entered.wait(5)
+    time.sleep(0.1)
+    assert not writer_done.is_set(), "BEGIN IMMEDIATE doit exclure l'écriture concurrente"
+    release.set()
+    request.join(5); writer.join(5)
+    monkeypatch.setattr(routes_pipeline.orchestrator, "enqueue_batch", original)
+    assert isinstance(response.get("error"), RuntimeError)
+    assert writer_done.is_set()
+    conn = db.get_connection(TEST_DB)
+    assert conn.execute("SELECT COUNT(*) FROM document_chunks WHERE id='d1-c1'").fetchone()[0] == 1
+    assert conn.execute("SELECT COUNT(*) FROM documents WHERE id='concurrent'").fetchone()[0] == 1
+    conn.close()
+    os.remove("/tmp/d1.pdf")
+
+
+@pytest.mark.parametrize("field,value", [
+    ("toc_id", "t2"),
+    ("linked_solution_chunk_id", "d2-c1"),
+])
+def test_accept_rejects_cross_document_chunk_references_before_mutation(field, value):
+    run_id = _create_run({"scope_type": "page", "document_id": "d1", "page": 2})
+    page = client.get("/api/validation/runs/%s/pages/2?db=%s" % (run_id, TEST_DB)).json()
+    page["working"]["chunks"][0][field] = value
+    assert client.put("/api/validation/runs/%s/pages/2?db=%s" % (run_id, TEST_DB),
+                      json={"working": page["working"]}).status_code == 200
+    before = _official_digest()
+    accepted = client.post("/api/validation/runs/%s/accept?db=%s" % (run_id, TEST_DB))
+    assert accepted.status_code == 409
+    assert _official_digest() == before
+
+
+def test_accept_rejects_cross_document_artifact_and_curriculum_links_before_mutation():
+    run_id = _create_run({"scope_type": "page", "document_id": "d1", "page": 2})
+    page = client.get("/api/validation/runs/%s/pages/2?db=%s" % (run_id, TEST_DB)).json()
+    page["working"]["artifacts"][0]["chunk_id"] = "d2-c1"
+    client.put("/api/validation/runs/%s/pages/2?db=%s" % (run_id, TEST_DB),
+               json={"working": page["working"]})
+    before = _official_digest()
+    assert client.post("/api/validation/runs/%s/accept?db=%s" %
+                       (run_id, TEST_DB)).status_code == 409
+    assert _official_digest() == before
+
+    clean_run = _create_run({"scope_type": "page", "document_id": "d1", "page": 2})
+    conn = db.get_connection(TEST_DB)
+    conn.execute("INSERT INTO content_links (id,document_id,link_type,from_id,to_id)"
+                 " VALUES ('cross-link','d1','course_exercise','d1-c1','d2-c1')")
+    conn.commit(); conn.close()
+    before = _official_digest()
+    rejected = client.post("/api/validation/runs/%s/accept?db=%s" % (clean_run, TEST_DB))
+    assert rejected.status_code == 409
+    assert _official_digest() == before
+
+
+def test_accept_rejects_dangling_reference_with_400_before_mutation():
+    run_id = _create_run({"scope_type": "page", "document_id": "d1", "page": 2})
+    page = client.get("/api/validation/runs/%s/pages/2?db=%s" % (run_id, TEST_DB)).json()
+    page["working"]["chunks"][0]["toc_id"] = "missing-toc"
+    client.put("/api/validation/runs/%s/pages/2?db=%s" % (run_id, TEST_DB),
+               json={"working": page["working"]})
+    before = _official_digest()
+    assert client.post("/api/validation/runs/%s/accept?db=%s" %
+                       (run_id, TEST_DB)).status_code == 400
+    assert _official_digest() == before
+
+
+def test_sources_mutations_reject_symlink_escape(tmp_path):
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    outside_pdf = outside / "outside.pdf"
+    outside_pdf.write_bytes(b"outside")
+    link_dir = os.path.join(config.SOURCES_DIR, "validation-escape-dir")
+    link_file = os.path.join(config.SOURCES_DIR, "validation-escape.pdf")
+    try:
+        os.symlink(str(outside), link_dir)
+        os.symlink(str(outside_pdf), link_file)
+        mkdir = client.post("/api/system/sources/folder", json={
+            "rel_path": "validation-escape-dir/new-folder"})
+        upload = client.post("/api/system/sources/upload", data={"rel_path": "validation-escape-dir"},
+                             files={"file": ("attack.pdf", b"payload", "application/pdf")})
+        delete = client.delete("/api/system/sources", params={"rel_path": "validation-escape.pdf"})
+        assert mkdir.status_code == upload.status_code == delete.status_code == 400
+        assert outside_pdf.read_bytes() == b"outside"
+        assert not (outside / "new-folder").exists()
+        assert not (outside / "attack.pdf").exists()
+    finally:
+        for path in (link_file, link_dir):
+            try:
+                os.remove(path)
+            except FileNotFoundError:
+                pass
+
+
+def test_terminal_run_rejects_late_benchmark_attachment():
+    run_id = _create_run({"scope_type": "page", "document_id": "d1", "page": 2})
+    assert client.post("/api/validation/runs/%s/accept?db=%s" %
+                       (run_id, TEST_DB)).status_code == 200
+    late = client.post("/api/validation/runs/%s/benchmarks?db=%s" % (run_id, TEST_DB),
+                       json={"benchmark_ids": ["b1"]})
+    assert late.status_code == 409
+    conn = db.get_connection(TEST_DB)
+    assert conn.execute("SELECT validation_run_id FROM processing_benchmarks WHERE id='b1'").fetchone()[0] is None
+    conn.close()
+
+
+def test_vector_state_is_not_ready_when_backfill_fails(monkeypatch):
+    conn = sqlite3.connect(":memory:")
+    conn.execute("CREATE TABLE document_chunks(id TEXT PRIMARY KEY, embedding_vector BLOB)")
+    conn.execute("INSERT INTO document_chunks VALUES ('c1', ?)", (b"vector",))
+    monkeypatch.setitem(sys.modules, "sqlite_vec", types.SimpleNamespace(load=lambda connection: None))
+    monkeypatch.setattr(db, "SCHEMA_VEC", "CREATE TABLE vec_chunks(chunk_id TEXT PRIMARY KEY);")
+    assert db.init_vector_support(conn, force_strict=False) == "sqlite-vec"
+    state = db.vector_state()
+    assert state["status"] == "loaded_not_ready"
+    assert "backfill" in state["message"]
+    conn.close()
+
+
+def test_migration_repairs_partial_schema_even_when_versions_are_declared():
+    partial = "Validation_Partial_Declared.sqlite"
+    path = os.path.join(config.DATABASES_DIR, partial)
+    for suffix in ("", "-wal", "-shm"):
+        try:
+            os.remove(path + suffix)
+        except FileNotFoundError:
+            pass
+    conn = db.create_database(partial)
+    assert conn.execute("SELECT COUNT(*) FROM schema_version WHERE version IN (5,6)").fetchone()[0] == 2
+    conn.execute("DROP TABLE validation_snapshots")
+    conn.commit(); conn.close()
+    try:
+        repaired = db.get_connection(partial)
+        assert "document_id" in [r[1] for r in repaired.execute("PRAGMA table_info(validation_events)")]
+        assert repaired.execute("SELECT 1 FROM sqlite_master WHERE type='table'"
+                                " AND name='validation_snapshots'").fetchone()
+        assert repaired.execute("SELECT COUNT(*) FROM schema_version WHERE version IN (5,6)").fetchone()[0] == 2
+        repaired.close()
+    finally:
+        for suffix in ("", "-wal", "-shm"):
+            try:
+                os.remove(path + suffix)
+            except FileNotFoundError:
+                pass
