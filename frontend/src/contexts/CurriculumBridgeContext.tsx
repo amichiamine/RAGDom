@@ -6,8 +6,8 @@ import {
 /** Les 6 onglets du workspace curriculum (pixel-perfect, §5.2.4). */
 export type TabKey = 'matrix' | 'programme' | 'cours' | 'exercices' | 'evaluations' | 'scans'
 
-/** Filtre croisé de la banque d'exercices (pont cours / pont galerie). */
-export interface ExoFilter { coursId?: string; page?: number }
+/** Filtre croisé de la banque d'exercices (pont cours / pont galerie / pont corrigé→énoncé). */
+export interface ExoFilter { coursId?: string; page?: number; chunkId?: string }
 
 interface CurriculumBridgeState {
   activeTab: TabKey
@@ -24,6 +24,9 @@ interface CurriculumBridgeValue extends CurriculumBridgeState {
   jumpTo: (tab: TabKey, targetId: string) => void
   filterExercicesByCours: (coursId: string) => void
   filterExercicesByPage: (page: number) => void
+  /** Pont bidirectionnel corrigé/scan → énoncé précis : bascule Exercices, cible le
+   *  chunk (id `exo_{chunkId}`), pose le halo doré (même moteur que `jumpTo`). */
+  jumpToExercise: (chunkId: string) => void
   setTrimFilter: (trim: number) => void
   setSearch: (q: string) => void
   toggleExpanded: (id: string) => void
@@ -81,6 +84,27 @@ export function CurriculumBridgeProvider({
     setActiveTab('exercices')
   }, [])
 
+  /**
+   * Pont corrigé→énoncé (navigation relationnelle bidirectionnelle) : bascule sur
+   * l'onglet Exercices SANS filtre restrictif (le chunk cible pourrait ne pas
+   * correspondre au filtre courant), puis pose le halo doré sur la carte de
+   * l'exercice (id `exo_{chunkId}`) via le même moteur que `jumpTo`.
+   */
+  const jumpToExercise = useCallback((chunkId: string) => {
+    setExoFilter(null)
+    setActiveTab('exercices')
+    const targetId = `exo_${chunkId}`
+    setExpandedIds(prev => {
+      if (prev.has(targetId)) return prev
+      const next = new Set(prev)
+      next.add(targetId)
+      return next
+    })
+    setHighlightedId(targetId)
+    if (highlightTimer.current) window.clearTimeout(highlightTimer.current)
+    highlightTimer.current = window.setTimeout(() => setHighlightedId(null), HIGHLIGHT_MS)
+  }, [])
+
   const setTrimFilter = useCallback((trim: number) => setTrim(trim), [])
   const setSearch = useCallback((q: string) => setSearchQuery(q), [])
 
@@ -111,11 +135,11 @@ export function CurriculumBridgeProvider({
 
   const value = useMemo<CurriculumBridgeValue>(() => ({
     activeTab, trimFilter, searchQuery, highlightedId, exoFilter, expandedIds,
-    switchTab, jumpTo, filterExercicesByCours, filterExercicesByPage,
+    switchTab, jumpTo, filterExercicesByCours, filterExercicesByPage, jumpToExercise,
     setTrimFilter, setSearch, toggleExpanded, expandAll, clearHighlight,
   }), [
     activeTab, trimFilter, searchQuery, highlightedId, exoFilter, expandedIds,
-    switchTab, jumpTo, filterExercicesByCours, filterExercicesByPage,
+    switchTab, jumpTo, filterExercicesByCours, filterExercicesByPage, jumpToExercise,
     setTrimFilter, setSearch, toggleExpanded, expandAll, clearHighlight,
   ])
 

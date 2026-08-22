@@ -1,4 +1,4 @@
-# CONTEXT — État complet du projet RAGDom (MAJ 2026-08-22 00:50 UTC+1)
+# CONTEXT — État complet du projet RAGDom (MAJ 2026-08-22 16:05 UTC+1 — V4.3)
 
 ## Identité du projet
 Bibliothèque numérique scientifique **local-first** + version web complète.

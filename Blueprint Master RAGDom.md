@@ -316,6 +316,8 @@ La promotion d'une famille Tier 2/3 → Tier 1 se fait exclusivement par add-on 
 
 **Couche 3bis — SolutionLinker (V3.1, passe post-document) :** une fois toutes les pages du document au statut READY, une passe de réconciliation algorithmique lie les énoncés à leurs corrigés de fin de manuel (`linked_solution_chunk_id`, `has_solution`) et peuple `content_links` si les tables curriculum sont actives. Voir tech_specs §4.4.
 
+**Couche 2 — variante parallèle intra-page (Phase 6 / D4-B, add-only — MAJ 2026-08-22, source : `engines/sci-engine/pipeline/layer_2_extract_v2.py`) :** activée UNIQUEMENT si `RAGDOM_INTRA_PAGE_WORKERS >= 2`, elle parallélise le traitement des **blocs** (images/formules/tableaux) via un pool borné 2-3 threads tandis que le texte/Markdown reste séquentiel, avec ordre de sortie déterministe et moteurs `rapid-*` sérialisés par verrou. **Équivalence des sorties avec la v1 séquentielle désormais stricte :** la v2 exécute la **MÊME qualification VLM séquentielle post-pool** et le **MÊME ancrage in-situ** que la v1 par réutilisation directe des helpers v1 (`_vlm_qualifier`, `_apply_qualification`, `_anchor_artifacts`, seuil `_AREA_RATIO_MAX`) — zéro duplication de logique, exclusion identique des cadres > 0,70 d'`area_ratio`, `raw_binary` jamais touché. La file séquentielle stricte (D4-A : une seule page en vol) n'est pas modifiée.
+
 ### **5.3 Schéma Base de Données SQLite (Source de Vérité)**
 
 *Note : Le DDL complet et exhaustif, incluant tous les indexes et triggers, est défini dans `tech_specs.md` (Section 1). Ce fichier fait autorité pour l'implémentation.*
@@ -376,6 +378,14 @@ Source : `Dockerfile`, `backend/main.py`. Un build = un artefact = un processus 
   * `geojson_map` → MapLibre GL
   * `dense_illustration`, `dicom_slice` → OpenSeadragon
 
+* **Application du contrat de rendu §12 (MAJ 2026-08-22 — source : `frontend/src/components/library/ArtifactRenderer.tsx`) :**
+  * `render_config_json.renderer` est lu **EN PRIORITÉ** pour choisir le renderer (dictionnaire renderer → famille), avec repli sur l'heuristique de type quand le champ est absent (cf. tech_specs §12).
+  * **Renderers embarqués en v1 :** `mermaid` (flowchart) et `plotly.js-dist-min` (signal_waveform) sont **installés** (imports dynamiques, chunks async) → rendu structuré natif ; `data_table` rendu via **tanstack-table** (tri par colonne) avec repli Markdown ; `latex_formula`/`matrix` rendus en **KaTeX même sans binaire** (source structurée seule → plus masquée) ; `geometry_vector` en SVG sanitisé.
+  * **Visionneuses hors périmètre v1 :** `smiles_chem` (ketcher) et `code_snippet` (shiki) restent **NON installés** → WebP original + panneau source repliable + étiquette explicite « visionneuse non installée » (tech_specs §9 Note Tiering).
+  * **Badge d'état de rendu** sur chaque artefact — *structuré* / *original (repli)* / *visionneuse non installée* — calculé sur le rendu **EFFECTIF** (async mermaid/plotly compris), en plus du badge de **type** affiché aussi in-situ, et du badge sémantique (`render_config_json.semantic`).
+  * **Comparateur** *structuré / original / comparaison* étendu aux familles natives incluant mermaid et plotly (familles natives + binaire présent).
+  * Résolution des ancres `asset://artifacts/{id}` et `asset://figures/{nom}` dans `lib/markdown.ts` (SideBySideViewer / SearchStudio / AskStudio) → plus d'images cassées.
+
 **Structure des 6 Onglets de la Bibliothèque (Norme Pixel-Perfect issue de `library.php`) :**
 1. **المصفوفة الشاملة 360° (Curriculum Matrix) :** Matrice relationnelle à 3 colonnes trimestres avec compteurs et rangée de ponts (`.bridge-cours`, `.bridge-exo`, `.bridge-prog`, `.bridge-scan`, `.bridge-eval`).
 2. **المنهاج والتدرج السنوي (Programme MEN 2G) :** Référentiel des مقاطع, compétences et ressources constituantes.
@@ -385,6 +395,12 @@ Source : `Dockerfile`, `backend/main.py`. Un build = un artefact = un processus 
 6. **المستودع البصري (Galerie des Scans) :** 272 documents scannés HD (201 livre + 71 examens) avec zoom plein écran (`#masterImageModal`).
 
 *Note (V3.1 — D1-B) : les compteurs 690 / 27 / 272 ci-dessus sont des valeurs d'exemple du corpus 2G de référence, jamais des constantes. Ces onglets ne s'activent que si les tables curriculum de la base active sont peuplées (`GET /api/library/curriculum`) — sinon la Vue 2 bascule en Mode Repli Générique (Frontend_UI_Specs §5.2).*
+
+*Structure & navigation des onglets curriculum (MAJ 2026-08-22 — source : `frontend/src/components/library/curriculum/tabs/`) :*
+* *Capsules de plages de pages fiabilisées côté client : le `page_end` de l'API est validé (cohérent et ne débordant pas la section suivante de niveau ≤ N) puis recalculé par niveaux sinon, borné par la dernière page réellement couverte par le TOC (jamais `total_pages`) → affichage « ص X - Y » pour une vraie plage, « ص X » pour une leçon d'une seule page (fini les « ص X - 210 » aberrantes).*
+* *Badges de type pédagogique **effectif** dans l'onglet Cours, avec ponts dorés (halo) vers Exercices/Évaluations/Programme/Scans — aucun contenu masqué (le contenu non-cours enfoui dans une plage de cours reste atteignable).*
+* *Navigation relationnelle **bidirectionnelle** exercice↔corrigé : priorité au `linked_solution_chunk_id` exposé par le backend, puis repli sur le lien `course_exercise` du SolutionLinker, puis sur un `pedagogical_index` identique ; index inverse corrigé→énoncé construit sur la même chaîne.*
+* *Pont chunk→scan de la page, et **préchargement des artefacts par plage de pages** du chapitre (fini le repli image transitoire des ancres in-situ).*
 
 **SearchStudio & AskStudio (V3.2) :**
 * **SearchStudio multi-bases :** cases à cocher des bases actives → bascule automatique `hybrid` (1 base) / `hybrid-multi` (n bases), badge `database_filename` sur chaque résultat.
@@ -600,9 +616,9 @@ Source : `Dockerfile`, `backend/main.py`. Un build = un artefact = un processus 
 ```
 
 #### `GET /api/library/chunks?db={nom.sqlite}&document_id={id}&page=1&limit=50`
-**Description :** Retourne les chunks **paginés** (tech_specs §14) d'un document. Filtres optionnels : `page_number`, `pedagogical_type` (`exercise` = raccourci solved+unsolved), `page_start`, `page_end`, `toc_id`.
+**Description :** Retourne les chunks **paginés** (tech_specs §14) d'un document. Filtres optionnels : `page_number`, `pedagogical_type` (`exercise` = raccourci solved+unsolved), `page_start`, `page_end`, `toc_id`, `has_solution` (MAJ 2026-08-22 — booléen : tri des exercices résolus/non-résolus).
 
-**Réponse 200 (MAJ 2026-08-22 — forme `{data, pagination}` + alias legacy `chunks`) :**
+**Réponse 200 (MAJ 2026-08-22 — forme `{data, pagination}` + alias legacy `chunks` ; `linked_solution_chunk_id` + `toc_id` exposés par chunk — source : `backend/api/routes_library.py`) :**
 ```json
 {
   "data": [
@@ -617,13 +633,16 @@ Source : `Dockerfile`, `backend/main.py`. Un build = un artefact = un processus 
       "has_solution": 0,
       "is_human_edited": 0,
       "updated_at": "2026-08-19T10:00:00",
-      "token_count": 412
+      "token_count": 412,
+      "linked_solution_chunk_id": null,
+      "toc_id": "uuid"
     }
   ],
   "chunks": [ "…alias legacy = même tableau que data…" ],
   "pagination": { "page": 1, "limit": 50, "total": 128, "total_pages": 3 }
 }
 ```
+*Liaisons relationnelles (MAJ 2026-08-22) : `linked_solution_chunk_id` (énoncé → corrigé, peuplé par la Couche 3bis SolutionLinker) et `toc_id` (rattachement au sommaire) rejoignent le payload pour que l'UI câble la navigation exercice↔solution et chapitre↔chunk sans requête supplémentaire ; `null` tant que la liaison n'existe pas.*
 
 #### `GET /api/library/artifacts?db={nom.sqlite}&chunk_id={id}`
 **Description :** Retourne les artefacts associés à un chunk.
@@ -834,6 +853,8 @@ data: {"batch_id":"uuid","page_number":5,"error":"UNBALANCED_LATEX","details":"M
 **Sémantique des états `INDEXED` vs `READY` (V3.1) :** `INDEXED` = chunks + artefacts persistés et FTS synchronisé (fin de l'écriture Couche 7) ; `READY` = benchmarks Couche 6 écrits et checkpoint `/pipeline-set/` purgé — état terminal. La transition `INDEXED → READY` est automatique, dans la même transaction de clôture.
 
 **Sommaire de repli dérivé des titres au finalize (MAJ 2026-08-22 — source : `backend/core/orchestrator._finalize_batches` / `_build_toc_from_headings`) :** à la clôture d'un document (toutes les pages `READY`), si le document **n'a AUCUN sommaire natif** (`document_toc` vide pour ce document), un TOC de repli est **dérivé des titres Markdown** (`##/###`) des chunks — une entrée par page (granularité sommaire, pas un index exhaustif) — puis les chunks du périmètre y sont reliés (`toc_id`). Garde-fous : **jamais d'écrasement d'un TOC natif** (n'écrit rien si `document_toc` est déjà peuplé) ; idempotent (recalculé à chaque finalize complet, compatible reprocess).
+
+**Construction incrémentale + plages fiables (MAJ 2026-08-22 — source : `backend/core/orchestrator._maybe_build_toc_incremental` / `layer_1_triage`) :** le sommaire de repli n'attend plus le finalize — il est **reconstruit AU FIL DE L'EAU pendant l'ingestion**, cadencé par la variable d'env `RAGDOM_TOC_INCREMENTAL_EVERY` (défaut **10** pages `READY` par document ; `0` = désactivé → construction au finalize uniquement, comportement historique), avec reconstruction complète finale au finalize (capte les derniers titres et répare toute dérive d'un reprocess scopé). L'état « sommaire natif ? » est mémoïsé par document (un seul `fitz.get_toc()` par passe de file), et un sommaire natif reste intouchable. Les **plages de pages sont désormais fiables** : `page_end` d'une entrée de niveau N = (page du **prochain titre de niveau ≤ N commençant STRICTEMENT plus loin**) − 1, borné au document — fini les plages aberrantes « X → dernière page » causées par des titres de même niveau co-localisés. Le **TOC natif reçoit lui aussi un `page_end` calculé** (côté `layer_1_triage`, même règle) : plus de `page_end = NULL` forçant l'UI et les agrégats SQL à un `COALESCE` à 100000 qui faisait « déborder » un chapitre sur tout le reste du document.
 
 ### **7.5 Routes LLM Key Manager (/api/llm)**
 

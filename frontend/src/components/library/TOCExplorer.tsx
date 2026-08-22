@@ -5,6 +5,14 @@ interface Props {
   nodes: TocNode[]
   onSelectPage: (page: number) => void
   activePage: number | null
+  /**
+   * Navigation RELATIONNELLE optionnelle « entrée de sommaire → cours » (défaut 3).
+   * Quand elle est fournie, un clic sur le titre d'un nœud remonte le nœud complet
+   * (id/level/pages) à l'appelant, qui peut basculer vers l'onglet Cours et illuminer
+   * la carte correspondante (`cours_{toc_id}`). Sans ce callback, le comportement
+   * historique (sélection de page) est INCHANGÉ — extension purement additive.
+   */
+  onSelectNode?: (node: TocNode) => void
 }
 
 function buildTree(flat: TocNode[]): TocNode[] {
@@ -18,10 +26,17 @@ function buildTree(flat: TocNode[]): TocNode[] {
   return roots
 }
 
-function TocItem({ node, onSelectPage, activePage, depth }: { node: TocNode; onSelectPage: (p: number) => void; activePage: number | null; depth: number }) {
+function TocItem({ node, onSelectPage, onSelectNode, activePage, depth }: { node: TocNode; onSelectPage: (p: number) => void; onSelectNode?: (n: TocNode) => void; activePage: number | null; depth: number }) {
   const [expanded, setExpanded] = useState(depth < 1)
   const hasChildren = !!node.children && node.children.length > 0
   const isActive = activePage !== null && activePage === node.page_start
+
+  // Un clic sur le titre : navigation relationnelle vers le cours si l'appelant
+  // l'a activée (onSelectNode), sinon sélection de page (comportement historique).
+  const handleTitleClick = () => {
+    if (onSelectNode) onSelectNode(node)
+    else onSelectPage(node.page_start)
+  }
 
   return (
     <li role="treeitem" aria-expanded={hasChildren ? expanded : undefined}>
@@ -44,18 +59,19 @@ function TocItem({ node, onSelectPage, activePage, depth }: { node: TocNode; onS
         ) : <span style={{ width: 18 }} />}
         <span
           style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
-          onClick={() => onSelectPage(node.page_start)}
+          onClick={handleTitleClick}
           title={node.title}
           dir="auto"
         >
           {node.title}
         </span>
+        {/* Le badge de page conserve TOUJOURS la sélection de page (aller au scan). */}
         <span className="badge badge-subtle" onClick={() => onSelectPage(node.page_start)}>ص {node.page_start}</span>
       </div>
       {hasChildren && expanded && (
         <ul role="group" style={{ listStyle: 'none', margin: 0, padding: 0 }}>
           {node.children!.map(c => (
-            <TocItem key={c.id} node={c} onSelectPage={onSelectPage} activePage={activePage} depth={depth + 1} />
+            <TocItem key={c.id} node={c} onSelectPage={onSelectPage} onSelectNode={onSelectNode} activePage={activePage} depth={depth + 1} />
           ))}
         </ul>
       )}
@@ -63,12 +79,12 @@ function TocItem({ node, onSelectPage, activePage, depth }: { node: TocNode; onS
   )
 }
 
-export default function TOCExplorer({ nodes, onSelectPage, activePage }: Props) {
+export default function TOCExplorer({ nodes, onSelectPage, activePage, onSelectNode }: Props) {
   const tree = buildTree(nodes)
   return (
     <ul role="tree" style={{ listStyle: 'none', margin: 0, padding: 0 }}>
       {tree.map(n => (
-        <TocItem key={n.id} node={n} onSelectPage={onSelectPage} activePage={activePage} depth={0} />
+        <TocItem key={n.id} node={n} onSelectPage={onSelectPage} onSelectNode={onSelectNode} activePage={activePage} depth={0} />
       ))}
     </ul>
   )

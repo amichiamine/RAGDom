@@ -79,7 +79,8 @@ def facets(db_name: str = Query(alias="db")):
 def chunks(db_name: str = Query(alias="db"), document_id: str = Query(...),
            page_number: Optional[int] = None, pedagogical_type: Optional[str] = None,
            page_start: Optional[int] = None, page_end: Optional[int] = None,
-           toc_id: Optional[str] = None, page: int = 1, limit: int = Query(50, le=200)):
+           toc_id: Optional[str] = None, has_solution: Optional[bool] = None,
+           page: int = 1, limit: int = Query(50, le=200)):
     conn = _conn(db_name)
     try:
         where, args = "document_id=?", [document_id]
@@ -101,16 +102,25 @@ def chunks(db_name: str = Query(alias="db"), document_id: str = Query(...),
         if toc_id is not None:
             where += " AND toc_id=?"
             args.append(toc_id)
+        if has_solution is not None:  # (D) tri des exercices résolus/non-résolus
+            where += " AND has_solution=?"
+            args.append(1 if has_solution else 0)
         total = conn.execute("SELECT COUNT(*) FROM document_chunks WHERE " + where, args).fetchone()[0]
+        # (D) Liaisons relationnelles exposées : linked_solution_chunk_id (énoncé →
+        # corrigé, peuplé par la Couche 3bis SolutionLinker) et toc_id (rattachement
+        # au sommaire) rejoignent le payload pour que l'UI câble la navigation
+        # exercice↔solution et chapitre↔chunk sans requête supplémentaire.
         rows = conn.execute(
             "SELECT id, page_number, chunk_index, section_title, content_markdown, pedagogical_type,"
-            " pedagogical_index, has_solution, is_human_edited, updated_at, token_count"
+            " pedagogical_index, has_solution, is_human_edited, updated_at, token_count,"
+            " linked_solution_chunk_id, toc_id"
             " FROM document_chunks WHERE %s ORDER BY page_number, chunk_index LIMIT ? OFFSET ?" % where,
             args + [limit, (page - 1) * limit]).fetchall()
         data = [{"id": r[0], "page_number": r[1], "chunk_index": r[2], "section_title": r[3],
                  "content_markdown": r[4], "pedagogical_type": r[5], "pedagogical_index": r[6],
                  "has_solution": r[7], "is_human_edited": r[8], "updated_at": r[9],
-                 "token_count": r[10]} for r in rows]
+                 "token_count": r[10], "linked_solution_chunk_id": r[11], "toc_id": r[12]}
+                for r in rows]
         return {"data": data, "chunks": data, "pagination": _paginate(page, limit, total)}
     finally:
         conn.close()

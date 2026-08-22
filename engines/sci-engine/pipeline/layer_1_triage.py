@@ -63,11 +63,32 @@ def run(ctx: dict) -> dict:
                               "bbox": [0, 0, ctx["width_px"], ctx["height_px"]], "confidence": 0.5}]
 
     # TOC : outlines natifs, extraits une fois par document (au passage de la page 1).
+    # page_end CALCULÉ (V4.3, correctif (B) côté natif) : fin d'une entrée de niveau N
+    # = (page_start du prochain signet de niveau <= N ET commençant plus loin) - 1,
+    # bornée au document. Sans ce calcul les entrées natives restaient à page_end=NULL,
+    # forçant l'UI et les agrégats SQL (page-scans) à un COALESCE à 100000 → un chapitre
+    # « débordait » sur tout le reste du document (mêmes plages incohérentes que (B)).
     toc_entries = []
     if ctx["job"]["page_number"] == 1:
-        for level, title, page_start in (doc.get_toc() or []):
-            toc_entries.append({"level": int(level), "title": str(title).strip(),
-                                "page_start": int(page_start), "page_end": None})
+        raw_toc = doc.get_toc() or []
+        try:
+            total_pages = int(ctx.get("document", {}).get("total_pages") or doc.page_count)
+        except Exception:  # noqa: BLE001 — page_count indisponible : borne repli
+            total_pages = None
+        parsed = [{"level": int(lvl), "title": str(title).strip(), "page_start": int(ps)}
+                  for lvl, title, ps in raw_toc]
+        for i, entry in enumerate(parsed):
+            nxt = next((n["page_start"] for n in parsed[i + 1:]
+                        if n["level"] <= entry["level"] and n["page_start"] > entry["page_start"]), None)
+            if nxt is not None:
+                page_end = nxt - 1
+            else:
+                page_end = total_pages if total_pages else entry["page_start"]
+            # Bornage défensif : jamais de plage inversée ni au-delà du document.
+            upper = total_pages if total_pages else page_end
+            page_end = max(entry["page_start"], min(page_end, upper))
+            toc_entries.append({"level": entry["level"], "title": entry["title"],
+                                "page_start": entry["page_start"], "page_end": page_end})
 
     ctx.update(layout_blocks=layout_blocks, toc_entries=toc_entries,
                triage_latency_ms=int((time.perf_counter() - started) * 1000))

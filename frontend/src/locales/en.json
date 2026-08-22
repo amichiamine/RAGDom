@@ -132,10 +132,21 @@
     "semantic_demonstration": "Demonstration",
     "semantic_illustration": "Illustration",
     "semantic_exercise_support": "Exercise support",
+    "render_state_structured": "Structured",
+    "render_state_original": "Original",
+    "render_state_viewer_missing": "Viewer not installed",
+    "media_viewer_not_installed": "The viewer for this format is not installed — the structured source is available below.",
     "eval_loading": "… Loading assessment models",
     "no_evaluations_typed": "No assessment subject detected by automatic typing in this database.",
     "eval_subject_title": "Assessment subject",
-    "eval_correction_only": "Assessment solution"
+    "eval_correction_only": "Assessment solution",
+    "nav_open_in_exercices": "Open in Exercises",
+    "nav_open_in_evaluations": "Open in Assessments",
+    "nav_goto_exercise": "→ Linked exercise",
+    "nav_goto_solution": "→ Linked solution",
+    "nav_goto_scan": "Scan p. {page}",
+    "range_single_page": "p. {page}",
+    "range_pages": "p. {start} – {end}"
   },
   "search": {
     "placeholder": "Search this database...",

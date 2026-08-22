@@ -1,3 +1,32 @@
+# 2026-08-22 — V4.2 / V4.3 : fix boucle explode + conformité multimodale complète
+
+- **V4.2 (déployé)** : `/pipeline/requalify-artifacts` excluait mal les cadres déjà
+  explosés (`vlm_exploded_at` absent du filtre) → mêmes 12 cadres re-sélectionnés à
+  chaque passe, doublons, boucle sans convergence. Exclusion systématique (même sous
+  `retry_failed`) + garde d'idempotence dans `_explode_fullpage_frames`. Vérifié en
+  production (sélection passée aux cadres neufs). Bases enrichies republiées en assets
+  de la release `corpus-1am-v1` AVANT redéploiement (disque Render éphémère).
+- **V4.3 backend** : équivalence v1/v2 de la Couche 2 rétablie (qualification VLM +
+  ancrage in-situ câblés dans layer_2_extract_v2, helpers v1 réutilisés) ; sommaire
+  dérivé construit incrémentalement pendant l'ingestion (`RAGDOM_TOC_INCREMENTAL_EVERY`,
+  défaut 10 pages) ; calcul `page_end` corrigé (fini les plages « X-210 » aberrantes,
+  TOC natif doté d'un page_end calculé) ; classification arabe renforcée (harakat,
+  marqueurs nus تمرين/نشاط/وضعية, solutions avant exercices, faux positifs BAC/Tp
+  éliminés) ; `GET /library/chunks` expose `linked_solution_chunk_id` + `toc_id` +
+  filtre `has_solution` ; `scripts/fetch_published_dbs.mjs` + `npm run fetch:dbs`
+  (seed local des bases publiées — la Library locale n'est plus vide).
+- **V4.3 frontend** : contrat §12 appliqué (`render_config_json.renderer` lu en
+  priorité) ; mermaid + plotly embarqués (imports dynamiques) ; badge d'ÉTAT DE RENDU
+  sur chaque artefact (structuré / original / visionneuse non installée) + badge de
+  type in-situ ; data_table via tanstack-table (tri, repli markdown) ; comparateur
+  étendu à mermaid/plotly ; ancres asset:// résolues dans lib/markdown.ts
+  (SideBySideViewer) ; formules sans binaire rendues en KaTeX ; capsules de plages de
+  pages fiabilisées ; badges de type effectif + ponts dorés dans Cours ; navigation
+  bidirectionnelle exercice↔corrigé + pont chunk→scan ; préchargement des artefacts
+  par plage (fini le repli image transitoire).
+- Qualité : pytest 73/73 verts hors artefacts sandbox (baseline identique avant/après),
+  tsc strict 0 erreur (harnais jsdelivr, registre npm indisponible dans le sandbox).
+
 # Changelog RAGDom — V3.0 → V3.1 → V3.1.1 → V3.2 → V3.3 → V3.4 → V3.5
 
 **Fichier :** `/docs/ragdom/04_state/changelog.md`

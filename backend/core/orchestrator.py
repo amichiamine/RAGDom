@@ -12,6 +12,7 @@ Python 3.9+.
 """
 import gc
 import logging
+import os
 import threading
 import time
 import uuid
@@ -46,6 +47,12 @@ class PipelineOrchestrator:
         self._stop_requested = False
         self._current: Optional[dict] = None
         self._listeners: List[Callable[[str, dict], None]] = []
+        # État « sommaire natif ? » mémoïsé par document (clé document_id → bool).
+        # Évite de rouvrir le PDF via fitz à chaque passe TOC incrémentale (V4.3).
+        self._native_toc_cache: Dict[str, bool] = {}
+        # Compteur de pages READY par document depuis la dernière reconstruction
+        # incrémentale du sommaire dérivé (V4.3, correctif structure documentaire (A)).
+        self._toc_pages_since: Dict[str, int] = {}
 
     # ── Abonnement SSE (routes_pipeline s'y branche en Phase 2) ──
     def subscribe(self, listener: Callable[[str, dict], None]) -> None:
@@ -132,13 +139,66 @@ class PipelineOrchestrator:
                 outcome = self._process_page(db_name, manifest, job)
                 if outcome == "READY":
                     processed += 1
+                    # (A) Structure documentaire construite AU FIL DE L'EAU : le
+                    # sommaire dérivé existe pendant l'ingestion, plus seulement au
+                    # finalize. Cadencé (RAGDOM_TOC_INCREMENTAL_EVERY pages) et
+                    # dégradé gracieusement — une erreur ici n'arrête jamais la file.
+                    self._maybe_build_toc_incremental(db_name, job["document_id"])
                 elif outcome in ("QUARANTINE", "INVALID_SOURCE"):
                     quarantined += 1
             self._finalize_batches(db_name, manifest)
             return {"processed": processed, "quarantined": quarantined, "stopped": self._stop_requested}
         finally:
+            # Caches d'exécution (durée de vie = une passe de file) purgés : une
+            # ré-ingestion ultérieure ré-évaluera l'état natif du PDF à neuf.
+            self._toc_pages_since.clear()
+            self._native_toc_cache.clear()
             with self._lock:
                 self._running = False
+
+    def _is_native_toc(self, conn, document_id: str) -> bool:
+        """État « le PDF porte-t-il des signets natifs ? » mémoïsé par document.
+
+        Ouvre le PDF via fitz au plus une fois par document et par exécution de la
+        file : la passe TOC incrémentale peut ainsi être appelée à chaque page sans
+        coût d'I/O répété. Dégradation gracieuse (source absente → non-natif)."""
+        if document_id in self._native_toc_cache:
+            return self._native_toc_cache[document_id]
+        row = conn.execute("SELECT source_path FROM documents WHERE id=?",
+                           (document_id,)).fetchone()
+        native = _has_native_toc(row[0] if row else None)
+        self._native_toc_cache[document_id] = native
+        return native
+
+    def _maybe_build_toc_incremental(self, db_name: str, document_id: str) -> None:
+        """Reconstruit le sommaire dérivé toutes les N pages READY d'un document.
+
+        N = RAGDOM_TOC_INCREMENTAL_EVERY (défaut 10 ; 0 = désactivé → construction
+        au finalize uniquement, comportement historique). Le sommaire natif n'est
+        JAMAIS écrasé (décision D actée). Idempotent : chaque passe est un DELETE +
+        rebuild complet, donc les plages restent cohérentes tout au long de l'ingestion."""
+        try:
+            every = int(os.environ.get("RAGDOM_TOC_INCREMENTAL_EVERY", "10"))
+        except ValueError:
+            every = 10
+        if every <= 0:
+            return  # construction incrémentale désactivée
+        count = self._toc_pages_since.get(document_id, 0) + 1
+        if count < every:
+            self._toc_pages_since[document_id] = count
+            return
+        self._toc_pages_since[document_id] = 0
+        conn = db.get_connection(db_name)
+        try:
+            if self._is_native_toc(conn, document_id):
+                return  # sommaire natif : intouchable
+            built = _build_toc_from_headings(conn, document_id, native_toc=False)
+            if built:
+                logger.info("Sommaire dérivé incrémental %s : %d entrées", document_id, built)
+        except Exception:  # noqa: BLE001 — la structure ne doit jamais tuer la file
+            logger.exception("Construction TOC incrémentale en échec (document %s)", document_id)
+        finally:
+            conn.close()
 
     def _fetch_document(self, db_name: str, document_id: str) -> dict:
         conn = db.get_connection(db_name)
@@ -182,7 +242,12 @@ class PipelineOrchestrator:
                         logger.info("SolutionLinker %s : %d liaison(s)", doc_id, linked)
                     except FileNotFoundError:
                         logger.warning("layer_3bis_link absent du moteur %s", manifest["id"])
-                    built = _build_toc_from_headings(conn, doc_id)
+                    # Sommaire dérivé RECONSTRUIT une dernière fois, complet : capte
+                    # les titres des dernières pages (au-delà du dernier lot incrémental)
+                    # et répare toute dérive laissée par un reprocess scopé. Réutilise
+                    # l'état natif mémoïsé quand il existe (économie d'I/O fitz).
+                    built = _build_toc_from_headings(
+                        conn, doc_id, native_toc=self._native_toc_cache.get(doc_id))
                     if built:
                         logger.info("Sommaire dérivé des titres pour %s : %d entrées", doc_id, built)
                 artifacts = conn.execute(
@@ -316,25 +381,31 @@ def _has_native_toc(source_path) -> bool:
         return False
 
 
-def _build_toc_from_headings(conn, doc_id: str) -> int:
+def _build_toc_from_headings(conn, doc_id: str, native_toc: Optional[bool] = None) -> int:
     """Sommaire de REPLI (documents scannés sans signets natifs) : dérivé des
     titres Markdown (## niveau 1, ### niveau 2) produits par l'extraction.
 
     Ne touche JAMAIS un sommaire NATIF (le PDF porte des signets fitz) : dans ce
     cas la fonction est inerte. Pour un document NON-natif, le sommaire dérivé est
-    intégralement reconstruit à chaque finalize (DELETE puis rebuild) — idempotent
+    intégralement reconstruit à chaque appel (DELETE puis rebuild) — idempotent
     et réparateur : après un reprocess chapter qui a laissé des trous dans le TOC
     dérivé, celui-ci est recalculé sans dérive. Relie les chunks à leur entrée.
+
+    `native_toc` (V4.3) : état natif pré-calculé et mémoïsé par l'appelant. Évite
+    de rouvrir le PDF via fitz à chaque passe incrémentale (structure construite au
+    fil de l'ingestion, pas seulement au finalize). Si None, l'état est déterminé ici.
     """
     import re as _re
     import uuid as _uuid
     global _HEADING_RE
     if _HEADING_RE is None:
         _HEADING_RE = _re.compile(r"^(#{2,3})\s+(.{3,120})$", _re.M)
-    source_path = conn.execute("SELECT source_path FROM documents WHERE id=?",
-                               (doc_id,)).fetchone()
-    source_path = source_path[0] if source_path else None
-    if _has_native_toc(source_path):
+    if native_toc is None:
+        source_path = conn.execute("SELECT source_path FROM documents WHERE id=?",
+                                   (doc_id,)).fetchone()
+        source_path = source_path[0] if source_path else None
+        native_toc = _has_native_toc(source_path)
+    if native_toc:
         return 0  # sommaire natif : intouchable
     # NON-natif : on repart du TOC dérivé à neuf (répare toute dérive/trou).
     # Les liens chunk→toc sont remis à NULL pour une reconstruction complète.
@@ -362,9 +433,19 @@ def _build_toc_from_headings(conn, doc_id: str) -> int:
     total = conn.execute("SELECT total_pages FROM documents WHERE id=?", (doc_id,)).fetchone()[0]
     parent_l1 = None
     for i, e in enumerate(entries):
-        nxt = next((n["page"] for n in entries[i + 1:] if n["level"] <= e["level"]), None)
+        # page_end d'une entrée de niveau N = (page_start du prochain titre de
+        # niveau <= N ET commençant STRICTEMENT plus loin) - 1, borné au document.
+        # Le garde-fou « n["page"] > e["page"] » corrige le bug des plages « p27-210 »
+        # (V4.3) : sans lui, deux titres de même niveau co-localisés sur une page
+        # faisaient chuter le successeur dans la branche « else total » → héritage
+        # aberrant de la dernière page du document.
+        nxt = next((n["page"] for n in entries[i + 1:]
+                    if n["level"] <= e["level"] and n["page"] > e["page"]), None)
+        page_end = (nxt - 1) if nxt is not None else (total or e["page"])
+        # Bornage défensif : jamais de plage inversée (page_end >= page_start), jamais
+        # au-delà du document. Titres co-localisés sur une même page → page_end=page_start.
         e["id"] = str(_uuid.uuid4())
-        e["page_end"] = (nxt - 1) if nxt and nxt > e["page"] else (total or e["page"])
+        e["page_end"] = max(e["page"], min(page_end, total or e["page"]))
         e["parent"] = parent_l1 if e["level"] == 2 else None
         if e["level"] == 1:
             parent_l1 = e["id"]

@@ -1,5 +1,46 @@
 # JOURNAL des passes (le plus récent en premier)
 
+## 2026-08-22 16:05 — V4.3 : GO Complet — conformité multimodale et structurelle totale
+- Mandat utilisateur : « combler tous les trous, Production Ready », GO permanent.
+  4 agents parallèles (backend pipeline, backend structure, frontend rendu,
+  frontend navigation) + agent doc + agent vérification tsc.
+- **Backend** : (1) layer_2_extract_v2 câble désormais la qualification VLM
+  séquentielle post-pool + l'ancrage in-situ (helpers v1 réutilisés, équivalence
+  prouvée par exécution, test_phase6_parallel 3/3) — le mode parallèle ne produit
+  plus 0 % de structuré ; (2) sommaire dérivé INCRÉMENTAL pendant l'ingestion
+  (RAGDOM_TOC_INCREMENTAL_EVERY, défaut 10, 0=off, jamais d'écrasement du natif) ;
+  (3) BUG plages « ص X-210 » : le successeur de niveau <= N devait être STRICTEMENT
+  postérieur — corrigé dans _build_toc_from_headings + page_end calculé aussi pour
+  le TOC natif (layer_1_triage, fini les NULL) ; sur base réelle : 20 entrées
+  aberrantes → 1 ; (4) classification arabe : normalisation harakat, marqueurs nus
+  (تمرين/نشاط/وضعية/أتذكر/أتحقق/أطبق), solutions AVANT exercices, faux positifs
+  BAC/Tp éliminés — base réelle : 0→8 exercise_unsolved, 6 faux positifs purgés ;
+  (5) /library/chunks expose linked_solution_chunk_id + toc_id + filtre has_solution.
+- **Frontend** : renderer du contrat §12 lu EN PRIORITÉ (repli heuristique) ;
+  mermaid 11 + plotly.js-dist-min EMBARQUÉS (imports dynamiques, chunks async) ;
+  BADGE D'ÉTAT DE RENDU sur chaque artefact (مُهيكل/أصل/عارض غير مثبت) calculé sur
+  le rendu EFFECTIF — réponse directe à la confusion utilisateur ; badge de type
+  in-situ ; data_table via tanstack-table (tri) ; comparateur étendu mermaid/plotly ;
+  asset:// résolu dans lib/markdown.ts (SideBySideViewer réparé) ; formules sans
+  binaire rendues (plus masquées) ; capsules de plages fiabilisées côté client ;
+  ponts dorés bidirectionnels exercice↔corrigé + chunk→scan + badges de type
+  effectif dans Cours (aucun contenu masqué) ; préchargement des artefacts par
+  plage de pages (fini le repli image transitoire des ancres).
+- **Dev local** : scripts/fetch_published_dbs.mjs + npm run fetch:dbs (seed des
+  bases publiées depuis la release corpus-1am-v1) — répond à « la Library locale
+  est vide » : sans seed ni ingestion, il n'y a simplement aucune base localement.
+- **Qualité** : pytest 73 passés / 11 échoués sandbox (baseline STRICTEMENT
+  identique avant/après) ; tsc strict EXIT 0 sur l'état fusionné via harnais
+  jsdelivr (registre npm bloqué dans le sandbox — demande d'accès en attente) ;
+  une VRAIE erreur TS2665 (declare module plotly inline) détectée et corrigée
+  (déplacée dans src/plotly-shim.d.ts) — elle aurait cassé le build Render.
+  LIMITE HONNÊTE : le build Vite complet n'a pas pu tourner dans le sandbox
+  (registre npm bloqué) — il est validé par le build Docker de Render (déploiement
+  atomique : en cas d'échec, l'ancien déploiement reste live).
+- Docs alignées : Blueprint §5.2/§6.2/§7.2/§7.4, tech_specs §3.6/§10/§12,
+  current_state (V4.3), changelog racine + changelog vivant 04_state, README §0bis
+  (seed local), GUIDE_UTILISATEUR §5, backend/.env (RAGDOM_TOC_INCREMENTAL_EVERY).
+
 ## 2026-08-22 14:30 — V4.2 : FIX boucle explode + GRAND AUDIT multimodal + bases sécurisées
 - **BUG BLOQUANT CORRIGÉ (routes_pipeline.py)** : le filtre d'exclusion de
   `/pipeline/requalify-artifacts` omettait `vlm_exploded_at` (il ne retirait que

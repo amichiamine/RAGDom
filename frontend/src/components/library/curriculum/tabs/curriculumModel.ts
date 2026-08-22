@@ -72,6 +72,64 @@ function flattenToc(nodes: TocNode[]): TocNode[] {
 }
 
 /**
+ * Plage de pages FIABLE d'une entrée TOC (correctif capsules « ص X - 210 »).
+ *
+ * Contexte terrain (base live 1AM_math) : 20/45 entrées `document_toc` portent
+ * `page_end = 210` (dernière page du DOCUMENT) au lieu de la vraie fin de section
+ * → capsules absurdes « ص 10 - 210 », « ص 27 - 210 » entremêlées de « ص 27 - 27 ».
+ * L'agent backend corrige `page_end` en parallèle ; ce helper rend le FRONTEND
+ * robuste quelle que soit la valeur reçue :
+ *
+ *  1. On fait confiance au `page_end` de l'API S'IL est cohérent :
+ *     page_end >= page_start ET page_end < début de la prochaine entrée de niveau
+ *     <= N (sinon il chevauche la section suivante → suspect) ET page_end <= fin
+ *     réelle du chapitre parent (jamais la fin du document via un repli global).
+ *  2. Sinon on RECALCULE : fin = (page_start de la prochaine entrée de niveau
+ *     <= N, en ordre document) − 1, bornée par la dernière page réelle connue.
+ *  3. Feuille sans successeur (dernière entrée) : sa propre `page_start` (plage
+ *     d'une page) plutôt que la fin du document.
+ *
+ * `flat` DOIT être l'aplatissement pré-ordre du TOC (ordre document). `contentMaxPage`
+ * est la dernière page réellement couverte par le TOC (max des page_start), utilisée
+ * comme borne haute — jamais `total_pages` du document.
+ */
+export function reliablePageEnd(
+  entry: TocNode,
+  index: number,
+  flat: TocNode[],
+  contentMaxPage: number,
+): number {
+  const start = entry.page_start
+  // Prochaine entrée de niveau <= au niveau courant, en ordre document → borne la section.
+  let nextBoundaryStart: number | null = null
+  for (let j = index + 1; j < flat.length; j++) {
+    const nxt = flat[j]
+    if (nxt.level <= entry.level && nxt.page_start >= start) {
+      nextBoundaryStart = nxt.page_start
+      break
+    }
+  }
+  // Borne haute logique de cette section (avant la prochaine section de même niveau
+  // ou supérieur), sans jamais déborder sur la dernière page réelle du contenu.
+  const sectionCeil = nextBoundaryStart != null
+    ? Math.min(nextBoundaryStart - 1, contentMaxPage)
+    : contentMaxPage
+
+  const apiEnd = entry.page_end
+  // 1. `page_end` API accepté uniquement s'il est cohérent ET ne déborde pas la section.
+  if (apiEnd != null && apiEnd >= start && apiEnd <= sectionCeil) {
+    return apiEnd
+  }
+  // 2. Recalcul : fin = juste avant la prochaine frontière, bornée par le plafond section.
+  if (nextBoundaryStart != null) {
+    return Math.max(start, Math.min(nextBoundaryStart - 1, sectionCeil))
+  }
+  // 3. Dernière entrée (aucun successeur) : bornée par la dernière page réelle du contenu,
+  //    à défaut plage d'une page (jamais la fin du document).
+  return Math.max(start, Math.min(sectionCeil, contentMaxPage))
+}
+
+/**
  * Construit le modèle dérivé. `lessonIndexByTocId` (optionnel) permet d'injecter
  * le `pedagogical_index` réel du premier chunk course_theory de chaque chapitre —
  * quand il est absent on retombe sur le rang 1-based du chapitre.
@@ -110,20 +168,42 @@ export function buildCurriculumModel(
     }
   }
 
-  // Chapitres de niveau 1 = les « cours ».
+  // Chapitres de niveau 1 = les « cours ». On travaille sur l'aplatissement pré-ordre
+  // (ordre document) pour calculer des plages de pages FIABLES (cf. reliablePageEnd) :
+  // l'index dans `flat` — et NON dans la liste triée des chapitres — est la référence
+  // pour trouver la prochaine frontière de section.
   const flat = flattenToc(toc)
-  const chapters = flat
-    .filter(n => n.level === 1)
-    .sort((a, b) => a.page_start - b.page_start)
+  // Dernière page réellement couverte par le TOC = borne haute des plages (JAMAIS
+  // total_pages du document → source des capsules « X - 210 »).
+  let contentMaxPage = 0
+  for (const n of flat) {
+    if (n.page_start > contentMaxPage) contentMaxPage = n.page_start
+    if (n.page_end != null && n.page_end > contentMaxPage && n.page_end < Number.MAX_SAFE_INTEGER) {
+      // On tolère un page_end supérieur au max des starts UNIQUEMENT s'il reste plausible
+      // (dernière section pouvant s'étendre) — plafonné plus bas par section, ici seule
+      // la borne globale du contenu nous intéresse.
+      contentMaxPage = Math.max(contentMaxPage, n.page_end)
+    }
+  }
+  // Fin réelle « max des débuts » (ignore les page_end sentinelle = fin document) :
+  // c'est cette valeur qui borne les sections, pas l'éventuel page_end gonflé ci-dessus.
+  let maxStart = 0
+  for (const n of flat) if (n.page_start > maxStart) maxStart = n.page_start
+  const contentCeil = maxStart > 0 ? maxStart : contentMaxPage
 
-  let cours: CoursNode[] = chapters.map((ch, i) => {
+  const chapters = flat
+    .map((node, idx) => ({ node, idx }))
+    .filter(({ node }) => node.level === 1)
+    .sort((a, b) => a.node.page_start - b.node.page_start)
+
+  let cours: CoursNode[] = chapters.map(({ node: ch, idx }, i) => {
     const programId = programByToc.get(ch.id) ?? null
     const termIndex = programId ? (programTermIndex.get(programId) ?? 0) : 0
     return {
       tocId: ch.id,
       title: ch.title,
       pageStart: ch.page_start,
-      pageEnd: ch.page_end ?? ch.page_start,
+      pageEnd: reliablePageEnd(ch, idx, flat, contentCeil),
       lessonNumber: lessonIndexByTocId?.get(ch.id) ?? (i + 1),
       programId,
       exercisesCount: exoCountByToc.get(ch.id) ?? 0,

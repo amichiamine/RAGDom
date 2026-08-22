@@ -132,10 +132,21 @@
     "semantic_demonstration": "برهان",
     "semantic_illustration": "توضيح",
     "semantic_exercise_support": "سند تمرين",
+    "render_state_structured": "مُهيكل",
+    "render_state_original": "أصل",
+    "render_state_viewer_missing": "عارض غير مثبت",
+    "media_viewer_not_installed": "عارض هذا التنسيق غير مثبت — المصدر المهيكل متاح أدناه.",
     "eval_loading": "… جارٍ تحميل نماذج التقويم",
     "no_evaluations_typed": "لم يكشف التصنيف الآلي عن أي موضوع تقويم في هذه القاعدة.",
     "eval_subject_title": "موضوع تقويم",
-    "eval_correction_only": "تصحيح تقويم"
+    "eval_correction_only": "تصحيح تقويم",
+    "nav_open_in_exercices": "فتح في التمارين",
+    "nav_open_in_evaluations": "فتح في التقويمات",
+    "nav_goto_exercise": "← التمرين المرتبط",
+    "nav_goto_solution": "← الحل المرتبط",
+    "nav_goto_scan": "مسح ص {page}",
+    "range_single_page": "ص {page}",
+    "range_pages": "ص {start} - {end}"
   },
   "search": {
     "placeholder": "ابحث في هذه القاعدة...",

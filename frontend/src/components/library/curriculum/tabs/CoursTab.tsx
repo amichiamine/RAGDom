@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   BookOpen, ChevronsDown, ChevronsUp, ChevronDown, FileImage, PenTool,
-  GraduationCap, Image as ImageIcon, X, Expand,
+  GraduationCap, Image as ImageIcon, X, Expand, PenLine, FileText,
 } from 'lucide-react'
 import type { Artifact, Chunk, CurriculumPayload, Document, PedagogicalType, TocNode } from '@/types'
 import { api } from '@/lib/api'
-import { splitMarkdownOnArtifactAnchors } from '@/lib/markdownKatex'
+import { splitMarkdownOnArtifactAnchors, hasArtifactAnchors } from '@/lib/markdownKatex'
 import { useCurriculumBridge, HighlightTarget } from '@/contexts/CurriculumBridgeContext'
+import { useLanguage } from '@/contexts/LanguageContext'
 import BridgeButton from '@/components/library/BridgeButton'
 import MarkdownKatex from '@/components/library/MarkdownKatex'
 import PageMedia from '@/components/library/PageMedia'
@@ -14,6 +15,7 @@ import ImageModal from '@/components/library/curriculum/ImageModal'
 import {
   buildCurriculumModel, type CoursNode, type CurriculumModel,
 } from './curriculumModel'
+import { effectivePedagogicalType, isNonCourseType } from './curriculumData'
 
 interface Props {
   curriculum: CurriculumPayload
@@ -133,19 +135,31 @@ interface CardProps {
  */
 function CoursCard({ cours, open, onToggle, activeDb, documentId, termIndex, onOpenScanModal }: CardProps) {
   const { jumpTo, filterExercicesByCours } = useCurriculumBridge()
+  const { t } = useLanguage()
   const [chunks, setChunks] = useState<Chunk[] | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [sideBySide, setSideBySide] = useState(false)
-  // Cache des artefacts par page (alimenté par PageMedia.onLoaded), partagé avec
-  // le rendu intercalé (asset://artifacts/{id}) → métadonnées sans refetch.
+  // Cache des artefacts par page. Deux sources FUSIONNÉES : (1) préchargement direct
+  // de la plage de pages du chapitre DANS le même effet que les chunks (correctif
+  // timing F9 → le résolveur dispose des métadonnées AVANT le rendu markdown, donc
+  // plus d'image de repli transitoire sur les ancres in-situ) ; (2) PageMedia.onLoaded
+  // (complète/rafraîchit page par page). L'union des deux évite tout scintillement.
   const [artifactsByPage, setArtifactsByPage] = useState<Map<number, Artifact[]>>(() => new Map())
+  // Vrai tant que le préchargement des artefacts de la plage n'a pas abouti : on
+  // retarde le rendu des ancres in-situ jusqu'à disposition du cache (sans bloquer
+  // le texte). Garde par ref pour NE PAS mettre `artifactsReady` dans les deps.
+  const [artifactsReady, setArtifactsReady] = useState(false)
+
   const [enlarged, setEnlarged] = useState<{ src: string; title: string } | null>(null)
 
-  // Chargement paresseux des chunks du chapitre (une seule fois, à l'ouverture).
-  // PIÈGE ÉVITÉ : ni `loading` ni `chunks` dans les deps — setLoading(true)
-  // relancerait l'effet, dont le cleanup (alive=false) JETTERAIT la réponse
-  // → « chargement infini » silencieux (bug réel corrigé le 2026-08-22).
+  // Chargement paresseux des chunks + PRÉCHARGEMENT des artefacts du chapitre
+  // (une seule fois, à l'ouverture).
+  // PIÈGE ÉVITÉ : ni `loading`/`chunks` ni `artifactsReady` dans les deps —
+  // un setState relancerait l'effet, dont le cleanup (alive=false) JETTERAIT la
+  // réponse → « chargement infini » silencieux (bug réel corrigé le 2026-08-22).
+  // Le préchargement des artefacts est piloté par une garde `ref` dédiée, pas par
+  // l'état, pour la même raison (leçon V3.11.1 : loading dans les deps → auto-annulation).
   const startedRef = useRef(false)
   useEffect(() => {
     if (!open || startedRef.current || !documentId) return
@@ -159,6 +173,24 @@ function CoursCard({ cours, open, onToggle, activeDb, documentId, termIndex, onO
         // chunks ont pedagogical_type=NULL et souvent toc_id=NULL ; on cible donc
         // la plage de pages du chapitre, toujours peuplée, pour ne rien masquer.
         const range = { page_start: cours.pageStart, page_end: cours.pageEnd }
+        // Préchargement artefacts (par plage {document_id, page_number}) LANCÉ EN
+        // PARALLÈLE des chunks : on peuple `artifactsByPage` dès sa résolution afin
+        // que le résolveur soit prêt pour le premier rendu des ancres in-situ.
+        // Requêtes par page émises EN PARALLÈLE (le navigateur borne lui-même la
+        // concurrence) → pas de régression de latence sur les chapitres larges.
+        const artifactsPromise = (async () => {
+          const pages: number[] = []
+          for (let p = cours.pageStart; p <= cours.pageEnd; p++) pages.push(p)
+          const results = await Promise.all(pages.map(p =>
+            api.library.getArtifacts(activeDb, { document_id: documentId, page_number: p })
+              .then(r => [p, r.artifacts] as const)
+              .catch(() => [p, [] as Artifact[]] as const),
+          ))
+          const byPage = new Map<number, Artifact[]>()
+          for (const [p, list] of results) if (list.length) byPage.set(p, list)
+          return byPage
+        })()
+
         const first = await api.library.getChunks(activeDb, documentId, 1, range)
         let all = first.chunks ?? []
         const totalPages = first.total_pages ?? 1
@@ -167,10 +199,22 @@ function CoursCard({ cours, open, onToggle, activeDb, documentId, termIndex, onO
           all = all.concat(res.chunks ?? [])
         }
         if (alive) setChunks(all)
+
+        // Fusion du préchargement d'artefacts (ne remplace jamais une entrée déjà
+        // renseignée par PageMedia.onLoaded : union non destructive).
+        const preloaded = await artifactsPromise
+        if (alive) {
+          setArtifactsByPage(prev => {
+            const next = new Map(prev)
+            for (const [pageNo, list] of preloaded) if (!next.has(pageNo)) next.set(pageNo, list)
+            return next
+          })
+          setArtifactsReady(true)
+        }
       } catch (e) {
         if (alive) setError(e instanceof Error ? e.message : 'خطأ في تحميل الدرس')
       } finally {
-        if (alive) setLoading(false)
+        if (alive) { setLoading(false); setArtifactsReady(true) }
       }
     })()
     return () => { alive = false }
@@ -248,6 +292,12 @@ function CoursCard({ cours, open, onToggle, activeDb, documentId, termIndex, onO
     return Array.from(map.entries()).sort((a, b) => a[0] - b[0])
   }, [sortedChunks])
 
+  // Capsule de plage de pages FIABLE (correctif défaut 1) : « ص X - Y » pour une
+  // vraie plage, « ص X » pour une leçon d'une seule page — jamais « ص X - 210 ».
+  const pageRangeLabel = cours.pageEnd > cours.pageStart
+    ? t('library.range_pages').replace('{start}', String(cours.pageStart)).replace('{end}', String(cours.pageEnd))
+    : t('library.range_single_page').replace('{page}', String(cours.pageStart))
+
   return (
     <HighlightTarget id={`cours_${cours.tocId}`} className="content-box cours-item-card" style={{ marginBottom: 24 }}>
       {/* Barre titre repliable + actions */}
@@ -261,7 +311,7 @@ function CoursCard({ cours, open, onToggle, activeDb, documentId, termIndex, onO
           <span className="badge badge-primary">الدرس {cours.lessonNumber}</span>
           <h5 style={{ margin: 0 }}>{cours.title}</h5>
           {termIndex > 0 && <span className="badge badge-warning">الفصل {termIndex}</span>}
-          <span className="badge badge-secondary font-num">ص {cours.pageStart} - {cours.pageEnd}</span>
+          <span className="badge badge-secondary font-num">{pageRangeLabel}</span>
         </button>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
           <button
@@ -302,22 +352,20 @@ function CoursCard({ cours, open, onToggle, activeDb, documentId, termIndex, onO
                 {documentId && pageGroups.map(([pageNo, pageChunks]) => (
                   <div key={pageNo} style={{ marginBottom: 16 }}>
                     {pageChunks.map(ch => (
-                      <div key={ch.id} style={{ marginBottom: 12 }}>
-                        {ch.pedagogical_type && (
-                          <span className="badge badge-secondary" style={{ marginBottom: 6, display: 'inline-block' }}>
-                            {PEDAGOGICAL_LABEL[ch.pedagogical_type] ?? ch.pedagogical_type}
-                          </span>
-                        )}
-                        <MarkdownKatex
-                          raw={ch.content_markdown}
-                          lazy
-                          onPageJump={openScan}
-                          resolveAsset={resolveAsset}
-                          artifactResolver={artifactResolver}
-                          artifactBinaryUrl={artifactBinaryUrl}
-                          onEnlarge={(src, title) => setEnlarged({ src, title })}
-                        />
-                      </div>
+                      <ChunkRow
+                        key={ch.id}
+                        chunk={ch}
+                        // Readiness PAR PAGE : dès que les artefacts de la page sont en
+                        // cache (préchargement ou PageMedia) on rend immédiatement ; sinon
+                        // on attend la fin du préchargement global (`artifactsReady`). Évite
+                        // à la fois le scintillement ET tout blocage sur chapitres larges.
+                        artifactsReady={artifactsReady || artifactsByPage.has(pageNo)}
+                        openScan={openScan}
+                        resolveAsset={resolveAsset}
+                        artifactResolver={artifactResolver}
+                        artifactBinaryUrl={artifactBinaryUrl}
+                        onEnlarge={(src, title) => setEnlarged({ src, title })}
+                      />
                     ))}
                     {/* Matériels multimodaux extraits de cette page (schémas, tableaux, formules-images). */}
                     <PageMedia
@@ -383,5 +431,119 @@ function CoursCard({ cours, open, onToggle, activeDb, documentId, termIndex, onO
         onClose={() => setEnlarged(null)}
       />
     </HighlightTarget>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Ligne de chunk dans l'onglet Cours.
+//
+// Correctif « des exercices dans l'onglet Cours » (défaut 2) + navigation
+// relationnelle (défaut 3) + timing artefacts (défaut 4), SANS sur-filtrage :
+//  - badge du TYPE EFFECTIF (déclaré par l'API, ou déduit prudemment des marqueurs
+//    arabes en amorce) — un exercice noyé dans le flux « cours » est ÉTIQUETÉ ;
+//  - si le type effectif relève d'un autre onglet (تمرين/حل/تقويم), un PONT doré
+//    mène à l'onglet dédié (le contenu RESTE affiché ici — dégradation gracieuse) ;
+//  - pont « مسح ص N » vers la page scan du chunk (onglet Scans à la bonne page) ;
+//  - le rendu des ancres in-situ (asset://artifacts/{id}) attend `artifactsReady`
+//    pour éviter l'image de repli transitoire (F9).
+// ─────────────────────────────────────────────────────────────────────────────
+interface ChunkRowProps {
+  chunk: Chunk
+  artifactsReady: boolean
+  openScan: (page: number) => void
+  resolveAsset: (ref: string) => string
+  artifactResolver: (id: string) => Artifact | undefined
+  artifactBinaryUrl: (id: string) => string
+  onEnlarge: (src: string, title: string) => void
+}
+
+function ChunkRow({
+  chunk, artifactsReady, openScan, resolveAsset, artifactResolver, artifactBinaryUrl, onEnlarge,
+}: ChunkRowProps) {
+  const { jumpTo, switchTab, jumpToExercise, filterExercicesByPage } = useCurriculumBridge()
+  const { t } = useLanguage()
+
+  const eff = useMemo(() => effectivePedagogicalType(chunk), [chunk])
+  const nonCourse = isNonCourseType(eff.type)
+  // Le rendu intercalé (ancres artefacts) est retardé jusqu'à disposition du cache
+  // d'artefacts, MAIS uniquement pour les chunks qui contiennent réellement des ancres :
+  // le texte pur s'affiche immédiatement (aucun blocage de lecture).
+  const waitingForArtifacts = useMemo(
+    () => hasArtifactAnchors(chunk.content_markdown) && !artifactsReady,
+    [chunk.content_markdown, artifactsReady],
+  )
+
+  const badgeLabel = eff.type ? (PEDAGOGICAL_LABEL[eff.type] ?? eff.type) : null
+  // Badge distinct pour un type DÉDUIT (heuristique) : nuance « ؟ » + classe atténuée,
+  // afin de ne jamais présenter une inférence comme une certitude.
+  const badgeClass = eff.inferred ? 'badge badge-warning' : 'badge badge-secondary'
+
+  return (
+    <div style={{ marginBottom: 12 }}>
+      {/* Rangée de ponts TOUJOURS présente : le pont chunk → scan est universel
+          (défaut 3), le badge de type et le pont de reroutage restent conditionnels. */}
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center', marginBottom: 6 }}>
+        {badgeLabel && (
+          <span className={badgeClass} style={{ display: 'inline-block' }} dir="auto">
+            {badgeLabel}{eff.inferred ? ' ؟' : ''}
+          </span>
+        )}
+        {/* Pont vers l'onglet dédié quand le contenu relève d'exercices/évaluations. */}
+        {nonCourse && (eff.type === 'evaluation_exam' ? (
+            /* Contenu d'évaluation → onglet Évaluations. Les cibles halo y sont
+               indexées par assessment/document (pas par id de chunk) : on bascule
+               simplement l'onglet (switchTab) plutôt que de poser un halo orphelin. */
+            <BridgeButton
+              variant="eval"
+              icon={<FileText size={13} />}
+              label={t('library.nav_open_in_evaluations')}
+              title={t('library.nav_open_in_evaluations')}
+              onClick={() => switchTab('evaluations')}
+            />
+          ) : eff.type === 'solution_only' ? (
+            /* Corrigé noyé dans le flux cours → pont BIDIRECTIONNEL vers l'énoncé.
+               `jumpToExercise` cible l'énoncé lié par id (le backend expose
+               linked_solution_chunk_id ; ExercicesTab résout aussi l'id de corrigé
+               vers son exercice via l'index inverse) et, à défaut de correspondance,
+               retombe sur les exercices de la même page. */
+            <BridgeButton
+              variant="cours"
+              icon={<PenLine size={13} />}
+              label={t('library.nav_goto_exercise')}
+              title={t('library.nav_goto_exercise')}
+              onClick={() => jumpToExercise(chunk.id)}
+            />
+        ) : (
+          <BridgeButton
+            variant="exo"
+            icon={<PenTool size={13} />}
+            label={t('library.nav_open_in_exercices')}
+            title={t('library.nav_open_in_exercices')}
+            onClick={() => filterExercicesByPage(chunk.page_number)}
+          />
+        ))}
+        {/* Pont universel chunk → page scan (onglet Scans à la bonne page). */}
+        <BridgeButton
+          variant="scan"
+          icon={<ImageIcon size={13} />}
+          label={t('library.nav_goto_scan').replace('{page}', String(chunk.page_number))}
+          title={t('library.nav_goto_scan').replace('{page}', String(chunk.page_number))}
+          onClick={() => jumpTo('scans', `scan_${chunk.page_number}`)}
+        />
+      </div>
+      {waitingForArtifacts ? (
+        <div style={{ minHeight: 40 }} aria-busy="true" />
+      ) : (
+        <MarkdownKatex
+          raw={chunk.content_markdown}
+          lazy
+          onPageJump={openScan}
+          resolveAsset={resolveAsset}
+          artifactResolver={artifactResolver}
+          artifactBinaryUrl={artifactBinaryUrl}
+          onEnlarge={onEnlarge}
+        />
+      )}
+    </div>
   )
 }

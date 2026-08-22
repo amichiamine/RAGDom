@@ -20,27 +20,59 @@ _AR_ORDINALS = {"الأول": 1, "الاول": 1, "الثاني": 2, "الثال
                 "العاشر": 10}
 _AR_ORD_RE = "|".join(_AR_ORDINALS)
 
+# Diacritiques arabes (harakat/tashkil U+064B-U+0652, alef superscript U+0670,
+# tatweel U+0640) : l'OCR des manuels vocalisés produit « التَّمْرِينُ » qu'on doit
+# reconnaître comme « التمرين ». On normalise AVANT toute qualification.
+_HARAKAT_RE = re.compile(r"[ً-ْٰـ]")
+
+
+def _strip_harakat(text: str) -> str:
+    return _HARAKAT_RE.sub("", text or "")
+
+
 # ── Regex de qualification (Skills §2.5) — opportunistes, jamais imposées ──
+# ORDRE CRITIQUE (Zéro Dogme mais priorités linguistiques) :
+#  1. Solutions/corrigés AVANT exercices : « حل التمرين 3 » (corrigé de l'ex 3) ne
+#     doit jamais être capté comme exercice par le mot « تمرين » qu'il contient.
+#  2. Marqueurs arabes NUS acceptés (sans numéro) : le corpus 1AM écrit « تمرين »,
+#     « نشاط », « وضعية » sans systématiquement les numéroter (V4.3 — corpus réel).
+#  3. Marqueurs FR/évaluations ANCRÉS en tête de ligne/heading : « BAC » enfoui dans
+#     un énoncé (angle BAC, « نتائج امتحان… ») ne doit plus produire de faux positif.
+#  4. Le cours (le plus générique) reste en dernier et ne prime jamais sur un exercice.
 _PATTERNS = [
-    ("exercise_unsolved", re.compile(r"(?:^|\n)\s*(?:\*{0,2})(?:Exercice|Exercise|Problem|Activité)\s*(?:n?[°ºo]\s*)?(\d{1,3})", re.I)),
-    ("exercise_unsolved", re.compile(r"(?:تمرين|مسألة|نشاط)\s*(?:رقم\s*)?(\d{1,3})")),
-    ("exercise_unsolved", re.compile(r"(?:ال)?(?:تمرين|مسألة|نشاط|وضعية)\s+(%s)" % _AR_ORD_RE)),
-    ("solution_only", re.compile(r"(?:^|\n)\s*(?:\*{0,2})(?:Solution|Corrigé|Correction)\s*(?:de\s+l['']exercice\s*)?(?:n?[°ºo]\s*)?(\d{1,3})?", re.I)),
-    ("solution_only", re.compile(r"(?:حل|تصحيح)\s*(?:ال)?(?:تمرين|فرض|اختبار)?\s*(?:رقم\s*)?(\d{1,3})?")),
-    ("solution_only", re.compile(r"(?:حل|تصحيح)\s+(?:ال)?(?:تمرين|فرض|اختبار)\s+(%s)" % _AR_ORD_RE)),
-    ("evaluation_exam", re.compile(r"(?:Devoir|Composition|Examen|Contrôle|BEM|BAC)\b|(?:فرض|اختبار|امتحان)", re.I)),
-    ("proof_demonstration", re.compile(r"(?:Démonstration|Preuve|Proof)\b|(?:برهان|إثبات)", re.I)),
-    ("practical_work", re.compile(r"(?:TP|Travaux\s+pratiques|Manipulation)\b|(?:عمل\s*تطبيقي)", re.I)),
-    ("course_theory", re.compile(r"(?:Définition|Théorème|Propriété|Règle|Cours|Leçon)\b|(?:تعريف|مبرهنة|خاصية|قاعدة|درس)", re.I)),
+    # ── SOLUTIONS / CORRIGÉS (priorité absolue) ──
+    ("solution_only", re.compile(r"(?:^|\n)\s*[#>*\-|\s]*(?:Solution|Corrigé|Corrige|Correction)\b\s*(?:de\s+l['’]exercice\s*)?(?:n?[°ºo]\s*)?(\d{1,3})?", re.I)),
+    ("solution_only", re.compile(r"(?:الحل|التصحيح|حل|تصحيح)\s+(?:ال)?(?:تمرين|تمارين|فرض|اختبار|مسألة|نشاط)\s+(%s)\b" % _AR_ORD_RE)),
+    ("solution_only", re.compile(r"(?:الحل|التصحيح|حل|تصحيح)\s*(?:ال)?(?:تمرين|تمارين|فرض|اختبار|مسألة|نشاط)?\s*(?:رقم\s*)?(\d{1,3})?")),
+    ("solution_only", re.compile(r"(?:الحلول|التصحيحات|حلول\s+التمارين|تصحيح\s+التمارين)")),
+    # ── ÉVALUATIONS (sujets d'examen) — ANCRÉES en tête pour éviter le bruit OCR ──
+    ("evaluation_exam", re.compile(r"(?:^|\n)\s*[#>*\-|\s]*(?:Devoir|Composition|Examen|Contrôle|Controle|BEM|BAC)\b", re.I)),
+    ("evaluation_exam", re.compile(r"(?:^|\n)\s*[#>*\-|\s]*(?:ال)?(?:فرض|اختبار|امتحان|تقويم|الوضعية\s+الإدماجية|إدماج)\b")),
+    # ── EXERCICES / ACTIVITÉS — FR : numéro requis ; AR : marqueur nu accepté ──
+    ("exercise_unsolved", re.compile(r"(?:^|\n)\s*[#>*\-|\s]*(?:Exercice|Exercise|Problem|Activité|Activite)\s*(?:n?[°ºo]\s*)?(\d{1,3})", re.I)),
+    ("exercise_unsolved", re.compile(r"(?:ال)?(?:تمرين|تمارين|مسألة|نشاط|أنشطة|وضعية)\s+(%s)\b" % _AR_ORD_RE)),
+    ("exercise_unsolved", re.compile(r"(?:ال)?(?:تمرين|تمارين|مسألة|نشاط|أنشطة|وضعية)\s*(?:رقم\s*)?(\d{1,3})")),
+    ("exercise_unsolved", re.compile(r"(?:^|\n|\||#|\s)(?:ال)?(?:تمرين|تمارين|أنشطة|نشاط|وضعية|أتدرب|أتمرن|أطبق|أوظف|أنجز)\b")),
+    # ── DÉMONSTRATIONS ──
+    ("proof_demonstration", re.compile(r"(?:^|\n)\s*[#>*\-|\s]*(?:Démonstration|Demonstration|Preuve|Proof)\b|(?:برهان|إثبات|أبرهن)", re.I)),
+    # ── TRAVAUX PRATIQUES — « TP » ANCRÉ en tête (bruit OCR latin « ...Tp... » exclu) ──
+    ("practical_work", re.compile(r"(?:^|\n)\s*[#>*\-|\s]*(?:TP|Travaux\s+pratiques|Manipulation)\b|(?:عمل\s*تطبيقي|أنشطة\s*تطبيقية)", re.I)),
+    # ── COURS / THÉORIE (dernier : le plus général) ──
+    ("course_theory", re.compile(r"(?:^|\n)\s*[#>*\-|\s]*(?:Définition|Definition|Théorème|Theoreme|Propriété|Propriete|Règle|Regle|Cours|Leçon|Lecon)\b|(?:تعريف|مبرهنة|خاصية|قاعدة|الدرس|أتعلم|أكتشف|أتذكر|أستحضر|أتحقق|مكتسباتي)", re.I)),
 ]
 _H2_RE = re.compile(r"\n(?=##?#?\s)")
 _embedder = {"tried": False, "model": None}
 
 
 def _qualify(text: str):
-    """Retourne (pedagogical_type|None, pedagogical_index|None) — Zéro Dogme."""
+    """Retourne (pedagogical_type|None, pedagogical_index|None) — Zéro Dogme.
+
+    Le texte est d'abord normalisé (suppression des harakat) : les marqueurs
+    vocalisés du corpus arabe sont ainsi reconnus sans dupliquer chaque regex.
+    """
+    scan = _strip_harakat(text)
     for ptype, pattern in _PATTERNS:
-        match = pattern.search(text)
+        match = pattern.search(scan)
         if match:
             index = None
             if match.groups() and match.group(1):

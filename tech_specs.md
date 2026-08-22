@@ -626,6 +626,11 @@ Afin de garantir une résilience maximale sous tous les environnements hôtes (W
 * **Ingestion OCR Multi-Scripts (Couche 2) :** RapidOCR et les pipelines de segmentation sont configurés pour reconnaître les documents bilingues/mixtes (arabe littéraire + variables/symboles/formules en alphabet latin ou grec).
 * **Indexation FTS5 Bilingue (V3.1) :** Le tokenizer `unicode61 remove_diacritics 2` indexe sans perte les tokens arabes (diacritiques normalisés nativement par le tokenizer) et les termes techniques ou formules latines dans la même table virtuelle `search_index`.
 * **Préservation BiDi des Actifs :** Lors de l'extraction, les formules LaTeX (`$ ... $` et `$$ ... $$`), les noms chimiques, les codes et les tableaux contenant des symboles scientifiques sont étiquetés pour un rendu strict en `LTR` côté Frontend via `direction: ltr !important; unicode-bidi: isolate !important;`, évitant toute corruption d'ordre de lecture dans un flux RTL.
+* **Classification pédagogique arabe renforcée (MAJ 2026-08-22 — source : `engines/sci-engine/pipeline/layer_3_qualify.py`) :** la qualification opportuniste (Zéro Dogme — `NULL` si aucun motif) est durcie pour le corpus arabe réel :
+  * **Normalisation des harakat** (diacritiques/tashkil U+064B-U+0652, alef superscript U+0670, tatweel U+0640) AVANT toute qualification : « التَّمْرِينُ » vocalisé est reconnu comme « التمرين » sans dupliquer chaque regex.
+  * **Marqueurs arabes NUS** acceptés sans numéro (le corpus 1AM ne numérote pas systématiquement) : `تمرين`/`تمارين`/`نشاط`/`أنشطة`/`وضعية`, plus les rubriques didactiques (`أتذكر`/`أتحقق` en cours, `أطبق`/`أتدرب`/`أتمرن`/`أوظف`/`أنجز` en exercice).
+  * **Ordre de test : solutions/corrigés AVANT exercices** — « حل التمرين N » (corrigé) est classé `solution_only` et n'est jamais capté comme exercice par le mot « تمرين » qu'il contient.
+  * **Ancrage en tête de ligne/heading** des marqueurs FR et d'évaluation (`(?:^|\n)…`) : plus de faux positifs « BAC » (angle géométrique) ni « TP » sur du bruit OCR latin enfoui dans un énoncé.
 
 ### **3.6.1 OCR VLM de Page Entière (Tier 2, contrat D3-B étendu) — (MAJ 2026-08-22)**
 
@@ -1016,6 +1021,7 @@ VLM_TIMEOUT_SECONDS=30
 MAX_RETRY_COUNT=3
 RAGDOM_INTRA_PAGE_WORKERS=1   # Parallélisme intra-page borné 1-3 (D4-B). 1 = séquentiel strict (défaut).
 RAGDOM_VLM_PAGE_OCR=auto   # OCR VLM de page entière (§3.6.1) : auto (défaut) | false (Tier 1 seul).
+RAGDOM_TOC_INCREMENTAL_EVERY=10   # (MAJ 2026-08-22) Sommaire de repli reconstruit toutes les N pages READY d'un document pendant l'ingestion. 0 = désactivé (construction au finalize uniquement). Sommaire natif jamais écrasé.
 
 # ── Web-Ready (Phase 7 — à définir chez l'hébergeur, jamais de secret dans le dépôt) ──
 RAGDOM_READONLY=false   # true = mode consultation : les routes d'ADMINISTRATION n'existent pas (404), seules les routes de LECTURE répondent.
@@ -1027,7 +1033,9 @@ RAGDOM_SEED_LLM_KEYS=   # Seed IDEMPOTENT au démarrage (disque éphémère). En
 RAGDOM_PUBLISHED_DBS=  # Dossier des bases pré-ingérées à installer au démarrage (défaut : {racine}/databases_publiees). Chaque .sqlite absent de DATABASES_DIR y est copié (bibliothèque pré-chargée à chaque réveil).
 ```
 
-**Sémantique exacte (source : `backend/config.py`, `backend/.env`, `backend/main.py`, `backend/db/connection.py`) — (MAJ 2026-08-22) :** `RAGDOM_READONLY`, `RAGDOM_ALLOW_REVEAL` et `RAGDOM_LOW_MEMORY` sont booléens (`"true"` insensible à la casse). `RAGDOM_AUTH_TOKEN` vide vaut `None` (pas de contrôle). `RAGDOM_ASK_RATE_PER_MIN` et `RAGDOM_INTRA_PAGE_WORKERS` sont des entiers (ce dernier borné à `[1, 3]`). `RAGDOM_VLM_PAGE_OCR` : seule la valeur littérale `false` désactive ; toute autre valeur (dont `auto`) active. `RAGDOM_SEED_LLM_KEYS` est relu à chaque `init_config_db()` (seed idempotent). `RAGDOM_PUBLISHED_DBS` est lu au lifespan `main.py` (copie non destructive : jamais d'écrasement d'une base déjà présente).
+**Sémantique exacte (source : `backend/config.py`, `backend/.env`, `backend/main.py`, `backend/db/connection.py`, `backend/core/orchestrator.py`) — (MAJ 2026-08-22) :** `RAGDOM_READONLY`, `RAGDOM_ALLOW_REVEAL` et `RAGDOM_LOW_MEMORY` sont booléens (`"true"` insensible à la casse). `RAGDOM_AUTH_TOKEN` vide vaut `None` (pas de contrôle). `RAGDOM_ASK_RATE_PER_MIN` et `RAGDOM_INTRA_PAGE_WORKERS` sont des entiers (ce dernier borné à `[1, 3]`). `RAGDOM_VLM_PAGE_OCR` : seule la valeur littérale `false` désactive ; toute autre valeur (dont `auto`) active. `RAGDOM_SEED_LLM_KEYS` est relu à chaque `init_config_db()` (seed idempotent). `RAGDOM_PUBLISHED_DBS` est lu au lifespan `main.py` (copie non destructive : jamais d'écrasement d'une base déjà présente). `RAGDOM_TOC_INCREMENTAL_EVERY` est un entier lu directement par l'orchestrateur (`_maybe_build_toc_incremental`) — défaut `10`, `≤ 0` désactive la construction incrémentale (le sommaire de repli n'est alors construit qu'au finalize) ; valeur non entière → repli sur `10`.
+
+**Équivalence v1/v2 de la Couche 2 (Phase 6 / D4-B — MAJ 2026-08-22, source : `engines/sci-engine/pipeline/layer_2_extract_v2.py`) :** lorsque `RAGDOM_INTRA_PAGE_WORKERS ≥ 2`, l'orchestrateur charge la variante parallèle `layer_2_extract_v2`. Cette variante produit des sorties **strictement équivalentes** à la v1 séquentielle : après le pool de blocs (parallélisé, ordre déterministe), elle exécute la **MÊME qualification VLM séquentielle** et le **MÊME ancrage in-situ** que la v1 en réutilisant directement ses helpers (`_v1._vlm_qualifier`, `_v1._apply_qualification`, `_v1._anchor_artifacts`, seuil `_v1._AREA_RATIO_MAX`) — aucune logique moteur dupliquée, exclusion identique des cadres > 0,70 d'`area_ratio`, `raw_binary` intouché, aucun arrêt de pipeline. Cf. Blueprint §5.2.
 
 ---
 
@@ -1093,6 +1101,10 @@ def _get_sess_options() -> ort.SessionOptions:
 ## **12. DICTIONNAIRE render_config_json PAR ARTIFACT_TYPE**
 
 La colonne `render_config_json` dans `scientific_artifacts` doit suivre **exactement** ce format JSON selon le type d'artefact. Le composant `ArtifactRenderer.tsx` utilise ce JSON pour instancier le bon renderer sans logique supplémentaire.
+
+**Règle de lecture du consommateur (MAJ 2026-08-22 — source : `frontend/src/components/library/ArtifactRenderer.tsx`) :** tout consommateur **DOIT lire `render_config_json.renderer` EN PRIORITÉ** pour choisir la famille de rendu (via le dictionnaire renderer → famille), et ne retomber sur une heuristique dérivée de l'`artifact_type` **que** lorsque le champ `renderer` est absent — un `dense_illustration` réel sans `render_config_json` par exemple. La clé additive `render_config_json.semantic` (§12.1) alimente le badge sémantique.
+
+**Indicateur d'état de rendu (MAJ 2026-08-22) :** le consommateur de référence expose sur chaque artefact un **badge d'état de rendu calculé sur le rendu EFFECTIF** — *structuré* (rendu natif abouti : KaTeX, SVG, tanstack-table, mermaid, plotly), *original* (repli image/WebP ou source structurée non rendable), *visionneuse non installée* (famille dont le renderer n'est pas embarqué en v1) — en plus du badge de **type** affiché in-situ. État réel des renderers en v1 : **embarqués** — `katex`, `svg` (DOMPurify), `tanstack-table`, `mermaid`, `plotly` (une `latex_formula`/`matrix` structurée sans binaire est rendue en KaTeX, plus jamais masquée) ; **non installés** (repli « visionneuse non installée » + WebP original + panneau source) — `ketcher` (`smiles_chem`) et `shiki` (`code_snippet`), ainsi que les renderers Tier 3 add-on (cf. §9 Note Tiering). Le comparateur *structuré / original / comparaison* couvre les familles natives (mermaid et plotly compris) dès qu'un binaire original est présent.
 
 ```json
 // artifact_type: "latex_formula" | "matrix" | "tensor"

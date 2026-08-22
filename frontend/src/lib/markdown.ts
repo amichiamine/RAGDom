@@ -60,6 +60,33 @@ function escapeHtml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 }
 
+// 3bis. Résolution des ancres d'assets (`asset://figures/…` · `asset://artifacts/{id}`)
+//       — alignée sur le pipeline complet `markdownKatex.ts` (F6). Corrige les
+//       images cassées dans SideBySideViewer / SearchStudio / AskStudio.
+export interface RenderOptions {
+  /**
+   * Résout `asset://figures/NOM` et `asset://artifacts/{id}` → URL réelle du
+   * binaire (base active). Reçoit le nom de figure OU l'id d'artefact.
+   */
+  resolveAsset?: (assetRef: string) => string
+}
+
+function transformAssets(html: string, opts?: RenderOptions): string {
+  return html.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (_m, alt: string, src: string) => {
+    if (src.startsWith('asset://figures/')) {
+      const figFile = src.replace('asset://figures/', '')
+      const actualSrc = opts?.resolveAsset ? opts.resolveAsset(figFile) : figFile
+      return `<div class="svg-figure-wrapper" data-figure="${alt}"><img src="${actualSrc}" alt="${alt}" /><div><small>📐 ${alt}</small></div></div>`
+    }
+    if (src.startsWith('asset://artifacts/')) {
+      const artifactId = src.replace('asset://artifacts/', '')
+      const actualSrc = opts?.resolveAsset ? opts.resolveAsset(artifactId) : artifactId
+      return `<div class="svg-figure-wrapper" data-artifact="${artifactId}"><img src="${actualSrc}" alt="${alt}" /><div><small>🖼️ ${alt}</small></div></div>`
+    }
+    return `<div class="svg-figure-wrapper"><img src="${src}" alt="${alt}" /><br><small>🖼️ ${alt}</small></div>`
+  })
+}
+
 // 4. Rubriques didactiques officielles 2G
 function transformDidacticRubrics(html: string): string {
   const map: Array<[RegExp, string]> = [
@@ -79,13 +106,16 @@ function transformDidacticRubrics(html: string): string {
 
 marked.setOptions({ gfm: true, breaks: false })
 
-export function renderMarkdownWithKaTeX(source: string): string {
+export function renderMarkdownWithKaTeX(source: string, opts?: RenderOptions): string {
   if (!source) return ''
   const healed = selfHealLatex(source)
   const { text, blocks } = protectMath(healed)
 
+  // Résolution des ancres d'assets AVANT marked (syntaxe markdown-image intacte).
+  const withAssets = transformAssets(text, opts)
+
   // marked (synchrone : marked.parse renvoie string quand async=false)
-  let html = marked.parse(text, { async: false }) as string
+  let html = marked.parse(withAssets, { async: false }) as string
 
   // réinjection des blocs KaTeX (déjà rendus, non altérés par le sanitizer ci-dessous)
   for (const b of blocks) {
@@ -94,9 +124,10 @@ export function renderMarkdownWithKaTeX(source: string): string {
 
   html = transformDidacticRubrics(html)
 
-  // 5. Sanitize (DOMPurify) — on autorise les classes KaTeX + data-attrs de remédiation
+  // 5. Sanitize (DOMPurify) — on autorise les classes KaTeX + data-attrs de
+  //    remédiation + data-attrs d'assets (figures/artefacts, F6).
   return DOMPurify.sanitize(html, {
-    ADD_ATTR: ['data-remediation-page', 'aria-hidden', 'style'],
+    ADD_ATTR: ['data-remediation-page', 'data-figure', 'data-artifact', 'aria-hidden', 'style'],
     ADD_TAGS: ['semantics', 'annotation', 'math', 'mrow', 'mi', 'mo', 'mn', 'msup', 'msub', 'mfrac', 'msqrt', 'span'],
   })
 }

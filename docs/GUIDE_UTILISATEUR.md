@@ -47,7 +47,7 @@ Une base `.sqlite` est AUTONOME : elle contient textes, formules, tableaux, curr
 | Ask répond « Je ne trouve pas d'informations pertinentes » | Rien d'assez proche dans les bases sélectionnées | Reformuler, élargir les bases interrogées — c'est une protection anti-hallucination, pas une panne |
 | Page en quarantaine | PDF corrompu/protégé sur cette page | Vue 3 → Quarantaine → motif détaillé → corriger le PDF source puis Réessayer |
 | Ingestion lente | Mode OCR (livre scanné) | Normal : Tier 2. La carte ETA affiche la projection réelle ; l'application reste utilisable pendant l'ingestion |
-| L'interface ne montre aucune base | Backend arrêté ou dossier /databases/ vide | Vérifier le backend (http://localhost:8000/api/system/health) puis ingérer un premier PDF |
+| L'interface ne montre aucune base | Backend arrêté ou dossier /databases/ vide | Vérifier le backend (http://localhost:8000/api/system/health). Le dossier `/databases/` est vide au premier clonage : soit **ingérer un premier PDF** (Vue 3), soit **récupérer les bases publiées du corpus** avec `npm run fetch:dbs` depuis la racine puis relancer le backend (les bases sont copiées automatiquement au démarrage) — voir README §0bis. Sans l'un ou l'autre, la Bibliothèque reste vide : c'est normal, RAGDom n'affiche jamais de données simulées. |
 
 ## 6. Raccourcis
 

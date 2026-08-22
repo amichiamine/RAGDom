@@ -5,6 +5,7 @@
   "description": "RAGDom — lancement unifié : `npm install` puis `npm run dev` depuis la racine",
   "scripts": {
     "setup": "npm --prefix frontend install && node scripts/dev-backend.mjs --setup",
+    "fetch:dbs": "node scripts/fetch_published_dbs.mjs",
     "dev": "concurrently -k -n api,ui -c blue,green \"node scripts/dev-backend.mjs\" \"npm --prefix frontend run dev\"",
     "dev:backend": "node scripts/dev-backend.mjs",
     "dev:frontend": "npm --prefix frontend run dev",

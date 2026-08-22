@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
-import { BookOpen, Image as ImageIcon, Eye, Maximize2, PenLine, ChevronDown } from 'lucide-react'
+import { BookOpen, Image as ImageIcon, Eye, Maximize2, PenLine, ChevronDown, CircleCheck } from 'lucide-react'
 import type { Chunk, CurriculumPayload, Document } from '@/types'
 import { api } from '@/lib/api'
 import { useCurriculumBridge, HighlightTarget } from '@/contexts/CurriculumBridgeContext'
@@ -9,7 +9,8 @@ import MarkdownKatex from '@/components/library/MarkdownKatex'
 import BridgeButton from '@/components/library/BridgeButton'
 import ImageModal from '../ImageModal'
 import {
-  fetchExerciseBank, resolveSolutionFor, resolveSolutionByDocument, resolveCourseFor, buildExerciseTermResolver,
+  fetchExerciseBank, resolveSolutionFor, resolveSolutionByDocument, resolveCourseFor,
+  buildExerciseTermResolver, buildSolutionToExerciseIndex,
 } from './curriculumData'
 
 interface Props {
@@ -40,6 +41,11 @@ export default function ExercicesTab({ curriculum, activeDb, documentId, documen
   const [rows, setRows] = useState<ExoRow[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [modal, setModal] = useState<{ src: string; fallback?: string; title: string } | null>(null)
+  // Index INVERSE corrigé(id) → énoncé(id) : sert la navigation bidirectionnelle
+  // (pont « → التمرين » depuis un corrigé isolé de l'onglet Cours). Union des
+  // liens relationnels (linked_solution_chunk_id / course_exercise) et du repli
+  // pedagogical_index. Vide tant que la banque n'est pas chargée.
+  const [solToExo, setSolToExo] = useState<Map<string, string>>(() => new Map())
 
   const termResolver = useMemo(() => buildExerciseTermResolver(curriculum), [curriculum])
   const links = useMemo(() => curriculum.links ?? [], [curriculum.links])
@@ -71,6 +77,11 @@ export default function ExercicesTab({ curriculum, activeDb, documentId, documen
           docId: docByChunkId.get(chunk.id) ?? documentId,
         }))
         setRows(built)
+        // Index inverse corrigé→énoncé : liens relationnels + repli sur la solution
+        // effectivement résolue pour chaque exercice (couvre le repli pedagogical_index).
+        const rev = buildSolutionToExerciseIndex(exercises, links)
+        for (const r of built) if (r.solution && !rev.has(r.solution.id)) rev.set(r.solution.id, r.chunk.id)
+        setSolToExo(rev)
       })
       .catch(e => { if (alive) { setError(String(e?.message ?? e)); setRows([]) } })
     return () => { alive = false }
@@ -80,7 +91,17 @@ export default function ExercicesTab({ curriculum, activeDb, documentId, documen
   const filtered = useMemo(() => {
     if (!rows) return []
     const q = searchQuery.trim().toLowerCase()
+    // Pont corrigé/scan → énoncé : le chunk ciblé peut être un ÉNONCÉ (id direct)
+    // ou un CORRIGÉ (résolu vers son énoncé via l'index inverse). Prioritaire sur
+    // tout autre filtre ; si l'id ne correspond à aucun énoncé (ni direct ni via
+    // l'index), on ne restreint pas (dégradation gracieuse : liste complète).
+    const targetChunkId = exoFilter?.chunkId
+      ? (rows.some(r => r.chunk.id === exoFilter.chunkId)
+          ? exoFilter.chunkId
+          : solToExo.get(exoFilter.chunkId) ?? null)
+      : null
     return rows.filter(r => {
+      if (exoFilter?.chunkId) return targetChunkId != null ? r.chunk.id === targetChunkId : true
       if (exoFilter?.coursId && r.courseId !== exoFilter.coursId) return false
       if (exoFilter?.page != null && r.chunk.page_number !== exoFilter.page) return false
       if (trimFilter !== 0 && r.termIndex !== trimFilter) return false
@@ -90,7 +111,7 @@ export default function ExercicesTab({ curriculum, activeDb, documentId, documen
       }
       return true
     })
-  }, [rows, exoFilter, trimFilter, searchQuery])
+  }, [rows, exoFilter, trimFilter, searchQuery, solToExo])
 
   // Statut de filtre dynamique (#exoFilterStatus — aria-live).
   const totalAggregate = curriculum.aggregates?.global?.exercises ?? (rows?.length ?? 0)
@@ -222,6 +243,7 @@ function ExerciceCard({
   onOpenScan: (page: number) => void
 }) {
   const bridge = useCurriculumBridge()
+  const { t } = useLanguage()
   const { chunk, solution, courseId, termIndex } = row
   const [scanOpen, setScanOpen] = useState(false)
   // Rendu KaTeX du corrigé UNIQUEMENT à la première ouverture (renderedOnce).
@@ -248,6 +270,17 @@ function ExerciceCard({
               icon={<BookOpen size={13} />}
               label="الدرس"
               onClick={() => bridge.jumpTo('cours', `cours_${courseId}`)}
+            />
+          )}
+          {/* Pont relationnel EXERCICE → CORRIGÉ (bidirectionnel avec le pont
+              corrigé→énoncé de l'onglet Cours) : révèle et met en avant le corrigé lié. */}
+          {solution && (
+            <BridgeButton
+              variant="eval"
+              icon={<CircleCheck size={13} />}
+              label={t('library.nav_goto_solution')}
+              title={t('library.nav_goto_solution')}
+              onClick={() => { if (!solutionOpen) onToggleSolution() }}
             />
           )}
           <BridgeButton

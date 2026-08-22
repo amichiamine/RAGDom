@@ -85,15 +85,17 @@ export default function PageMedia({ db, documentId, page, embeddedIds, onLoaded 
   }, [db, documentId, page])
 
   // Ne conserve que les médias réellement rendables.
+  const hasRaw = (a: Artifact) => typeof a.raw_data === 'string' && a.raw_data.trim().length > 0
   const renderable = (artifacts ?? []).filter(a => {
     const type = (a.artifact_type || '').toLowerCase()
     if (type.includes('illustration') || type.includes('image') || type.includes('figure')) return true
     if (type.includes('table')) return true
-    if (type.includes('geometry') || type.includes('svg') || type.includes('vector')) return a.has_binary === true || !!a.raw_data
-    // Formule : seulement si un binaire image existe (sinon dupliquerait le texte).
-    if (type.includes('formula') || type.includes('latex') || type.includes('equation')) return a.has_binary === true
-    // Autres types (source structurée / Tier 3) : rendus s'ils ont un binaire.
-    return a.has_binary === true
+    if (type.includes('geometry') || type.includes('svg') || type.includes('vector')) return a.has_binary === true || hasRaw(a)
+    // F8 — Formule : rendue si binaire image OU raw_data structuré (KaTeX via
+    // ArtifactRenderer). Une formule structurée sans image doit être VISIBLE.
+    if (type.includes('formula') || type.includes('latex') || type.includes('equation') || type.includes('matrix')) return a.has_binary === true || hasRaw(a)
+    // Autres types (source structurée / Tier 3) : rendus s'ils ont un binaire OU une source structurée.
+    return a.has_binary === true || hasRaw(a)
   })
 
   // Cadres quasi-pleine-page (area_ratio > 0.7) : re-cadrages de la page → masqués par défaut.
@@ -145,9 +147,14 @@ export default function PageMedia({ db, documentId, page, embeddedIds, onLoaded 
           return (
             <figure key={a.id} className="page-media-item" style={{ margin: 0, background: 'var(--bg-card-inner)', border: '1px solid var(--border-color)', borderRadius: 12, padding: 12 }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
-                <span className="badge badge-secondary" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }} dir="auto">
-                  <ImageIcon size={12} /> {badge}
-                </span>
+                {/* Badge de TYPE de la galerie affiché uniquement pour l'entrée « intégrée
+                    au texte » (ArtifactRenderer n'est pas monté ici) ; sinon le badge
+                    type + état de rendu est porté in-situ par ArtifactRenderer (F4). */}
+                {isEmbedded ? (
+                  <span className="badge badge-secondary" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }} dir="auto">
+                    <ImageIcon size={12} /> {badge}
+                  </span>
+                ) : <span />}
                 <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
                   {isEmbedded && (
                     <span className="badge badge-subtle" dir="auto" title={t('library.media_embedded_in_text')}>

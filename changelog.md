@@ -235,3 +235,80 @@ Contre-audit indépendant du corpus V3.5 complet (7 fichiers, 4748 lignes) : **0
 | CWD | COSM. | CWD Lock : ajout du répertoire `engines\` |
 
 **Le corpus V3.5 est clos : GO Phase 1 définitif.**
+
+---
+
+## 2026-08-22 — V4.2 : fix boucle d'explosion des cadres pleine page (DÉPLOYÉ)
+
+- **`POST /api/pipeline/requalify-artifacts` (mode `explode`)** : le marqueur de SUCCÈS
+  `vlm_exploded_at` est désormais TOUJOURS exclu de la sélection de requalification
+  (`render_config_json NOT LIKE '%vlm_exploded_at%'`), y compris sous `retry_failed`
+  (qui vise les ÉCHECS à retenter, pas les succès à refaire). Sans cette exclusion,
+  les cadres déjà explosés restaient éligibles à chaque passe (`ORDER BY page_number`
+  + `limit` → toujours le MÊME lot) : la boucle ne convergeait jamais vers `frames=0`
+  et re-créait des sous-artefacts en doublon. Garde d'idempotence conservée côté
+  `_explode_fullpage_frames`. Source : `backend/api/routes_pipeline.py`.
+
+## 2026-08-22 — V4.3 : correctifs pipeline + structure documentaire + contrat de rendu
+
+**Backend**
+
+- **Équivalence v1/v2 STRICTE de la Couche 2** (`engines/sci-engine/pipeline/layer_2_extract_v2.py`) :
+  la variante parallèle (`RAGDOM_INTRA_PAGE_WORKERS ≥ 2`) exécute désormais la MÊME
+  qualification VLM séquentielle post-pool et le MÊME ancrage in-situ que la v1, par
+  réutilisation directe des helpers v1 (`_vlm_qualifier`, `_apply_qualification`,
+  `_anchor_artifacts`, seuil `_AREA_RATIO_MAX`) — zéro duplication de logique moteur,
+  exclusion identique des cadres > 0,70 d'`area_ratio`, `raw_binary` intouché.
+- **Sommaire incrémental + plages de pages fiables** (`backend/core/orchestrator.py`,
+  `engines/sci-engine/pipeline/layer_1_triage.py`) : le sommaire de repli dérivé des
+  titres est construit AU FIL DE L'EAU pendant l'ingestion (nouvelle variable d'env
+  `RAGDOM_TOC_INCREMENTAL_EVERY`, défaut 10 pages, 0 = désactivé) en plus du rebuild
+  complet au finalize ; jamais d'écrasement d'un sommaire natif. `page_end` corrigé
+  (fin d'une entrée de niveau N = page du prochain titre de niveau ≤ N STRICTEMENT
+  postérieur − 1, borné) — fini les plages « X → dernière page » ; le TOC natif reçoit
+  aussi un `page_end` calculé (plus de `NULL` forçant un `COALESCE` à 100000).
+- **Classification pédagogique arabe renforcée** (`engines/sci-engine/pipeline/layer_3_qualify.py`) :
+  normalisation des harakat (U+064B-U+0652, alef superscript, tatweel) avant qualification ;
+  marqueurs arabes nus sans numéro (تمرين/تمارين/نشاط/أنشطة/وضعية + rubriques
+  أتذكر/أتحقق/أطبق/أتدرب…) ; ordre de test solutions AVANT exercices (« حل التمرين N »
+  classé `solution_only`) ; ancrage en tête de ligne des marqueurs FR/évaluation
+  (fini les faux positifs « BAC » angle géométrique et « TP » bruit OCR).
+- **Liaisons relationnelles exposées** (`backend/api/routes_library.py`) :
+  `GET /api/library/chunks` expose désormais `linked_solution_chunk_id` et `toc_id`
+  par chunk + filtre optionnel `has_solution`.
+
+**Frontend**
+
+- **Application du contrat de rendu §12** (`frontend/src/components/library/ArtifactRenderer.tsx`) :
+  `render_config_json.renderer` lu EN PRIORITÉ (repli heuristique de type) ; `mermaid`
+  et `plotly.js-dist-min` EMBARQUÉS (imports dynamiques → rendu structuré natif de
+  flowchart/signal_waveform) ; `ketcher`/`shiki` restent NON installés avec étiquette
+  « visionneuse non installée » ; NOUVEAU badge d'état de rendu (structuré / original /
+  visionneuse non installée) calculé sur le rendu EFFECTIF + badge de type in-situ ;
+  `data_table` via tanstack-table (tri par colonne, repli markdown) ; comparateur étendu
+  à mermaid/plotly ; résolution `asset://artifacts` et `asset://figures` dans
+  `lib/markdown.ts` ; formule structurée sans binaire rendue en KaTeX (plus masquée).
+- **Structure & navigation curriculum** (`frontend/src/components/library/curriculum/tabs/`) :
+  capsules de plages fiabilisées côté client (validation du `page_end` API + recalcul
+  par niveaux, plage d'une page « ص N ») ; badges de type effectif dans l'onglet Cours
+  avec ponts dorés vers Exercices/Évaluations (aucun contenu masqué) ; navigation
+  bidirectionnelle exercice↔corrigé (priorité au `linked_solution_chunk_id` backend,
+  replis locaux `course_exercise` puis `pedagogical_index`) ; pont chunk→scan de page ;
+  préchargement des artefacts par plage de pages (fini le repli image transitoire).
+
+**Exploitation / ops**
+
+- Bases enrichies **republiées** en assets de la release `corpus-1am-v1` — procédure
+  imposée par le disque Render éphémère : **export authentifié → republication de
+  l'asset → seulement ensuite redéploiement** (sinon la base enrichie est perdue au
+  réveil). Seed local via `npm run fetch:dbs` (`scripts/fetch_published_dbs.mjs`,
+  variables `RAGDOM_RELEASE_REPO`/`RAGDOM_RELEASE_TAG`/`RAGDOM_PUBLISHED_DBS`).
+- Clés Gemini 2 et 4 **définitivement 403 `PERMISSION_DENIED`** (permission projet,
+  PAS un rate-limit : la rotation ne les récupère pas — à désactiver, pas à retenter).
+
+**Documentation alignée (le code fait référence) :** Blueprint §5.2 (équivalence v1/v2),
+§6.2 (contrat de rendu ArtifactRenderer + structure/navigation), §7.2 (chunks :
+`linked_solution_chunk_id`/`toc_id`/`has_solution`), §7.4 (sommaire incrémental + plages
+fiables) ; tech_specs §3.6 (classification AR), §10 (`RAGDOM_TOC_INCREMENTAL_EVERY` +
+équivalence v1/v2), §12 (renderer lu en priorité + indicateur d'état de rendu) ;
+README §0bis (seed local) ; GUIDE_UTILISATEUR §5 ; current_state.md.

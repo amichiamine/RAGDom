@@ -63,6 +63,21 @@ c:\xampp\htdocs\RAGDom\
 
 Une fois cette checklist validée et affichée à ArchiSys3.0, passer au prompt d'initialisation ci-dessous.
 
+### **0bis. DÉMARRAGE LOCAL (DÉVELOPPEMENT) & SEED DES BASES PUBLIÉES — (MAJ 2026-08-22)**
+
+Depuis la racine : `npm install` puis `npm run dev` (lance simultanément le backend FastAPI et le frontend Vite). Le frontend s'ouvre sur `http://localhost:5173`, le backend sur `http://localhost:8000`.
+
+⚠️ **La bibliothèque locale est VIDE tant que la base n'a pas de contenu.** RAGDom n'affiche QUE le contenu réellement présent dans les fichiers `.sqlite` de `/databases/` (Zéro Mock — aucune donnée d'exemple simulée). Au premier clonage, `/databases/` est vide → l'écran d'accueil ne montre aucune base. Deux façons d'y remédier :
+
+1. **Ingérer un PDF** via le Automation Hub (Vue 3) — construit une base localement.
+2. **Récupérer les bases PUBLIÉES du corpus** (recommandé pour explorer immédiatement) :
+   ```
+   npm run fetch:dbs
+   ```
+   Ce script (`scripts/fetch_published_dbs.mjs`, Node pur, zéro dépendance) télécharge les assets `.sqlite` de la release GitHub publique du corpus vers `databases_publiees/` à la racine. Au démarrage suivant du backend, `backend/main.py` copie chaque `.sqlite` absent de `DATABASES_DIR` vers `/databases/` (copie non destructive, jamais d'écrasement d'une base déjà présente) → la Library est alors peuplée. Le script est idempotent (il saute tout fichier déjà présent à la bonne taille).
+
+   Réglages par variables d'environnement (valeurs par défaut, aucune obligatoire) : `RAGDOM_RELEASE_REPO` (défaut `amichiamine/RAGDom`), `RAGDOM_RELEASE_TAG` (défaut `corpus-1am-v1`), `RAGDOM_PUBLISHED_DBS` (défaut `<racine>/databases_publiees`).
+
 **Instructions pour ArchiSys3.0 :**
 
 Attache les **fichiers** suivants à ta session avec l'agent, puis copie-colle le bloc de texte ci-dessous comme **premier message** de la session.

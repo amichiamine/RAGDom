@@ -1,8 +1,10 @@
 # État Actuel du Projet RAGDom
 
-**Phase :** V3.11.1 — v1 complète + extensions Web-Ready et Parallélisme D4-B
+**Phase :** V4.3 — v1 complète + extensions Web-Ready et Parallélisme D4-B
 **fusionnées sur une BRANCHE UNIQUE `main`** (plus de branche `post-v1` : tout est
-sur `main`).
+sur `main`). Correctifs pipeline/structure/rendu V4.2 (fix boucle explode, déployé)
+et V4.3 (équivalence v1/v2, sommaire incrémental + plages fiables, classification AR
+renforcée, liaisons relationnelles exposées, contrat de rendu §12 appliqué) alignés.
 **Date de mise à jour :** 2026-08-22
 
 > **Mémoire de reprise :** `.hyperagent/` à la racine du dépôt sert de mémoire de
@@ -59,3 +61,9 @@ premier manuel réel, peupler le curriculum via CurriculumStudio → les 6 ongle
 **MAJ 2026-08-22 (Contrat de Portabilité)** : ajout de `tech_specs.md` §12.1 « Contrat de Portabilité de la Base Autonome » (contrat plug-and-play du `.sqlite` autonome : autonomie mono-fichier, ancrage in-situ `asset://artifacts/` + `asset://figures/`, familles v1 garanties + repli universel `raw_binary`, clé additive `semantic`, ordre de lecture + `area_ratio` >70 %, recette de conformité consommateur en 7 points) ; pointeur ajouté dans « Blueprint Master RAGDom.md » §5.3.
 
 **MAJ 2026-08-22 (V3.11.1)** : alignement de la doc normative sur le code audité (le code fait référence) — décompte réel 60 routes / 7 routers, branche unique `main` (post-v1 fusionné), `.hyperagent/` = mémoire de reprise. Documenté côté specs : OCR VLM de page entière Tier 2 (RAGDOM_VLM_PAGE_OCR), modèle par clé + auto-détection live, /pipeline/reprocess + reprise/chaînage + sommaire de repli au finalize, déploiement Docker single-origin (bases publiées, RAGDOM_LOW_MEMORY), variables d'env web réelles, .env versionné pré-rempli sans secrets, formes {data,pagination}+alias, toc/curriculum non paginés.
+
+**MAJ 2026-08-22 (V4.2 — fix boucle explode, DÉPLOYÉ)** : `POST /api/pipeline/requalify-artifacts` (mode `explode`) — le marqueur de SUCCÈS `vlm_exploded_at` est désormais TOUJOURS exclu de la sélection de requalification (`render_config_json NOT LIKE '%vlm_exploded_at%'`), même sous `retry_failed`. Sans cette exclusion les cadres déjà explosés restaient éligibles à chaque passe (`ORDER BY page_number` + `limit` → toujours le même lot) : la boucle ne convergeait jamais vers `frames=0` et re-créait des sous-artefacts en doublon. Source : `backend/api/routes_pipeline.py`.
+
+**MAJ 2026-08-22 (V4.3 — correctifs pipeline + structure + rendu)** : alignement doc↔code des correctifs livrés (le code fait référence). Backend : (1) équivalence v1/v2 stricte de la Couche 2 (la variante parallèle `RAGDOM_INTRA_PAGE_WORKERS≥2` exécute la MÊME qualification VLM séquentielle post-pool et le MÊME ancrage in-situ que la v1 via réutilisation des helpers v1) ; (2) sommaire de repli construit INCRÉMENTALEMENT pendant l'ingestion (`RAGDOM_TOC_INCREMENTAL_EVERY`, défaut 10, 0=désactivé) + rebuild complet au finalize, jamais d'écrasement d'un TOC natif, `page_end` fiable (dérivé ET natif — fini les plages « X → dernière page » et les `page_end=NULL`) ; (3) classification pédagogique arabe renforcée (normalisation harakat, marqueurs arabes nus, solutions testées avant exercices, ancrage en tête de ligne des marqueurs FR/évaluation) ; (4) `GET /api/library/chunks` expose `linked_solution_chunk_id` + `toc_id` + filtre `has_solution`. Frontend : (6) application du contrat §12 (renderer lu en priorité, mermaid+plotly embarqués, ketcher/shiki étiquetés « visionneuse non installée », badge d'état de rendu effectif, data_table via tanstack-table, comparateur étendu, résolution asset://, KaTeX pour formule structurée sans binaire) ; (7) capsules de plages fiabilisées côté client, badges de type effectif + ponts dorés, navigation bidirectionnelle exercice↔corrigé (priorité `linked_solution_chunk_id`), pont chunk→scan, préchargement des artefacts par plage.
+
+**Exploitation (MAJ 2026-08-22)** : bases enrichies **republiées** en assets de la release `corpus-1am-v1` — procédure obligatoire vu le disque Render éphémère : **export authentifié → republication de l'asset → seulement ensuite redéploiement** (sinon la base enrichie est perdue au réveil). Clés Gemini 2 et 4 **définitivement 403 `PERMISSION_DENIED`** (permission projet, PAS un rate-limit : la rotation ne les récupère pas — à désactiver, pas à retenter).

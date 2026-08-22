@@ -1,5 +1,5 @@
 import { api } from '@/lib/api'
-import type { Chunk, ContentLink, CurriculumPayload } from '@/types'
+import type { Chunk, ContentLink, CurriculumPayload, PedagogicalType } from '@/types'
 
 /**
  * Helpers de données partagés par les onglets de la VAGUE C (exercices,
@@ -133,22 +133,73 @@ export async function fetchEvaluationGroups(db: string, documentIds: string[]): 
   return groups
 }
 
-/** Corrigé lié à un exercice : par lien `course_exercise` si possible, sinon par `pedagogical_index`. */
+/**
+ * Champ RELATIONNEL exercice→corrigé exposé par le backend sur le chunk
+ * (`document_chunks.linked_solution_chunk_id`). Il n'est PAS encore dans le type
+ * `Chunk` (schéma géré hors périmètre) ; on le lit défensivement : si le payload
+ * ne le porte pas (état actuel du live), on renvoie null et les replis prennent
+ * le relais (pedagogical_index / document). Aucun crash si le champ est absent.
+ */
+export function linkedSolutionId(chunk: Chunk): string | null {
+  const v = (chunk as unknown as { linked_solution_chunk_id?: unknown }).linked_solution_chunk_id
+  return typeof v === 'string' && v.length > 0 ? v : null
+}
+
+/**
+ * Corrigé lié à un exercice, par ordre de fiabilité DÉCROISSANTE :
+ *  1. lien relationnel direct porté par le chunk (`linked_solution_chunk_id`, backend) ;
+ *  2. lien explicite `course_exercise` (SolutionLinker) dans le graphe content_links ;
+ *  3. repli `pedagogical_index` identique.
+ * Chaque étape est défensive : un champ/lien absent passe simplement à la suivante.
+ */
 export function resolveSolutionFor(
   exo: Chunk,
   links: ContentLink[],
   solutionsByIndex: Map<number, Chunk>,
   solutionsById: Map<string, Chunk>,
 ): Chunk | null {
-  // Priorité : lien explicite exercice → solution (course_exercise du SolutionLinker).
+  // 1. Lien relationnel direct porté par le chunk (backend, le plus fiable).
+  const direct = linkedSolutionId(exo)
+  if (direct && solutionsById.has(direct)) return solutionsById.get(direct) ?? null
+  // 2. Lien explicite exercice → solution (course_exercise du SolutionLinker).
   for (const l of links) {
     if (l.link_type !== 'course_exercise') continue
     if (l.from_id === exo.id && solutionsById.has(l.to_id)) return solutionsById.get(l.to_id) ?? null
     if (l.to_id === exo.id && solutionsById.has(l.from_id)) return solutionsById.get(l.from_id) ?? null
   }
-  // Repli : même pedagogical_index.
+  // 3. Repli : même pedagogical_index.
   if (exo.pedagogical_index != null) return solutionsByIndex.get(exo.pedagogical_index) ?? null
   return null
+}
+
+/**
+ * Index INVERSE corrigé→exercice (navigation bidirectionnelle) construit à partir
+ * de la même chaîne de fiabilité que `resolveSolutionFor`. Permet, depuis un chunk
+ * `solution_only` affiché seul (onglet Cours / Scans / Évaluations de repli),
+ * d'offrir un pont « → التمرين » vers l'énoncé lié. Toutes les sources sont
+ * défensives : un champ/lien manquant est simplement ignoré.
+ */
+export function buildSolutionToExerciseIndex(
+  exercises: Chunk[],
+  links: ContentLink[],
+): Map<string, string> {
+  const solToExo = new Map<string, string>()
+  const setOnce = (solId: string, exoId: string) => { if (!solToExo.has(solId)) solToExo.set(solId, exoId) }
+  // 1. Champ relationnel direct sur l'exercice.
+  for (const exo of exercises) {
+    const direct = linkedSolutionId(exo)
+    if (direct) setOnce(direct, exo.id)
+  }
+  // 2. Liens course_exercise (bidirectionnels) — on ne connaît le rôle exact qu'en
+  //    croisant avec l'ensemble des ids d'exercices.
+  const exoIds = new Set(exercises.map(e => e.id))
+  for (const l of links) {
+    if (l.link_type !== 'course_exercise') continue
+    if (exoIds.has(l.from_id)) setOnce(l.to_id, l.from_id)
+    else if (exoIds.has(l.to_id)) setOnce(l.from_id, l.to_id)
+  }
+  // 3. Repli pedagogical_index : côté appelant (ExercicesTab connaît solutionsByIndex).
+  return solToExo
 }
 
 /**
@@ -203,4 +254,68 @@ export function resolveCourseFor(exo: Chunk, links: ContentLink[]): string | nul
     if (l.to_id === exo.id) return l.from_id
   }
   return null
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Classification pédagogique EFFECTIVE (correctif « des exercices dans l'onglet
+// Cours ») — DÉGRADATION GRACIEUSE (leçon V3.11 : jamais de sur-filtrage).
+//
+// Sur les corpus réels, la majorité des chunks ont `pedagogical_type = NULL`
+// (base live : 234/255). Certains sont en réalité des énoncés d'exercices/activités
+// ou des corrigés noyés dans le flux « cours ». On NE SUPPRIME RIEN : on calcule
+// un TYPE EFFECTIF pour poser le bon badge et proposer un pont vers l'onglet dédié,
+// tout en laissant le contenu visible dans l'onglet Cours.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Familles de marqueurs arabes d'exercices/activités/corrigés (in-texte, tolérant OCR). */
+const EXERCISE_MARKERS = ['تمرين', 'تمارين', 'التمرين', 'نشاط', 'أنشطة', 'النشاط', 'تطبيق']
+const SOLUTION_MARKERS = ['الحل', 'الحلول', 'التصحيح', 'حل التمرين', 'الإجابة النموذجية', 'عناصر الإجابة']
+const EVAL_MARKERS = ['الفرض', 'الاختبار', 'الامتحان', 'التقويم', 'المراقبة المستمرة', 'الوضعية الإدماجية']
+
+/** Cherche un marqueur uniquement dans l'AMORCE du markdown (titre/1re ligne),
+ *  après avoir retiré le bruit markdown de tête (#, >, *, images) — évite les faux
+ *  positifs d'un mot cité en plein corps de leçon. */
+function headContainsMarker(markdown: string | null | undefined, markers: string[]): boolean {
+  if (!markdown) return false
+  // On isole l'amorce : première ligne non vide + un petit horizon de sécurité.
+  const stripped = markdown
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, ' ')   // images markdown
+    .replace(/[#>*_`~-]+/g, ' ')             // ponctuation markdown de tête
+    .trim()
+  const head = stripped.slice(0, 40)
+  return markers.some(m => head.includes(m))
+}
+
+/**
+ * Type EFFECTIF d'un chunk pour l'affichage dans l'onglet Cours :
+ *  - priorité ABSOLUE au `pedagogical_type` explicite quand il existe ;
+ *  - sinon, heuristique conservatrice sur l'amorce markdown (marqueurs arabes) ;
+ *  - `null` (= درس / contenu de cours) par défaut → aucune reclassification abusive.
+ *
+ * Retourne aussi si le type a été DÉDUIT (heuristique) vs déclaré (API), pour
+ * nuancer le badge (« تمرين؟ » déduit vs « تمرين » déclaré) sans jamais masquer.
+ */
+export interface EffectiveType {
+  type: PedagogicalType | null
+  inferred: boolean
+}
+
+export function effectivePedagogicalType(chunk: Chunk): EffectiveType {
+  if (chunk.pedagogical_type) return { type: chunk.pedagogical_type, inferred: false }
+  const md = chunk.content_markdown
+  // Ordre : évaluation > solution > exercice (les corrigés citent souvent « تمرين »).
+  if (headContainsMarker(md, EVAL_MARKERS)) return { type: 'evaluation_exam', inferred: true }
+  if (headContainsMarker(md, SOLUTION_MARKERS)) return { type: 'solution_only', inferred: true }
+  if (headContainsMarker(md, EXERCISE_MARKERS)) return { type: 'exercise_unsolved', inferred: true }
+  return { type: null, inferred: false }
+}
+
+/** Types « hors cours » : appartiennent en propre aux onglets Exercices/Évaluations. */
+const NON_COURSE_TYPES: ReadonlySet<PedagogicalType> = new Set<PedagogicalType>([
+  'exercise_unsolved', 'exercise_solved', 'solution_only', 'evaluation_exam',
+])
+
+/** Vrai si le type effectif relève d'un autre onglet (→ pont proposé, jamais masqué). */
+export function isNonCourseType(type: PedagogicalType | null): boolean {
+  return type != null && NON_COURSE_TYPES.has(type)
 }

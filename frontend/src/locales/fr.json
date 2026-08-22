@@ -132,10 +132,21 @@
     "semantic_demonstration": "Démonstration",
     "semantic_illustration": "Illustration",
     "semantic_exercise_support": "Support d'exercice",
+    "render_state_structured": "Structuré",
+    "render_state_original": "Original",
+    "render_state_viewer_missing": "Visionneuse non installée",
+    "media_viewer_not_installed": "La visionneuse de ce format n'est pas installée — la source structurée est disponible ci-dessous.",
     "eval_loading": "… Chargement des modèles d'évaluation",
     "no_evaluations_typed": "Aucun sujet d'évaluation détecté par le typage automatique dans cette base.",
     "eval_subject_title": "Sujet d'évaluation",
-    "eval_correction_only": "Corrigé d'évaluation"
+    "eval_correction_only": "Corrigé d'évaluation",
+    "nav_open_in_exercices": "Ouvrir dans les Exercices",
+    "nav_open_in_evaluations": "Ouvrir dans les Évaluations",
+    "nav_goto_exercise": "→ Énoncé lié",
+    "nav_goto_solution": "→ Corrigé lié",
+    "nav_goto_scan": "Scan p. {page}",
+    "range_single_page": "p. {page}",
+    "range_pages": "p. {start} – {end}"
   },
   "search": {
     "placeholder": "Rechercher dans cette base...",
