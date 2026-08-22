@@ -5,6 +5,9 @@ import type {
   BenchmarkRow, BenchmarkAggregates, AppSettings, EngineManifest,
   Document, TocNode, Chunk, Artifact, PaginatedResponse,
   PageScanManifestEntry, AuthState, AuthSession, PipelineQueueState,
+  ValidationPreviewRequest, ValidationPreview, ValidationRunRequest, ValidationRun,
+  ValidationRunListResponse, ValidationPage, ValidationDiff, ValidationDecision,
+  ValidationDecisionRequest,
 } from '@/types'
 
 // Phase 7 : VITE_API_URL (origine du backend) pour l'UI hébergée (Cloudflare/tunnel) ;
@@ -92,6 +95,37 @@ async function request<T>(endpoint: string, options?: RequestInit): Promise<T> {
 function withDb(endpoint: string, db: string, params?: Record<string, string>): string {
   const p = new URLSearchParams({ db, ...params })
   return `${endpoint}?${p.toString()}`
+}
+
+// Adaptateurs du contrat Validation v1. Le backend nomme `database` → `base`
+// et `selection` → `page_selection`; l'UI conserve les termes produit.
+function validationScopeDto(scope: ValidationPreviewRequest['scope']) {
+  return {
+    scope_type: scope.kind === 'database' ? 'base' : scope.kind === 'selection' ? 'page_selection' : scope.kind,
+    ...(scope.document_id ? { document_id: scope.document_id } : {}),
+    ...(scope.toc_id ? { toc_id: scope.toc_id } : {}),
+    ...(scope.kind === 'page' && scope.page_start ? { page: scope.page_start } : {}),
+    ...(scope.page_start && scope.kind !== 'page' ? { page_start: scope.page_start } : {}),
+    ...(scope.page_end && scope.kind !== 'page' ? { page_end: scope.page_end } : {}),
+    ...(scope.page_numbers?.length ? { pages: scope.page_numbers } : {}),
+  }
+}
+
+function validationScopeFromDto(db: string, scope: Record<string, unknown>, pageCount: number) {
+  const rawType = String(scope.scope_type ?? 'base')
+  const kind = rawType === 'base' ? 'database' : rawType === 'page_selection' ? 'selection' : rawType
+  const pages = Array.isArray(scope.pages) ? scope.pages.filter((p): p is number => typeof p === 'number') : []
+  return {
+    db,
+    kind: kind as ValidationRun['scope']['kind'],
+    ...(typeof scope.document_id === 'string' ? { document_id: scope.document_id } : {}),
+    ...(typeof scope.toc_id === 'string' ? { toc_id: scope.toc_id } : {}),
+    ...(typeof scope.page === 'number' ? { page_start: scope.page, page_end: scope.page } : {}),
+    ...(typeof scope.page_start === 'number' ? { page_start: scope.page_start } : {}),
+    ...(typeof scope.page_end === 'number' ? { page_end: scope.page_end } : {}),
+    page_count: pageCount,
+    page_numbers: pages,
+  }
 }
 
 export const api = {
@@ -272,6 +306,142 @@ export const api = {
       request<{ updated: boolean; key_id: string; active_model: string | null }>(`/llm/keys/${keyId}`, {
         method: 'PUT', body: JSON.stringify({ active_model: activeModel }),
       }),
+  },
+  validation: {
+    // `resolve-scope` est le dry-run canonique : aucun run n'est créé et aucune
+    // donnée officielle n'est mutée. L'identifiant client lie ce résultat au CTA.
+    preview: (payload: ValidationPreviewRequest) =>
+      request<{ scope_type: string; targets: Array<{ document_id: string; toc_id?: string | null; pages: number[]; page_start: number; page_end: number; total_pages: number }>; page_count: number }>(
+        '/validation/resolve-scope', {
+          method: 'POST', body: JSON.stringify({ db: payload.scope.db, scope: validationScopeDto(payload.scope) }),
+        },
+      ).then(r => ({
+        preview_id: `${payload.scope.db}:${Date.now()}`,
+        created_at: new Date().toISOString(),
+        scope: {
+          ...payload.scope,
+          page_count: r.page_count,
+          page_numbers: r.targets.flatMap(target => target.pages),
+        },
+        options: payload.options,
+        impact: { pages: r.page_count, chunks: null, artifacts: null, toc_entries: null, curriculum_entries: null, benchmarks: null, human_edits_preserved: null },
+        warnings: [], runnable: r.page_count > 0,
+        summary: `${r.page_count} page(s) · ${r.targets.length} cible(s)`,
+      } satisfies ValidationPreview)),
+    createRun: (payload: ValidationRunRequest) =>
+      request<{ id: string; status: ValidationRun['status']; page_count: number; scope_type: string }>(
+        '/validation/runs', {
+          method: 'POST', body: JSON.stringify({ db: payload.scope.db, scope: validationScopeDto(payload.scope) }),
+        },
+      ).then(r => ({
+        id: r.id, status: r.status, scope: { ...payload.scope, page_count: r.page_count, page_numbers: payload.scope.page_numbers ?? [] },
+        options: payload.options, created_at: new Date().toISOString(), started_at: null, completed_at: null,
+        pages_total: r.page_count, pages_completed: 0, pages_failed: 0, progress: 0,
+        working_copy_id: r.id, snapshot_before_id: null, snapshot_after_id: null, pages: [],
+      })),
+    listRuns: (db: string, page = 1, limit = 25) =>
+      request<{ runs: Array<{ id: string; document_id: string | null; scope_type: string; status: ValidationRun['status']; label: string | null; created_at: string; updated_at: string; page_count: number }> }>(
+        withDb('/validation/runs', db),
+      ).then(r => {
+        const total = r.runs.length
+        const start = (page - 1) * limit
+        const data = r.runs.slice(start, start + limit).map(item => ({
+          id: item.id, status: item.status,
+          scope: validationScopeFromDto(db, { scope_type: item.scope_type, document_id: item.document_id }, item.page_count),
+          options: { working_copy: true, preserve_human_edits: true }, created_at: item.created_at,
+          started_at: item.created_at, completed_at: ['ACCEPTED', 'REJECTED', 'CANCELLED', 'FAILED'].includes(item.status) ? item.updated_at : null,
+          pages_total: item.page_count, pages_completed: ['READY', 'ACCEPTED', 'REJECTED'].includes(item.status) ? item.page_count : 0,
+          pages_failed: item.status === 'FAILED' ? item.page_count : 0,
+          progress: ['READY', 'ACCEPTED', 'REJECTED'].includes(item.status) ? 100 : 0,
+          working_copy_id: item.id, snapshot_before_id: null, snapshot_after_id: null,
+        }))
+        return { data, pagination: { page, limit, total, total_pages: Math.max(1, Math.ceil(total / limit)) } } satisfies ValidationRunListResponse
+      }),
+    getRun: (runId: string, db?: string) => {
+      if (!db) return Promise.reject(new Error('db required'))
+      return request<{ id: string; document_id: string | null; scope_type: string; scope: Record<string, unknown>; status: ValidationRun['status']; created_at: string; updated_at: string; accepted_at: string | null; rejected_at: string | null; pages: Array<{ document_id: string; page_number: number; status: ValidationPage['status']; updated_at: string }> }>(
+        withDb(`/validation/runs/${encodeURIComponent(runId)}`, db),
+      ).then(r => {
+        const completed = r.pages.filter(p => ['READY', 'COMPLETED', 'ACCEPTED', 'REJECTED'].includes(p.status)).length
+        return {
+          id: r.id, status: r.status, scope: validationScopeFromDto(db, r.scope, r.pages.length),
+          options: { working_copy: true, preserve_human_edits: true }, created_at: r.created_at,
+          started_at: r.created_at, completed_at: r.accepted_at ?? r.rejected_at,
+          pages_total: r.pages.length, pages_completed: completed,
+          pages_failed: r.pages.filter(p => p.status === 'FAILED').length,
+          progress: r.pages.length ? completed / r.pages.length * 100 : 0,
+          working_copy_id: r.id, snapshot_before_id: null, snapshot_after_id: null,
+          pages: r.pages.map(p => ({ run_id: r.id, document_id: p.document_id, page_number: p.page_number, status: p.status, completed_at: p.updated_at })),
+        } satisfies ValidationRun
+      })
+    },
+    getPage: async (runId: string, pageNumber: number, db?: string, documentId?: string): Promise<ValidationPage> => {
+      if (!db) throw new Error('db required')
+      type RawPage = { document_id: string; page_number: number; status: ValidationPage['status']; baseline: { chunks?: Chunk[]; artifacts?: Array<Artifact & { raw_binary?: unknown }> }; working: { chunks?: Chunk[]; artifacts?: Array<Artifact & { raw_binary?: unknown }> }; error_log: string | null; updated_at: string }
+      const raw = await request<RawPage>(withDb(`/validation/runs/${encodeURIComponent(runId)}/pages/${pageNumber}`, db, documentId ? { document_id: documentId } : undefined))
+      const [tocResult, curriculumResult, benchmarkResult] = await Promise.all([
+        request<{ toc: TocNode[] }>(withDb('/library/toc', db, { document_id: raw.document_id })).catch(() => ({ toc: [] })),
+        request<CurriculumPayload>(withDb('/library/curriculum', db)).catch(() => null),
+        request<{ data: BenchmarkRow[] }>(withDb('/library/benchmarks', db, { document_id: raw.document_id, page: '1', limit: '250' })).catch(() => ({ data: [] })),
+      ])
+      const sanitizeArtifacts = (items: RawPage['working']['artifacts'] = []): Artifact[] => items.map(item => ({ ...item, raw_binary: null, has_binary: item.raw_binary != null }))
+      const beforeChunks = raw.baseline.chunks ?? [], afterChunks = raw.working.chunks ?? []
+      const beforeArtifacts = sanitizeArtifacts(raw.baseline.artifacts), afterArtifacts = sanitizeArtifacts(raw.working.artifacts)
+      const beforeMarkdown = beforeChunks.map(c => c.content_markdown).join('\n\n'), afterMarkdown = afterChunks.map(c => c.content_markdown).join('\n\n')
+      const artifactIds = new Set([...beforeArtifacts.map(a => a.id), ...afterArtifacts.map(a => a.id)])
+      const artifacts = Array.from(artifactIds).map(id => {
+        const before = beforeArtifacts.find(a => a.id === id) ?? null, after = afterArtifacts.find(a => a.id === id) ?? null
+        const change = !before ? 'added' : !after ? 'removed' : JSON.stringify(before) === JSON.stringify(after) ? 'unchanged' : 'changed'
+        return { artifact_id: id, change, before, after } as ValidationDiff['artifacts'][number]
+      })
+      return {
+        run_id: runId, document_id: raw.document_id, page_number: raw.page_number, status: raw.status, completed_at: raw.updated_at,
+        inspection: {
+          chunks: afterChunks, artifacts: afterArtifacts, toc: tocResult.toc ?? [],
+          curriculum: curriculumResult ? {
+            terms: curriculumResult.terms, programs: curriculumResult.programs,
+            assessments: curriculumResult.assessments, links: curriculumResult.links,
+          } : null,
+          benchmarks: (benchmarkResult.data ?? []).filter(row => row.page_number === raw.page_number),
+          errors: raw.error_log ? [{ message: raw.error_log }] : [],
+        },
+        diff: {
+          markdown: { before: beforeMarkdown, after: afterMarkdown }, artifacts,
+          metrics: [
+            { key: 'chunks', before: beforeChunks.length, after: afterChunks.length, delta: afterChunks.length - beforeChunks.length },
+            { key: 'artifacts', before: beforeArtifacts.length, after: afterArtifacts.length, delta: afterArtifacts.length - beforeArtifacts.length },
+          ],
+        }, error: raw.error_log,
+      }
+    },
+    getDiff: (runId: string, pageNumber?: number, db?: string) => {
+      if (!db) return Promise.reject(new Error('db required'))
+      if (pageNumber != null) return api.validation.getPage(runId, pageNumber, db).then(page => page.diff ?? { markdown: null, artifacts: [], metrics: [] })
+      return request<{ changed_pages: number }>(withDb(`/validation/runs/${encodeURIComponent(runId)}/diff`, db))
+        .then(r => ({ markdown: null, artifacts: [], metrics: [{ key: 'changed_pages', before: 0, after: r.changed_pages, delta: r.changed_pages }] }))
+    },
+    cancelRun: (runId: string, db: string) =>
+      request<{ cancelled: boolean; run_id: string }>(withDb(`/validation/runs/${encodeURIComponent(runId)}/cancel`, db), { method: 'POST' }),
+    decide: (runId: string, db: string, payload: ValidationDecisionRequest) => {
+      const endpoint = payload.page_number != null
+        ? withDb(`/validation/runs/${encodeURIComponent(runId)}/decisions`, db)
+        : withDb(`/validation/runs/${encodeURIComponent(runId)}/${payload.decision}`, db)
+      return request<Record<string, unknown>>(endpoint, payload.page_number != null
+        ? { method: 'POST', body: JSON.stringify(payload) }
+        : { method: 'POST' }).then(() => ({
+          id: `${runId}:${payload.decision}:${Date.now()}`, run_id: runId,
+          target: payload.page_number != null ? 'page' : 'run', page_number: payload.page_number,
+          decision: payload.decision, created_at: new Date().toISOString(),
+        } satisfies ValidationDecision))
+    },
+    createStream: (runId: string, db?: string, cursor?: string): EventSource => {
+      const params = new URLSearchParams({ run_id: runId })
+      if (db) params.set('db', db)
+      if (cursor) params.set('cursor', cursor)
+      const token = getAdminToken()
+      if (token) params.set('auth_token', token)
+      return new EventSource(`${BASE_URL}/validation/stream?${params.toString()}`)
+    },
   },
   curriculum: {
     list: (db: string, kind: 'terms' | 'programs' | 'assessments' | 'links') => request(withDb(`/curriculum/${kind}`, db)),

@@ -250,3 +250,236 @@ export interface BenchmarkRow { id: string; page_number: number; engine_used: st
 export interface BenchmarkAggregates { avg_latency_ms: number; avg_confidence: number; avg_ram_peak_mb: number; vlm_usage_rate: number; fallback_rate: number; }
 export interface AppSettings { vec_distance_threshold: number; bm25_score_threshold: number; force_sqlite_vec: boolean; }
 export interface EngineManifest { id: string; label: string; version: string; accent: string; families_tier1: string[]; status: 'active' | 'inactive'; } // V3.4
+
+// ── Studio de validation live ────────────────────────────────────────────────
+// Les unions restent ouvertes via les champs metadata : le moteur peut ajouter
+// une inspection sans forcer le client à inventer ou à perdre des données.
+export type ValidationScopeKind =
+  | 'database' | 'document' | 'toc' | 'chapter' | 'course' | 'title'
+  | 'page' | 'page_range' | 'selection';
+
+export interface ValidationScope {
+  db: string;
+  kind: ValidationScopeKind;
+  document_id?: string;
+  toc_id?: string;
+  page_start?: number;
+  page_end?: number;
+  page_numbers?: number[];
+  chunk_ids?: string[];
+}
+
+export interface ValidationScopeResolved extends ValidationScope {
+  database_label?: string;
+  document_title?: string;
+  toc_title?: string;
+  page_count: number;
+  page_numbers: number[];
+}
+
+export interface ValidationRunOptions {
+  working_copy: boolean;
+  preserve_human_edits: boolean;
+}
+
+export interface ValidationPreviewRequest {
+  scope: ValidationScope;
+  options: ValidationRunOptions;
+}
+
+export interface ValidationPreviewImpact {
+  pages: number;
+  chunks: number | null;
+  artifacts: number | null;
+  toc_entries: number | null;
+  curriculum_entries: number | null;
+  benchmarks: number | null;
+  human_edits_preserved: number | null;
+}
+
+export interface ValidationPreview {
+  preview_id: string;
+  created_at: string;
+  expires_at?: string | null;
+  scope: ValidationScopeResolved;
+  options: ValidationRunOptions;
+  impact: ValidationPreviewImpact;
+  warnings: string[];
+  runnable: boolean;
+  summary: string;
+}
+
+export type ValidationRunStatus =
+  | 'READY' | 'QUEUED' | 'RUNNING' | 'COMPLETED' | 'FAILED' | 'CANCELLED'
+  | 'ACCEPTED' | 'REJECTED';
+export type ValidationPageStatus =
+  | 'READY' | 'PENDING' | 'RUNNING' | 'COMPLETED' | 'FAILED' | 'SKIPPED'
+  | 'CANCELLED' | 'ACCEPTED' | 'REJECTED';
+export type ValidationDecisionKind = 'accept' | 'reject' | 'restore';
+export type ValidationDecisionTarget = 'run' | 'page';
+
+export interface ValidationRunRequest extends ValidationPreviewRequest {
+  preview_id: string;
+}
+
+export interface ValidationRunSummary {
+  id: string;
+  status: ValidationRunStatus;
+  scope: ValidationScopeResolved;
+  options: ValidationRunOptions;
+  created_at: string;
+  started_at: string | null;
+  completed_at: string | null;
+  pages_total: number;
+  pages_completed: number;
+  pages_failed: number;
+  progress: number;
+  working_copy_id: string | null;
+  snapshot_before_id: string | null;
+  snapshot_after_id: string | null;
+  decision?: ValidationDecisionKind | null;
+  error?: string | null;
+}
+
+export interface ValidationMetricSet {
+  latency_ms?: number | null;
+  confidence?: number | null;
+  ram_peak_mb?: number | null;
+  chunks?: number;
+  artifacts?: number;
+  errors?: number;
+  [metric: string]: number | string | boolean | null | undefined;
+}
+
+export interface ValidationMetricDiff {
+  key: string;
+  before: number | string | boolean | null;
+  after: number | string | boolean | null;
+  delta: number | null;
+}
+
+export interface ValidationMarkdownDiff {
+  before: string;
+  after: string;
+  unified?: string | null;
+}
+
+export interface ValidationArtifactDiff {
+  artifact_id: string;
+  change: 'added' | 'removed' | 'changed' | 'unchanged';
+  before: Artifact | null;
+  after: Artifact | null;
+}
+
+export interface ValidationDiff {
+  markdown: ValidationMarkdownDiff | null;
+  artifacts: ValidationArtifactDiff[];
+  metrics: ValidationMetricDiff[];
+}
+
+export interface ValidationInspectionError {
+  code?: string | null;
+  message: string;
+  layer?: string | null;
+  details?: string | null;
+}
+
+export interface ValidationInspection {
+  scan_url?: string | null;
+  scan_thumb_url?: string | null;
+  chunks: Chunk[];
+  artifacts: Artifact[];
+  toc: TocNode[];
+  curriculum: {
+    terms?: CurriculumTerm[];
+    programs?: CurriculumProgram[];
+    assessments?: Assessment[];
+    links?: ContentLink[];
+  } | null;
+  benchmarks: BenchmarkRow[];
+  errors: ValidationInspectionError[];
+}
+
+export interface ValidationPage {
+  run_id: string;
+  document_id?: string;
+  page_number: number;
+  status: ValidationPageStatus;
+  started_at?: string | null;
+  completed_at?: string | null;
+  source_snapshot_id?: string | null;
+  result_snapshot_id?: string | null;
+  metrics_before?: ValidationMetricSet | null;
+  metrics_after?: ValidationMetricSet | null;
+  inspection?: ValidationInspection | null;
+  diff?: ValidationDiff | null;
+  decision?: ValidationDecisionKind | null;
+  error?: string | null;
+}
+
+export interface ValidationWorkingCopy {
+  id: string;
+  run_id: string;
+  db: string;
+  source_snapshot_id: string;
+  status: 'active' | 'accepted' | 'rejected' | 'restored';
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ValidationSnapshot {
+  id: string;
+  run_id: string;
+  working_copy_id: string | null;
+  kind: 'before' | 'after' | 'restore';
+  created_at: string;
+  checksum?: string | null;
+  page_numbers: number[];
+}
+
+export interface ValidationDecision {
+  id: string;
+  run_id: string;
+  target: ValidationDecisionTarget;
+  page_number?: number | null;
+  decision: ValidationDecisionKind;
+  created_at: string;
+  message?: string | null;
+}
+
+export interface ValidationRun extends ValidationRunSummary {
+  pages: ValidationPage[];
+  working_copy?: ValidationWorkingCopy | null;
+  snapshots?: ValidationSnapshot[];
+  decisions?: ValidationDecision[];
+  diff?: ValidationDiff | null;
+  events_cursor?: string | null;
+}
+
+export type ValidationEventType =
+  | 'run_update' | 'page_update' | 'inspection_update' | 'diff_ready'
+  | 'decision' | 'completed' | 'cancelled' | 'error' | 'heartbeat';
+
+export interface ValidationEvent {
+  id?: string;
+  type: ValidationEventType;
+  run_id: string;
+  page_number?: number;
+  status?: ValidationRunStatus | ValidationPageStatus;
+  progress?: number;
+  message?: string;
+  timestamp?: string;
+  run?: ValidationRun;
+  page?: ValidationPage;
+  error?: string;
+}
+
+export interface ValidationRunListResponse {
+  data: ValidationRunSummary[];
+  pagination: { page: number; limit: number; total: number; total_pages: number };
+}
+
+export interface ValidationDecisionRequest {
+  decision: ValidationDecisionKind;
+  page_number?: number;
+}
