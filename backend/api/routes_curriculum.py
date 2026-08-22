@@ -28,6 +28,29 @@ def _table(kind: str):
     return _TABLES[kind]
 
 
+def _validate_document_refs(conn, kind: str, item: dict) -> None:
+    document_id = item.get("document_id")
+    if not document_id:
+        documents = [row[0] for row in conn.execute("SELECT id FROM documents ORDER BY id").fetchall()]
+        if len(documents) != 1:
+            raise HTTPException(400, "document_id requis; curriculum legacy ambigu interdit en écriture")
+        document_id = documents[0]
+        item["document_id"] = document_id
+    if not conn.execute("SELECT 1 FROM documents WHERE id=?", (document_id,)).fetchone():
+        raise HTTPException(404, "Document curriculum introuvable")
+    if item.get("term_id"):
+        owner = conn.execute("SELECT document_id FROM curriculum_terms WHERE id=?",
+                             (item["term_id"],)).fetchone()
+        if owner and owner[0] != document_id:
+            raise HTTPException(409, "Référence term_id cross-document")
+    for field in ("subject_chunk_id", "correction_chunk_id"):
+        if item.get(field):
+            owner = conn.execute("SELECT document_id FROM document_chunks WHERE id=?",
+                                 (item[field],)).fetchone()
+            if owner and owner[0] != document_id:
+                raise HTTPException(409, "Référence %s cross-document" % field)
+
+
 class StrictBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -115,6 +138,7 @@ def import_curriculum(body: ImportBody, db_name: str = Query(alias="db")):
                     if item.get("document_id") not in (None, body.document_id):
                         raise HTTPException(409, "Élément curriculum hors document")
                     item["document_id"] = body.document_id
+                _validate_document_refs(conn, kind, item)
                 conn.execute("INSERT OR REPLACE INTO %s (id, %s) VALUES (%s)"
                              % (table, ", ".join(columns), ", ".join("?" * (len(columns) + 1))),
                              [item.get("id") or str(uuid.uuid4())] + [item.get(c) for c in columns])
@@ -154,10 +178,11 @@ def create_item(kind: str, payload: dict, db_name: str = Query(alias="db")):
     unknown = set(payload) - (set(columns) | {"id"})
     if unknown:
         raise HTTPException(422, "Champs inconnus : %s" % ", ".join(sorted(unknown)))
-    values = [payload.get(col) for col in columns]
     item_id = payload.get("id") or str(uuid.uuid4())
     conn = db.get_connection_or_http(db_name)
     try:
+        _validate_document_refs(conn, kind, payload)
+        values = [payload.get(col) for col in columns]
         conn.execute("INSERT INTO %s (id, %s) VALUES (%s)" % (table, ", ".join(columns),
                      ", ".join("?" * (len(columns) + 1))), [item_id] + values)
         conn.commit()
@@ -181,6 +206,13 @@ def update_item(kind: str, item_id: str, payload: dict, db_name: str = Query(ali
         raise HTTPException(400, "Aucun champ à mettre à jour")
     conn = db.get_connection_or_http(db_name)
     try:
+        row = conn.execute("SELECT %s FROM %s WHERE id=?" % (", ".join(columns), table),
+                           (item_id,)).fetchone()
+        if row is None:
+            raise HTTPException(404, "Élément introuvable")
+        merged = dict(zip(columns, row))
+        merged.update(payload)
+        _validate_document_refs(conn, kind, merged)
         cur = conn.execute("UPDATE %s SET %s WHERE id=?" % (table, ", ".join(sets)), args + [item_id])
         conn.commit()
         if cur.rowcount == 0:

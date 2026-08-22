@@ -136,4 +136,4 @@ def test_orchestrator_recovery_and_ready_skip(fresh_db):
     conn = db.get_connection(TEST_DB)
     queued = conn.execute("SELECT COUNT(*) FROM pipeline_jobs WHERE status='QUEUED'").fetchone()[0]
     conn.close()
-    assert queued == 3  # page 1 (recovery) + pages 1 et 3 du batch
+    assert queued == 2  # page 1 recovery réutilisée + page 3; aucun doublon actif

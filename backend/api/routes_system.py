@@ -64,14 +64,33 @@ def health() -> dict:
         state = db.vector_state()
     queue_len = 0
     current = orch.orchestrator.current_job
+    validation_failed = 0
+    curriculum_ambiguities = 0
+    for name in sorted(os.listdir(config.DATABASES_DIR)):
+        if not db.DB_NAME_RE.fullmatch(name):
+            continue
+        try:
+            conn = db.get_connection(name)
+            validation_failed += conn.execute("SELECT COUNT(*) FROM validation_runs"
+                                              " WHERE status='FAILED'").fetchone()[0]
+            for table in ("curriculum_terms", "curriculum_programs", "assessments", "content_links"):
+                curriculum_ambiguities += conn.execute(
+                    "SELECT COUNT(*) FROM %s WHERE document_id IS NULL" % table).fetchone()[0]
+            conn.close()
+        except Exception:
+            validation_failed += 1
+    degraded = state["engine"] != "sqlite-vec" or validation_failed > 0 or curriculum_ambiguities > 0
     return {
-        "status": "ok",
+        "status": "degraded" if degraded else "ok",
         "version": "3.5",
         "queue_length": queue_len if current is None else queue_len + 1,
         "vector_engine": state["engine"],
         "vector_engine_status": state["status"],
         "vector_engine_message": state["message"],
         "force_sqlite_vec": state["force"],
+        "validation": {"failed_runs": validation_failed,
+                       "curriculum_ambiguous_rows": curriculum_ambiguities,
+                       "status": "degraded" if validation_failed or curriculum_ambiguities else "ok"},
         "readonly": config.RAGDOM_READONLY,  # Phase 7 : le frontend masque la Vue 3
     }
 
@@ -102,9 +121,9 @@ def list_engines() -> dict:
 
 
 # ═══════════════════ Administration §7.6 (V3.2) ═══════════════════
-import shutil
 from fastapi import File, UploadFile, Form
 from fastapi.responses import FileResponse
+from starlette.background import BackgroundTask
 
 _REL_RE = __import__("re").compile(r"^[\w\- /\.]{0,200}$")
 
@@ -202,10 +221,9 @@ def database_export(filename: str):
     path = db.sanitize_db_name(filename)
     if not os.path.exists(path):
         raise HTTPException(404, "Base introuvable")
-    conn = db.get_connection(filename)
-    conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-    conn.close()
-    return FileResponse(path, media_type="application/vnd.sqlite3", filename=filename)
+    snapshot = db.backup_database(filename)
+    return FileResponse(snapshot, media_type="application/vnd.sqlite3", filename=filename,
+                        background=BackgroundTask(os.remove, snapshot))
 
 
 class DuplicateBody(BaseModel):
@@ -220,10 +238,9 @@ def database_duplicate(filename: str, body: DuplicateBody):
         raise HTTPException(404, "Base source introuvable")
     if os.path.exists(dst):
         raise HTTPException(409, "La base cible existe déjà")
-    conn = db.get_connection(filename)
-    conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-    conn.close()
-    shutil.copy2(src, dst)
+    # backup() observes one consistent source snapshot even with concurrent WAL
+    # writers; no checkpoint/copy race and no copy2 fallback.
+    db.backup_database(filename, dst)
     return {"duplicated": True, "new_name": body.new_name}
 
 

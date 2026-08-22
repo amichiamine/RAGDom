@@ -28,7 +28,7 @@ import config  # noqa: E402
 BASE = "http://127.0.0.1:8901"
 TEST_DB = "Maths_Recovery.sqlite"
 BACKEND_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-PYTHON = os.path.abspath(os.path.join(BACKEND_DIR, "..", ".venv", "bin", "python"))
+PYTHON = os.path.abspath(os.path.join(BACKEND_DIR, ".venv", "bin", "python"))
 
 
 def api(path, payload=None, timeout=10):
@@ -114,7 +114,8 @@ def main():
             proc.kill()
 
     transient = query("SELECT COUNT(*) FROM pipeline_jobs WHERE status IN"
-                      " ('QUEUED','PROCESSING','EXTRACTING','QUALIFYING','LINTING','PERSISTING')")[0][0]
+                      " ('QUEUED','PROCESSING_CV','SEGMENTING','EXTRACTING','LINTING',"
+                      "  'VLM_RECOVERY','INDEXED')")[0][0]
     ready_mid = query("SELECT COUNT(*) FROM pipeline_jobs WHERE status='READY'")[0][0]
     print("[5] Post-kill : READY=%d, transitoires=%d" % (ready_mid, transient))
     assert transient > 0, "Le kill devait laisser des jobs transitoires"
@@ -140,10 +141,6 @@ def main():
                   "page_scans": scans, "ready_before_kill": ready_before,
                   "transient_after_kill": transient, "verdict": "PASS" if verdict else "FAIL"}
         print(json.dumps(result, indent=2))
-        out = os.path.join(BACKEND_DIR, "..", "docs", "ragdom", "04_state",
-                           "recovery_sigterm.json")
-        with open(os.path.abspath(out), "w", encoding="utf-8") as f:
-            json.dump(result, f, indent=2)
         assert verdict, "Recovery incomplet : %s" % result
         print("RECOVERY SIGTERM : PASS")
     finally:

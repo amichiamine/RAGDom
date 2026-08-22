@@ -42,7 +42,10 @@ class WorkingCopyDTO(StrictModel):
 
 
 class SnapshotDTO(StrictModel):
-    snapshot_type: Literal["logical", "physical"] = "logical"
+    # A physical snapshot used to capture page_scans but the restore endpoint only
+    # restored working_json.  Advertising it as restorable was unsafe, so the API
+    # now exposes the sole mode it can restore without touching official tables.
+    snapshot_type: Literal["logical"] = "logical"
 
 
 class BenchmarkAttachDTO(StrictModel):
@@ -110,10 +113,22 @@ def _official_page(conn, document_id: str, page_number: int) -> dict:
             "chunks": chunks, "artifacts": artifacts}
 
 
-def _event(conn, run_id: str, event_type: str, payload=None, page_number=None) -> None:
-    conn.execute("INSERT INTO validation_events (id, run_id, page_number, event_type, payload_json)"
-                 " VALUES (?,?,?,?,?)", (str(uuid.uuid4()), run_id, page_number, event_type,
-                                         json.dumps(payload or {}, ensure_ascii=False, sort_keys=True)))
+def _event(conn, run_id: str, event_type: str, payload=None, page_number=None,
+           document_id=None) -> None:
+    if document_id is None and page_number is not None:
+        rows = conn.execute("SELECT DISTINCT document_id FROM validation_run_pages"
+                            " WHERE run_id=? AND page_number=?", (run_id, page_number)).fetchall()
+        document_id = rows[0][0] if len(rows) == 1 else None
+    conn.execute("INSERT INTO validation_events"
+                 " (id, run_id, document_id, page_number, event_type, payload_json)"
+                 " VALUES (?,?,?,?,?,?)", (str(uuid.uuid4()), run_id, document_id, page_number,
+                                            event_type, json.dumps(payload or {}, ensure_ascii=False,
+                                                                   sort_keys=True)))
+
+
+def _payload_sha256(payload: dict) -> str:
+    encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
 def _run(conn, run_id: str):
@@ -180,8 +195,10 @@ def create_run(body: RunCreateDTO):
                 payload = _official_page(conn, target.document_id, page_number)
                 encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True)
                 conn.execute("INSERT INTO validation_run_pages (id, run_id, document_id, page_number,"
-                             " status, baseline_json, working_json) VALUES (?,?,?,?, 'READY', ?,?)",
-                             (str(uuid.uuid4()), run_id, target.document_id, page_number, encoded, encoded))
+                             " status, baseline_json, working_json, baseline_hash)"
+                             " VALUES (?,?,?,?, 'READY', ?,?,?)",
+                             (str(uuid.uuid4()), run_id, target.document_id, page_number, encoded, encoded,
+                              _payload_sha256(payload)))
                 count += 1
         _event(conn, run_id, "run.created", {"pages": count})
         conn.commit()
@@ -333,6 +350,15 @@ def restore_snapshot(run_id: str, snapshot_id: str, db_name: str = Query(alias="
         conn.close()
 
 
+def _assert_human_edits_preserved(baseline: dict, working: dict) -> None:
+    """A validation run may not silently delete/replace pre-existing human edits."""
+    for collection in ("chunks", "artifacts"):
+        working_by_id = {item.get("id"): item for item in working.get(collection, [])}
+        for item in baseline.get(collection, []):
+            if item.get("is_human_edited") and working_by_id.get(item.get("id")) != item:
+                raise HTTPException(409, "Édition humaine protégée : %s" % item.get("id"))
+
+
 def _replace_official_page(conn, payload: dict) -> None:
     doc_id, page_number = payload["document_id"], int(payload["page_number"])
     chunks, artifacts = payload.get("chunks", []), payload.get("artifacts", [])
@@ -367,15 +393,23 @@ def _replace_official_page(conn, payload: dict) -> None:
 def accept_run(run_id: str, db_name: str = Query(alias="db")):
     conn = _conn(db_name)
     try:
+        conn.execute("BEGIN IMMEDIATE")
         run = _run(conn, run_id)
         if run["status"] != "READY":
             raise HTTPException(409, "Seul un run READY peut être accepté")
-        rows = conn.execute("SELECT id, working_json FROM validation_run_pages WHERE run_id=?"
-                            " ORDER BY document_id, page_number", (run_id,)).fetchall()
-        conn.execute("BEGIN")
+        rows = conn.execute("SELECT id, document_id, page_number, baseline_json, working_json, baseline_hash"
+                            " FROM validation_run_pages WHERE run_id=? ORDER BY document_id, page_number",
+                            (run_id,)).fetchall()
         deferred_links = []
-        for page_id, working in rows:
-            deferred_links.extend(_replace_official_page(conn, json.loads(working)))
+        for page_id, document_id, page_number, baseline, working, baseline_hash in rows:
+            baseline_payload = json.loads(baseline)
+            working_payload = json.loads(working)
+            current_hash = _payload_sha256(_official_page(conn, document_id, page_number))
+            expected_hash = baseline_hash or _payload_sha256(baseline_payload)
+            if current_hash != expected_hash:
+                raise HTTPException(409, "Données officielles modifiées depuis la création du run")
+            _assert_human_edits_preserved(baseline_payload, working_payload)
+            deferred_links.extend(_replace_official_page(conn, working_payload))
             conn.execute("UPDATE validation_run_pages SET status='ACCEPTED',"
                          " updated_at=CURRENT_TIMESTAMP WHERE id=?", (page_id,))
         for linked_id, chunk_id in deferred_links:
@@ -478,12 +512,13 @@ def report(run_id: str, db_name: str = Query(alias="db")):
     try:
         run = _run(conn, run_id)
         diff = run_diff(run_id, db_name)
-        events = [{"id": r[0], "page_number": r[1], "event_type": r[2],
-                   "payload": json.loads(r[3]), "created_at": r[4]} for r in conn.execute(
-            "SELECT id, page_number, event_type, payload_json, created_at FROM validation_events"
-            " WHERE run_id=? ORDER BY created_at, rowid", (run_id,)).fetchall()]
+        events = [{"id": r[0], "document_id": r[1], "page_number": r[2], "event_type": r[3],
+                   "payload": json.loads(r[4]), "created_at": r[5]} for r in conn.execute(
+            "SELECT id, document_id, page_number, event_type, payload_json, created_at"
+            " FROM validation_events WHERE run_id=? ORDER BY created_at, rowid", (run_id,)).fetchall()]
         benchmarks = [r[0] for r in conn.execute(
-            "SELECT id FROM processing_benchmarks WHERE validation_run_id=? ORDER BY page_number", (run_id,))]
+            "SELECT id FROM processing_benchmarks WHERE validation_run_id=?"
+            " ORDER BY document_id, page_number, id", (run_id,))]
         return {"schema": "ragdom.validation-report.v1", "run": run, "diff": diff,
                 "events": events, "benchmark_ids": benchmarks}
     finally:
@@ -494,6 +529,7 @@ def report(run_id: str, db_name: str = Query(alias="db")):
 def attach_benchmarks(run_id: str, body: BenchmarkAttachDTO, db_name: str = Query(alias="db")):
     conn = _conn(db_name)
     try:
+        conn.execute("BEGIN IMMEDIATE")
         _run(conn, run_id)
         allowed = {(r[0], r[1]) for r in conn.execute(
             "SELECT document_id, page_number FROM validation_run_pages WHERE run_id=?", (run_id,))}
@@ -505,8 +541,12 @@ def attach_benchmarks(run_id: str, body: BenchmarkAttachDTO, db_name: str = Quer
                 raise HTTPException(404, "Benchmark introuvable : %s" % benchmark_id)
             if (row[0], row[1]) not in allowed:
                 raise HTTPException(409, "Benchmark hors périmètre : %s" % benchmark_id)
-            conn.execute("UPDATE processing_benchmarks SET validation_run_id=? WHERE id=?",
-                         (run_id, benchmark_id))
+            owner = conn.execute("SELECT validation_run_id FROM processing_benchmarks WHERE id=?",
+                                 (benchmark_id,)).fetchone()[0]
+            if owner not in (None, run_id):
+                raise HTTPException(409, "Benchmark déjà rattaché à un autre run : %s" % benchmark_id)
+            conn.execute("UPDATE processing_benchmarks SET validation_run_id=?"
+                         " WHERE id=? AND validation_run_id IS NULL", (run_id, benchmark_id))
             attached.append(benchmark_id)
         _event(conn, run_id, "benchmarks.attached", {"ids": attached})
         conn.commit()
@@ -517,19 +557,34 @@ def attach_benchmarks(run_id: str, body: BenchmarkAttachDTO, db_name: str = Quer
 
 @router.post("/embeddings/profiles", status_code=201)
 def create_embedding_profile(body: EmbeddingProfileDTO, db_name: str = Query(alias="db")):
+    if body.dimensions != 384:
+        raise HTTPException(422, "Seuls les profils 384 dimensions sont supportés actuellement")
     conn = _conn(db_name)
     try:
+        conn.execute("BEGIN IMMEDIATE")
+        natural = (body.model_name.strip(), body.model_version.strip(), body.pooling,
+                   body.dimensions, int(body.normalized))
+        existing = conn.execute("SELECT id, metadata_json FROM embedding_profiles WHERE model_name=?"
+                                " AND model_version=? AND pooling=? AND dimensions=? AND normalized=?",
+                                natural).fetchone()
+        metadata = dict(body.metadata)
+        metadata["profile_contract"] = {"model_name": natural[0], "model_version": natural[1],
+                                         "pooling": natural[2], "dimensions": natural[3],
+                                         "normalized": bool(natural[4])}
+        if existing:
+            stored = json.loads(existing[1] or "{}")
+            if stored != metadata:
+                raise HTTPException(409, "Profil naturel existant avec des métadonnées différentes")
+            conn.commit()
+            return {"id": existing[0], **body.model_dump(), "metadata": stored, "existing": True}
         profile_id = str(uuid.uuid4())
         conn.execute("INSERT INTO embedding_profiles (id, model_name, model_version, pooling, dimensions,"
                      " normalized, metadata_json) VALUES (?,?,?,?,?,?,?)",
-                     (profile_id, body.model_name, body.model_version, body.pooling, body.dimensions,
-                      int(body.normalized), json.dumps(body.metadata, ensure_ascii=False, sort_keys=True)))
+                     (profile_id, *natural, json.dumps(metadata, ensure_ascii=False, sort_keys=True)))
         conn.commit()
-        return {"id": profile_id, **body.model_dump()}
-    except Exception as exc:
+        return {"id": profile_id, **body.model_dump(), "metadata": metadata, "existing": False}
+    except HTTPException:
         conn.rollback()
-        if "UNIQUE constraint failed" in str(exc):
-            raise HTTPException(409, "Profil d'embedding déjà enregistré")
         raise
     finally:
         conn.close()

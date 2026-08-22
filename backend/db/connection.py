@@ -10,6 +10,7 @@ import logging
 import os
 import re
 import sqlite3
+import tempfile
 from pathlib import Path
 from typing import Optional, Tuple
 
@@ -38,6 +39,37 @@ def sanitize_db_name(db_name: str) -> str:
     return db_path
 
 
+def backup_database(db_name: str, destination: Optional[str] = None) -> str:
+    """Create a transactionally consistent SQLite image using Connection.backup."""
+    source_path = sanitize_db_name(db_name)
+    if destination is None:
+        fd, destination = tempfile.mkstemp(prefix=".ragdom-backup-", suffix=".sqlite",
+                                           dir=config.DATABASES_DIR)
+        os.close(fd)
+    source = sqlite3.connect(source_path, check_same_thread=False)
+    target = sqlite3.connect(destination, check_same_thread=False)
+    try:
+        source.backup(target)
+        target.commit()
+    finally:
+        target.close()
+        source.close()
+    return destination
+
+
+def restore_database(db_name: str, backup_path: str) -> None:
+    """Restore a backup image over a live database via SQLite's backup API."""
+    destination_path = sanitize_db_name(db_name)
+    source = sqlite3.connect(backup_path, check_same_thread=False)
+    target = sqlite3.connect(destination_path, check_same_thread=False)
+    try:
+        source.backup(target)
+        target.commit()
+    finally:
+        target.close()
+        source.close()
+
+
 def init_vector_support(conn: sqlite3.Connection, force_strict: Optional[bool] = None) -> str:
     """Option B (résiliente) par défaut ; Option A (stricte) si forcée.
 
@@ -52,14 +84,26 @@ def init_vector_support(conn: sqlite3.Connection, force_strict: Optional[bool] =
         import sqlite_vec  # noqa: WPS433 — import local volontaire (extension optionnelle)
         sqlite_vec.load(conn)
         conn.enable_load_extension(False)
-        _vector_state.update(engine="sqlite-vec", status="ready",
-                             message="Moteur hybride opérationnel (FTS5 + sqlite-vec 384d)")
+        # Returning from a previous fallback must recreate every vector object,
+        # including UPDATE synchronization, and backfill rows inserted meanwhile.
+        try:
+            conn.executescript(SCHEMA_VEC)
+            conn.execute("INSERT OR REPLACE INTO vec_chunks (chunk_id, embedding)"
+                         " SELECT id, embedding_vector FROM document_chunks"
+                         " WHERE embedding_vector IS NOT NULL")
+            vector_count = conn.execute("SELECT COUNT(*) FROM vec_chunks").fetchone()[0]
+            message = "Moteur hybride opérationnel; vec_chunks=%d (schéma et backfill vérifiés)" % vector_count
+        except sqlite3.OperationalError as schema_exc:
+            # In-memory probes and very old databases may not have core tables yet;
+            # create_database reapplies schema_vec after schema_core.
+            message = "sqlite-vec chargé; schéma vectoriel différé: %s" % schema_exc
+        _vector_state.update(engine="sqlite-vec", status="ready", message=message)
         return "sqlite-vec"
     except Exception as exc:  # noqa: BLE001 — tout échec de chargement => fallback contrôlé
         if force_strict:
             raise RuntimeError("Échec critique : sqlite-vec non chargeable alors que le mode strict est forcé. (%s)" % exc)
         logger.warning("[WARN] sqlite-vec non disponible (%s). Bascule en mode dégradé FTS5 BM25.", exc)
-        for trig in ("trg_chunks_vec_sync", "trg_chunks_vec_delete"):
+        for trig in ("trg_chunks_vec_sync", "trg_chunks_vec_delete", "trg_chunks_vec_update"):
             conn.execute("DROP TRIGGER IF EXISTS %s" % trig)
         _vector_state.update(engine="fts5-fallback", status="fallback_bm25_only",
                              message="Mode dégradé FTS5 BM25 actif (sqlite-vec non chargé). Recherche sémantique vectorielle désactivée.")
@@ -133,6 +177,143 @@ def create_database(db_name: str) -> sqlite3.Connection:
     return conn
 
 
+def _sql_statements(script: str):
+    """Parse SQLite statements without breaking trigger bodies on semicolons."""
+    buffer = []
+    for line in script.splitlines(True):
+        buffer.append(line)
+        candidate = "".join(buffer).strip()
+        if candidate and sqlite3.complete_statement(candidate):
+            yield candidate
+            buffer = []
+    if "".join(buffer).strip():
+        raise sqlite3.OperationalError("Migration SQL incomplète")
+
+
+def _prepare_legacy_validation_schema(conn: sqlite3.Connection) -> None:
+    """Repair tables absent from partial historical/public database images."""
+    conn.execute("CREATE TABLE IF NOT EXISTS documents (id TEXT PRIMARY KEY)")
+    conn.execute("CREATE TABLE IF NOT EXISTS processing_benchmarks (id TEXT PRIMARY KEY)")
+    conn.execute("CREATE TABLE IF NOT EXISTS curriculum_terms (id TEXT PRIMARY KEY)")
+    conn.execute("CREATE TABLE IF NOT EXISTS curriculum_programs (id TEXT PRIMARY KEY)")
+    conn.execute("CREATE TABLE IF NOT EXISTS content_links (id TEXT PRIMARY KEY)")
+    conn.execute("CREATE TABLE IF NOT EXISTS scientific_artifacts (id TEXT PRIMARY KEY)")
+    conn.execute("CREATE TABLE IF NOT EXISTS assessments (id TEXT PRIMARY KEY)")
+    conn.execute("CREATE TABLE IF NOT EXISTS pipeline_jobs"
+                 " (id TEXT PRIMARY KEY, document_id TEXT, page_number INTEGER, status TEXT)")
+    conn.execute("CREATE TABLE IF NOT EXISTS ingestion_batches (id TEXT PRIMARY KEY)")
+    conn.execute("CREATE TABLE IF NOT EXISTS document_toc (id TEXT PRIMARY KEY)")
+    conn.execute("CREATE TABLE IF NOT EXISTS document_chunks (id TEXT PRIMARY KEY)")
+    conn.execute("CREATE TABLE IF NOT EXISTS page_scans (id TEXT PRIMARY KEY)")
+    # Published images have existed with partially-created historical tables. Add
+    # the columns consumed by current routes before numbered migrations add their
+    # own V5/V6 ownership columns.
+    repairs = {
+        "documents": (("title", "TEXT"), ("filename", "TEXT"), ("source_path", "TEXT"),
+                      ("total_pages", "INTEGER"), ("doc_type", "TEXT")),
+        "pipeline_jobs": (("document_id", "TEXT"), ("page_number", "INTEGER"), ("status", "TEXT"),
+                          ("batch_id", "TEXT"), ("retry_count", "INTEGER DEFAULT 0"),
+                          ("error_log", "TEXT"), ("updated_at", "DATETIME")),
+        "ingestion_batches": (("source_path", "TEXT"), ("target_db", "TEXT"), ("mode", "TEXT"),
+                              ("page_start", "INTEGER"), ("page_end", "INTEGER"), ("status", "TEXT"),
+                              ("pages_total", "INTEGER"), ("pages_done", "INTEGER DEFAULT 0"),
+                              ("updated_at", "DATETIME")),
+        "document_toc": (("document_id", "TEXT"), ("level", "INTEGER"), ("title", "TEXT"),
+                         ("page_start", "INTEGER"), ("page_end", "INTEGER")),
+        "document_chunks": (("document_id", "TEXT"), ("toc_id", "TEXT"), ("page_number", "INTEGER"),
+                            ("chunk_index", "INTEGER"), ("section_title", "TEXT"),
+                            ("content_markdown", "TEXT"), ("pedagogical_type", "TEXT"),
+                            ("has_solution", "INTEGER DEFAULT 0"), ("linked_solution_chunk_id", "TEXT"),
+                            ("is_human_edited", "INTEGER DEFAULT 0"), ("pedagogical_index", "INTEGER"),
+                            ("updated_at", "DATETIME"), ("embedding_vector", "BLOB"),
+                            ("token_count", "INTEGER"), ("created_at", "DATETIME")),
+        "scientific_artifacts": (("document_id", "TEXT"), ("chunk_id", "TEXT"),
+                                 ("page_number", "INTEGER"), ("domain", "TEXT"),
+                                 ("artifact_type", "TEXT"), ("raw_data", "TEXT"),
+                                 ("raw_binary", "BLOB"), ("render_config_json", "TEXT"),
+                                 ("caption", "TEXT"), ("searchable_text", "TEXT"),
+                                 ("bounding_box_json", "TEXT"), ("is_human_edited", "INTEGER DEFAULT 0"),
+                                 ("updated_at", "DATETIME"), ("created_at", "DATETIME")),
+        "processing_benchmarks": (("document_id", "TEXT"), ("page_number", "INTEGER"),
+                                  ("engine_used", "TEXT"), ("execution_time_ms", "INTEGER")),
+        "page_scans": (("document_id", "TEXT"), ("page_number", "INTEGER"), ("width_px", "INTEGER"),
+                       ("height_px", "INTEGER"), ("dpi", "INTEGER"), ("image_webp", "BLOB"),
+                       ("thumb_webp", "BLOB")),
+        "curriculum_terms": (("term_index", "INTEGER"), ("label", "TEXT"), ("metadata_json", "TEXT")),
+        "curriculum_programs": (("term_id", "TEXT"), ("seq_index", "INTEGER"), ("title", "TEXT"),
+                                ("source", "TEXT"), ("competencies_json", "TEXT")),
+        "assessments": (("term_id", "TEXT"), ("kind", "TEXT"), ("title", "TEXT"),
+                        ("subject_chunk_id", "TEXT"), ("correction_chunk_id", "TEXT"),
+                        ("scale_json", "TEXT")),
+        "content_links": (("link_type", "TEXT"), ("from_id", "TEXT"), ("to_id", "TEXT"),
+                          ("page_number", "INTEGER"), ("metadata_json", "TEXT")),
+    }
+    for table, columns in repairs.items():
+        existing = {row[1] for row in conn.execute("PRAGMA table_info(%s)" % table)}
+        for name, declaration in columns:
+            if name not in existing:
+                conn.execute("ALTER TABLE %s ADD COLUMN %s %s" % (table, name, declaration))
+    conn.execute("DELETE FROM pipeline_jobs WHERE rowid NOT IN (SELECT MIN(rowid) FROM pipeline_jobs"
+                 " WHERE status IN ('QUEUED','PROCESSING_CV','SEGMENTING','EXTRACTING','LINTING',"
+                 " 'VLM_RECOVERY','INDEXED') GROUP BY document_id,page_number)"
+                 " AND status IN ('QUEUED','PROCESSING_CV','SEGMENTING','EXTRACTING','LINTING',"
+                 " 'VLM_RECOVERY','INDEXED')")
+
+
+def _repair_legacy_curriculum_scope(conn: sqlite3.Connection) -> int:
+    """Backfill NULL curriculum ownership only when the database is unambiguous."""
+    documents = [row[0] for row in conn.execute("SELECT id FROM documents ORDER BY id").fetchall()]
+    if len(documents) == 1:
+        changed = 0
+        for table in ("curriculum_terms", "curriculum_programs", "assessments", "content_links"):
+            columns = {row[1] for row in conn.execute("PRAGMA table_info(%s)" % table)}
+            if "document_id" in columns:
+                changed += conn.execute("UPDATE %s SET document_id=? WHERE document_id IS NULL" % table,
+                                        (documents[0],)).rowcount
+        conn.commit()  # UPDATE opens a transaction even when every rowcount is zero.
+        return 0
+    ambiguous = 0
+    for table in ("curriculum_terms", "curriculum_programs", "assessments", "content_links"):
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(%s)" % table)}
+        if "document_id" in columns:
+            ambiguous += conn.execute("SELECT COUNT(*) FROM %s WHERE document_id IS NULL" % table).fetchone()[0]
+    return ambiguous
+
+
+def _hardened_schema_present(conn: sqlite3.Connection) -> bool:
+    required = {
+        "assessments": {"document_id"},
+        "validation_events": {"document_id"},
+        "validation_run_pages": {"baseline_hash"},
+        "pipeline_jobs": {"document_id", "page_number", "status"},
+    }
+    for table, columns in required.items():
+        actual = {row[1] for row in conn.execute("PRAGMA table_info(%s)" % table)}
+        if not columns.issubset(actual):
+            return False
+    return conn.execute("SELECT 1 FROM sqlite_master WHERE type='index'"
+                        " AND name='uq_jobs_active_page'").fetchone() is not None
+
+
+def _verify_hardened_schema(conn: sqlite3.Connection) -> None:
+    required = {
+        "assessments": {"document_id"},
+        "validation_events": {"document_id"},
+        "validation_run_pages": {"baseline_hash"},
+        "pipeline_jobs": {"document_id", "page_number", "status"},
+    }
+    for table, columns in required.items():
+        actual = {row[1] for row in conn.execute("PRAGMA table_info(%s)" % table)}
+        missing = columns - actual
+        if missing:
+            raise sqlite3.OperationalError("Post-migration invalide: %s manque %s" %
+                                           (table, ",".join(sorted(missing))))
+    index = conn.execute("SELECT 1 FROM sqlite_master WHERE type='index'"
+                         " AND name='uq_jobs_active_page'").fetchone()
+    if index is None:
+        raise sqlite3.OperationalError("Post-migration invalide: index actif absent")
+
+
 def apply_migrations(conn: sqlite3.Connection) -> int:
     """Applique les migrations numérotées manquantes.
 
@@ -143,6 +324,10 @@ def apply_migrations(conn: sqlite3.Connection) -> int:
     mig_dir = _DB_DIR / "migrations"
     conn.execute("CREATE TABLE IF NOT EXISTS schema_version (version INTEGER PRIMARY KEY,"
                  " applied_at DATETIME DEFAULT CURRENT_TIMESTAMP, description TEXT)")
+    conn.commit()
+    if not _hardened_schema_present(conn):
+        _prepare_legacy_validation_schema(conn)
+        conn.commit()
     applied = {r[0] for r in conn.execute("SELECT version FROM schema_version")}
     count = 0
     for path in sorted(mig_dir.glob("migration_*.sql")):
@@ -154,7 +339,7 @@ def apply_migrations(conn: sqlite3.Connection) -> int:
             continue
         script = "\n".join(line for line in path.read_text(encoding="utf-8").splitlines()
                            if not line.lstrip().startswith("--"))
-        statements = [part.strip() for part in script.split(";") if part.strip()]
+        statements = list(_sql_statements(script))
         try:
             conn.execute("BEGIN")
             for statement in statements:
@@ -172,6 +357,11 @@ def apply_migrations(conn: sqlite3.Connection) -> int:
             conn.rollback()
             raise
         count += 1
+    _verify_hardened_schema(conn)
+    ambiguous = _repair_legacy_curriculum_scope(conn)
+    if ambiguous:
+        logger.warning("Curriculum legacy ambigu: %d ligne(s) document_id NULL dans une base multi-document",
+                       ambiguous)
     return count
 
 

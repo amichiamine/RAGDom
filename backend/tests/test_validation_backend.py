@@ -1,12 +1,15 @@
 # -*- coding: utf-8 -*-
 """Studio de validation live : scopes, runs, snapshots, isolation et embeddings."""
+import hashlib
 import importlib.util
+import json
 import os
 import sqlite3
 import struct
 import sys
 
 import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -99,8 +102,11 @@ def test_universal_scope_resolver_and_strict_guards():
 
 def test_working_copy_snapshots_diff_reject_never_mutate_official():
     run_id = _create_run({"scope_type": "page", "document_id": "d1", "page": 2})
+    unsupported = client.post("/api/validation/runs/%s/snapshots?db=%s" % (run_id, TEST_DB),
+                              json={"snapshot_type": "physical"})
+    assert unsupported.status_code == 422
     snap = client.post("/api/validation/runs/%s/snapshots?db=%s" % (run_id, TEST_DB),
-                       json={"snapshot_type": "physical"})
+                       json={"snapshot_type": "logical"})
     assert snap.status_code == 201 and snap.json()["page_count"] == 1
     page = client.get("/api/validation/runs/%s/pages/2?db=%s" % (run_id, TEST_DB)).json()
     working = page["working"]
@@ -277,6 +283,10 @@ def test_migration_application_is_additive_and_idempotent_from_v4():
         migrated = db.get_connection(legacy)
         assert migrated.execute("SELECT COUNT(*) FROM schema_version WHERE version=5").fetchone()[0] == 1
         assert "document_id" in [r[1] for r in migrated.execute("PRAGMA table_info(content_links)")]
+        assert "document_id" in [r[1] for r in migrated.execute("PRAGMA table_info(assessments)")]
+        assert "document_id" in [r[1] for r in migrated.execute("PRAGMA table_info(validation_events)")]
+        assert "baseline_hash" in [r[1] for r in migrated.execute("PRAGMA table_info(validation_run_pages)")]
+        assert migrated.execute("SELECT 1 FROM sqlite_master WHERE name='uq_jobs_active_page'").fetchone()
         assert db.apply_migrations(migrated) == 0
         migrated.close()
     finally:
@@ -285,3 +295,192 @@ def test_migration_application_is_additive_and_idempotent_from_v4():
                 os.remove(path + suffix)
             except FileNotFoundError:
                 pass
+
+
+def _official_digest():
+    conn = db.get_connection(TEST_DB)
+    try:
+        rows = []
+        for table in ("document_chunks", "scientific_artifacts", "page_scans"):
+            rows.extend((table,) + tuple(row) for row in conn.execute(
+                "SELECT * FROM %s ORDER BY rowid" % table).fetchall())
+        return hashlib.sha256(repr(rows).encode()).hexdigest()
+    finally:
+        conn.close()
+
+
+def test_run_requalify_is_fail_closed_and_terminal_actions_preserve_official(monkeypatch):
+    run_id = _create_run({"scope_type": "page", "document_id": "d1", "page": 1})
+    before = _official_digest()
+    response = client.post("/api/pipeline/requalify-artifacts", json={
+        "db": TEST_DB, "document_id": "d1", "run_id": run_id, "limit": 1, "dry_run": False})
+    assert response.status_code == 409
+    assert _official_digest() == before
+    assert client.post("/api/validation/runs/%s/cancel?db=%s" % (run_id, TEST_DB)).status_code == 200
+    assert _official_digest() == before
+
+    rejected_run = _create_run({"scope_type": "page", "document_id": "d1", "page": 2})
+    before = _official_digest()
+    assert client.post("/api/validation/runs/%s/reject?db=%s" %
+                       (rejected_run, TEST_DB)).status_code == 200
+    assert _official_digest() == before
+
+
+def test_accept_optimistic_concurrency_and_human_edit_protection():
+    run_id = _create_run({"scope_type": "page", "document_id": "d1", "page": 2})
+    conn = db.get_connection(TEST_DB)
+    conn.execute("UPDATE document_chunks SET content_markdown='human concurrent', is_human_edited=1"
+                 " WHERE id='d1-c2'")
+    conn.commit(); conn.close()
+    conflicted = client.post("/api/validation/runs/%s/accept?db=%s" % (run_id, TEST_DB))
+    assert conflicted.status_code == 409
+    conn = db.get_connection(TEST_DB)
+    assert conn.execute("SELECT content_markdown FROM document_chunks WHERE id='d1-c2'").fetchone()[0] == \
+        "human concurrent"
+    conn.execute("UPDATE document_chunks SET content_markdown='protected baseline', is_human_edited=1"
+                 " WHERE id='d1-c3'")
+    conn.commit(); conn.close()
+
+    protected = _create_run({"scope_type": "page", "document_id": "d1", "page": 3})
+    page = client.get("/api/validation/runs/%s/pages/3?db=%s" % (protected, TEST_DB)).json()
+    page["working"]["chunks"][0]["content_markdown"] = "overwrite attempted"
+    assert client.put("/api/validation/runs/%s/pages/3?db=%s" % (protected, TEST_DB),
+                      json={"working": page["working"]}).status_code == 200
+    assert client.post("/api/validation/runs/%s/accept?db=%s" %
+                       (protected, TEST_DB)).status_code == 409
+    conn = db.get_connection(TEST_DB)
+    assert conn.execute("SELECT content_markdown FROM document_chunks WHERE id='d1-c3'").fetchone()[0] == \
+        "protected baseline"
+    conn.close()
+
+
+def test_active_job_uniqueness_and_atomic_claim():
+    orch = PipelineOrchestrator()
+    first = orch.enqueue_batch(TEST_DB, "d1", "/tmp/d1.pdf", "page_range", 1, 1)
+    second = orch.enqueue_batch(TEST_DB, "d1", "/tmp/d1.pdf", "page_range", 1, 1)
+    assert first["skipped_active"] == 0 and second["skipped_active"] == 1
+    conn = db.get_connection(TEST_DB)
+    assert conn.execute("SELECT COUNT(*) FROM pipeline_jobs WHERE document_id='d1' AND page_number=1"
+                        " AND status='QUEUED'").fetchone()[0] == 1
+    with pytest.raises(sqlite3.IntegrityError):
+        conn.execute("INSERT INTO pipeline_jobs (id,document_id,page_number,status)"
+                     " VALUES ('duplicate','d1',1,'QUEUED')")
+    conn.rollback(); conn.close()
+    claimed = orch._next_job(TEST_DB)
+    assert claimed and claimed["document_id"] == "d1"
+    assert PipelineOrchestrator()._next_job(TEST_DB) is None
+
+
+def test_reprocess_restores_snapshot_if_enqueue_fails(monkeypatch):
+    from api import routes_pipeline
+    for path in ("/tmp/d1.pdf",):
+        with open(path, "wb") as stream:
+            stream.write(b"source")
+    before = _official_digest()
+    monkeypatch.setattr(routes_pipeline.orchestrator, "enqueue_batch",
+                        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("enqueue failed")))
+    with pytest.raises(RuntimeError, match="enqueue failed"):
+        client.post("/api/pipeline/reprocess", json={
+            "db": TEST_DB, "scope": "page", "document_id": "d1", "page": 1})
+    assert _official_digest() == before
+    os.remove("/tmp/d1.pdf")
+
+
+def test_validation_events_are_document_scoped_and_benchmark_owner_is_immutable():
+    run1 = _create_run({"scope_type": "page", "document_id": "d1", "page": 2})
+    page = client.get("/api/validation/runs/%s/pages/2?db=%s" % (run1, TEST_DB)).json()
+    assert client.put("/api/validation/runs/%s/pages/2?db=%s" % (run1, TEST_DB),
+                      json={"working": page["working"]}).status_code == 200
+    conn = db.get_connection(TEST_DB)
+    assert conn.execute("SELECT document_id FROM validation_events WHERE run_id=?"
+                        " AND page_number=2 ORDER BY rowid DESC", (run1,)).fetchone()[0] == "d1"
+    conn.close()
+    assert client.post("/api/validation/runs/%s/benchmarks?db=%s" % (run1, TEST_DB),
+                       json={"benchmark_ids": ["b1"]}).status_code == 200
+    run2 = _create_run({"scope_type": "page", "document_id": "d1", "page": 2})
+    assert client.post("/api/validation/runs/%s/benchmarks?db=%s" % (run2, TEST_DB),
+                       json={"benchmark_ids": ["b1"]}).status_code == 409
+
+
+def test_embedding_profile_natural_key_384_contract_and_vector_recovery():
+    payload = {"model_name": " deterministic/model ", "model_version": "v1", "pooling": "mean",
+               "dimensions": 384, "normalized": True, "metadata": {"runtime": "cpu"}}
+    first = client.post("/api/validation/embeddings/profiles?db=" + TEST_DB, json=payload)
+    second = client.post("/api/validation/embeddings/profiles?db=" + TEST_DB, json=payload)
+    assert first.status_code == second.status_code == 201
+    assert first.json()["id"] == second.json()["id"] and second.json()["existing"] is True
+    bad = dict(payload, dimensions=768)
+    assert client.post("/api/validation/embeddings/profiles?db=" + TEST_DB, json=bad).status_code == 422
+
+    conn = db.get_connection(TEST_DB)
+    if db.vector_state()["engine"] == "sqlite-vec":
+        conn.execute("DROP TRIGGER IF EXISTS trg_chunks_vec_sync")
+        conn.execute("DROP TRIGGER IF EXISTS trg_chunks_vec_delete")
+        conn.execute("DROP TRIGGER IF EXISTS trg_chunks_vec_update")
+        conn.execute("DROP TABLE IF EXISTS vec_chunks")
+        db.init_vector_support(conn)
+        expected = conn.execute("SELECT COUNT(*) FROM document_chunks WHERE embedding_vector IS NOT NULL").fetchone()[0]
+        assert conn.execute("SELECT COUNT(*) FROM vec_chunks").fetchone()[0] == expected
+        conn.execute("UPDATE document_chunks SET embedding_vector=NULL WHERE id='d1-c1'")
+        assert conn.execute("SELECT COUNT(*) FROM vec_chunks WHERE chunk_id='d1-c1'").fetchone()[0] == 0
+    conn.close()
+
+
+def test_curriculum_legacy_ambiguity_and_cross_document_guards():
+    conn = db.get_connection(TEST_DB)
+    conn.execute("INSERT INTO curriculum_terms (id,document_id,term_index,label)"
+                 " VALUES ('legacy-null',NULL,1,'legacy')")
+    conn.execute("INSERT INTO curriculum_terms (id,document_id,term_index,label)"
+                 " VALUES ('d2-term','d2',1,'d2')")
+    conn.commit(); conn.close()
+    ambiguous = client.post("/api/curriculum/programs?db=" + TEST_DB,
+                            json={"term_id": "d2-term", "seq_index": 1, "title": "x"})
+    assert ambiguous.status_code == 400
+    crossed = client.post("/api/curriculum/programs?db=" + TEST_DB,
+                          json={"document_id": "d1", "term_id": "d2-term",
+                                "seq_index": 1, "title": "x"})
+    assert crossed.status_code == 409
+    health = client.get("/api/system/health").json()
+    assert health["status"] == "degraded"
+    assert health["validation"]["curriculum_ambiguous_rows"] >= 1
+
+
+def test_sql_migration_parser_keeps_trigger_body_together():
+    script = """CREATE TABLE x(id INTEGER, value TEXT);\nCREATE TABLE log(v TEXT);\nCREATE TRIGGER tx AFTER INSERT ON x BEGIN\n INSERT INTO log(v) VALUES('a;b');\n UPDATE x SET value='done' WHERE id=new.id;\nEND;\n"""
+    statements = list(db._sql_statements(script))
+    assert len(statements) == 3
+    conn = sqlite3.connect(":memory:")
+    for statement in statements:
+        conn.execute(statement)
+    conn.execute("INSERT INTO x(id) VALUES(1)")
+    assert conn.execute("SELECT value FROM x").fetchone()[0] == "done"
+    conn.close()
+
+
+def test_sqlite_duplicate_uses_atomic_backup():
+    duplicate = "Validation_Backend_Copy.sqlite"
+    path = os.path.join(config.DATABASES_DIR, duplicate)
+    for suffix in ("", "-wal", "-shm"):
+        try:
+            os.remove(path + suffix)
+        except FileNotFoundError:
+            pass
+    response = client.post("/api/system/databases/%s/duplicate" % TEST_DB,
+                           json={"new_name": duplicate})
+    assert response.status_code == 200
+    copied = db.get_connection(duplicate)
+    assert copied.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+    assert copied.execute("SELECT COUNT(*) FROM documents").fetchone()[0] == 2
+    copied.close()
+    os.remove(path)
+
+
+def test_historical_chapter_and_folder_confinement_guards():
+    from api.routes_pipeline import StartBody, _resolve_pages
+    with pytest.raises(HTTPException) as mismatch:
+        _resolve_pages(StartBody(source_path="x", mode="chapter", toc_id="t2"), TEST_DB,
+                       {"id": "d1", "total_pages": 5})
+    assert mismatch.value.status_code == 409
+    outside = client.post("/api/pipeline/start", json={"source_path": "/tmp", "mode": "folder",
+                                                       "target_db": TEST_DB})
+    assert outside.status_code == 400
