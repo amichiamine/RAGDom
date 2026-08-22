@@ -114,7 +114,7 @@ export default function ValidationRunsPanel({ activeDb, readonly, createdRun }: 
   useEffect(() => {
     if (!runId || pageParam == null || !validationDb) { setSelectedPage(null); return }
     void selectPage(pageParam, documentParam ?? undefined)
-  }, [documentParam, pageParam, runId, selectPage, validationDb])
+  }, [documentParam, pageParam, runId, run?.status, selectPage, validationDb])
 
   const refresh = async () => {
     await Promise.all([loadRuns(), runId ? loadRun(runId, true) : Promise.resolve(null)])
@@ -169,17 +169,24 @@ export default function ValidationRunsPanel({ activeDb, readonly, createdRun }: 
               <div className="validation-actions">
                 <span className="badge badge-subtle"><Timer size={12} />{t('validation.runs.polling')}</span>
                 {!isValidationRunTerminal(run.status) && <button type="button" className="btn btn-sm btn-outline-danger" onClick={() => void mutate('cancel')} disabled={readonly || mutating}><Ban size={14} /> {t('buttons.cancel')}</button>}
+                {(run.status === 'BLOCKED' || run.status === 'FAILED') && <button type="button" className="btn btn-sm btn-outline-danger" onClick={() => void mutate('reject')} disabled={readonly || mutating}><X size={14} /> {t('validation.decisions.reject_run')}</button>}
               </div>
             </header>
             <div className="validation-progress" role="progressbar" aria-label={t('validation.runs.progress')} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(run.progress)}><span style={{ width: `${Math.min(100, Math.max(0, run.progress))}%` }} /></div>
-            <div className="validation-run-summary"><span>{run.pages_total} {t('validation.metrics.pages')}</span><span>{t('validation.builder.working_copy')}</span></div>
+            <div className="validation-run-summary">
+              <span>{run.pages_total} {t('validation.metrics.pages')}</span>
+              <span>{run.operation}</span>
+              {run.batch_id && <span><code dir="ltr">{run.batch_id.slice(0, 8)}</code></span>}
+              {run.working_db_filename && <span title={run.working_db_filename}>{t('validation.builder.working_copy')} · {run.working_db_exists ? t('validation.runs.copy_available') : t('validation.runs.copy_removed')}</span>}
+            </div>
+            {run.error_log && <p className="validation-inline-error" role="alert">{run.status === 'BLOCKED' ? t('validation.runs.source_missing') : t('validation.runs.execution_failed')} — {run.error_log}</p>}
 
             <div className="validation-page-strip" aria-label={t('validation.runs.pages')}>{run.pages.map(page => <button type="button" key={`${page.document_id}-${page.page_number}`} className={page.page_number === pageParam && (!documentParam || page.document_id === documentParam) ? 'active' : ''} aria-pressed={page.page_number === pageParam && (!documentParam || page.document_id === documentParam)} onClick={() => void selectPage(page.page_number, page.document_id)} title={page.document_id}><span>{page.page_number}</span><StatusDot status={page.status} /></button>)}</div>
 
             {selectedPage && (
               <>
                 <div className="validation-page-heading"><h4>{t('library.page')} {selectedPage.page_number}</h4><StatusBadge status={selectedPage.status} /></div>
-                {!isValidationRunTerminal(run.status) && <div className="validation-decision-bar" aria-label={t('validation.decisions.title')}>
+                {run.status === 'COMPLETED' && <div className="validation-decision-bar" aria-label={t('validation.decisions.title')}>
                   <button type="button" className="btn btn-sm btn-outline-warning" onClick={() => void mutate('restore', 'page')} disabled={readonly || mutating}><RotateCcw size={14} /> {t('validation.decisions.restore_page')}</button>
                 </div>}
                 <ValidationDiffView diff={selectedPage.diff} db={run.scope.db} />
@@ -187,12 +194,12 @@ export default function ValidationRunsPanel({ activeDb, readonly, createdRun }: 
               </>
             )}
 
-            {!isValidationRunTerminal(run.status) && (
+            {run.status === 'COMPLETED' && (
               <div className="validation-decision-bar validation-run-decisions">
                 <strong>{t('validation.decisions.run_title')}</strong>
-                {run.status === 'READY' && <button type="button" className="btn btn-sm btn-success" onClick={() => setConfirmAcceptOpen(true)} disabled={readonly || mutating}><Check size={14} /> {t('validation.decisions.accept_run')}</button>}
-                {run.status === 'READY' && <button type="button" className="btn btn-sm btn-outline-danger" onClick={() => void mutate('reject')} disabled={readonly || mutating}><X size={14} /> {t('validation.decisions.reject_run')}</button>}
-                <button type="button" className="btn btn-sm btn-outline-warning" onClick={() => void mutate('restore')} disabled={readonly || mutating}><RotateCcw size={14} /> {t('validation.decisions.restore_run')}</button>
+                {run.status === 'COMPLETED' && <button type="button" className="btn btn-sm btn-success" onClick={() => setConfirmAcceptOpen(true)} disabled={readonly || mutating}><Check size={14} /> {t('validation.decisions.accept_run')}</button>}
+                {run.status === 'COMPLETED' && <button type="button" className="btn btn-sm btn-outline-danger" onClick={() => void mutate('reject')} disabled={readonly || mutating}><X size={14} /> {t('validation.decisions.reject_run')}</button>}
+                {run.status === 'COMPLETED' && <button type="button" className="btn btn-sm btn-outline-warning" onClick={() => void mutate('restore')} disabled={readonly || mutating}><RotateCcw size={14} /> {t('validation.decisions.restore_run')}</button>}
               </div>
             )}
           </>
@@ -239,7 +246,7 @@ export default function ValidationRunsPanel({ activeDb, readonly, createdRun }: 
 
 function StatusBadge({ status }: { status: string }) {
   const { t } = useLanguage()
-  const klass = status === 'ACCEPTED' ? 'badge-success' : status === 'REJECTED' || status === 'CANCELLED' || status === 'FAILED' ? 'badge-danger' : 'badge-info'
+  const klass = status === 'ACCEPTED' || status === 'COMPLETED' ? 'badge-success' : status === 'REJECTED' || status === 'CANCELLED' || status === 'FAILED' || status === 'BLOCKED' ? 'badge-danger' : 'badge-info'
   return <span className={`badge ${klass}`}>{t(`validation.status.${status}`)}</span>
 }
 function StatusDot({ status }: { status: string }) {

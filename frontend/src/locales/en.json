@@ -473,7 +473,11 @@
     "readonly": "Read-only — mutations disabled",
     "status": {
       "DRAFT": "Draft",
+      "CREATED": "Copy created",
+      "QUEUED": "Queued",
       "RUNNING": "Running",
+      "COMPLETED": "Completed",
+      "BLOCKED": "Blocked",
       "PENDING": "Pending",
       "PROCESSING": "Processing",
       "READY": "Ready",
@@ -535,7 +539,11 @@
       "progress": "Validation progress",
       "cancelled": "Cancellation requested.",
       "direct": "Direct write",
-      "pages": "Run pages"
+      "pages": "Run pages",
+      "copy_available": "isolated copy available",
+      "copy_removed": "isolated copy removed",
+      "source_missing": "The official source PDF is missing. The official database was not modified.",
+      "execution_failed": "The real pipeline execution failed"
     },
     "inspection": {
       "title": "Unified inspection",

@@ -7,6 +7,7 @@ import os
 import sqlite3
 import struct
 import sys
+import time
 from pathlib import Path
 
 import fitz
@@ -177,9 +178,40 @@ def _load_curriculum_builder():
 
 
 def _create_run(database, scope):
+    """Create a completed staging run for decision/reference unit scenarios."""
     response = client.post("/api/validation/runs", json={"db": database, "scope": scope})
     assert response.status_code == 201, response.text
-    return response.json()["id"]
+    run_id = response.json()["id"]
+    conn = db.get_connection(database)
+    conn.execute("UPDATE validation_runs SET status='READY', execution_status='COMPLETED',"
+                 " progress_current=progress_total WHERE id=?", (run_id,))
+    conn.execute("UPDATE validation_run_pages SET status='READY' WHERE run_id=?", (run_id,))
+    conn.commit(); conn.close()
+    return run_id
+
+
+def _create_and_execute(scope):
+    response = client.post("/api/validation/runs", json={"db": TEST_DB, "scope": scope})
+    assert response.status_code == 201, response.text
+    created = response.json()
+    assert created["status"] == "CREATED"
+    assert created["working_db_filename"].startswith("validation_test_")
+    executed = client.post("/api/validation/runs/%s/execute" % created["id"], params={"db": TEST_DB})
+    assert executed.status_code == 202, executed.text
+    return created, executed.json()
+
+
+def _poll_run(run_id, terminal=("COMPLETED", "BLOCKED", "FAILED", "CANCELLED"), timeout=30):
+    deadline = time.time() + timeout
+    last = None
+    while time.time() < deadline:
+        response = client.get("/api/validation/runs/%s" % run_id, params={"db": TEST_DB})
+        assert response.status_code == 200, response.text
+        last = response.json()
+        if last["status"] in terminal:
+            return last
+        time.sleep(0.05)
+    pytest.fail("run %s non terminal après %ss: %r" % (run_id, timeout, last))
 
 
 def _official_hash(database):
@@ -204,6 +236,129 @@ def multibook_corpus(tmp_path):
     _seed_multibook_database(pdf_dir)
     yield pdf_dir
     _remove_database(TEST_DB)
+    for path in Path(config.DATABASES_DIR).glob("validation_test_*.sqlite*"):
+        path.unlink(missing_ok=True)
+
+
+def test_validation_execute_real_pipeline_isolated_diff_reject(multibook_corpus, monkeypatch):
+    monkeypatch.setenv("RAGDOM_VLM_PAGE_OCR", "false")
+    monkeypatch.setenv("RAGDOM_VLM_ARTIFACTS", "false")
+    before = _official_hash(TEST_DB)
+    created, execution = _create_and_execute(
+        {"scope_type": "page", "document_id": "science-fr-native", "page": 1})
+    assert execution["official_mutated"] is False
+    run = _poll_run(created["id"])
+    assert run["status"] == "COMPLETED"
+    assert run["progress"] == {"current": 1, "total": 1, "percent": 100.0}
+    assert run["batch_id"] and run["operation"] == "REPROCESS"
+    assert run["working_db"]["exists"] is True
+    assert _official_hash(TEST_DB) == before
+
+    working = db.get_connection(created["working_db_filename"])
+    try:
+        assert working.execute("SELECT COUNT(*) FROM pipeline_jobs WHERE batch_id=? AND status='READY'",
+                               (run["batch_id"],)).fetchone()[0] == 1
+        assert working.execute("SELECT COUNT(*) FROM document_chunks"
+                               " WHERE document_id='science-fr-native' AND page_number=1").fetchone()[0] > 0
+    finally:
+        working.close()
+    diff = client.get("/api/validation/runs/%s/diff" % created["id"], params={"db": TEST_DB}).json()
+    assert diff["changed_pages"] == 1
+    rejected = client.post("/api/validation/runs/%s/reject" % created["id"], params={"db": TEST_DB})
+    assert rejected.status_code == 200 and rejected.json()["working_db_deleted"] is True
+    assert not _db_path(created["working_db_filename"]).exists()
+    assert _official_hash(TEST_DB) == before
+
+
+def test_validation_accept_promotes_only_scope_and_removes_copy(multibook_corpus, monkeypatch):
+    monkeypatch.setenv("RAGDOM_VLM_PAGE_OCR", "false")
+    monkeypatch.setenv("RAGDOM_VLM_ARTIFACTS", "false")
+    conn = db.get_connection(TEST_DB)
+    untouched_before = conn.execute("SELECT * FROM document_chunks"
+                                    " WHERE document_id='science-fr-native' AND page_number=2").fetchall()
+    target_before = conn.execute("SELECT * FROM document_chunks"
+                                 " WHERE document_id='science-fr-native' AND page_number=1").fetchall()
+    conn.close()
+    created, _ = _create_and_execute(
+        {"scope_type": "page", "document_id": "science-fr-native", "page": 1})
+    assert _poll_run(created["id"])["status"] == "COMPLETED"
+    accepted = client.post("/api/validation/runs/%s/accept" % created["id"], params={"db": TEST_DB})
+    assert accepted.status_code == 200, accepted.text
+    assert accepted.json()["official_mutated"] is True
+    assert not _db_path(created["working_db_filename"]).exists()
+    conn = db.get_connection(TEST_DB)
+    try:
+        untouched_after = conn.execute("SELECT * FROM document_chunks"
+                                       " WHERE document_id='science-fr-native' AND page_number=2").fetchall()
+        target_after = conn.execute("SELECT * FROM document_chunks"
+                                    " WHERE document_id='science-fr-native' AND page_number=1").fetchall()
+        assert untouched_after == untouched_before
+        assert target_after != target_before
+    finally:
+        conn.close()
+
+
+def test_validation_missing_source_blocks_without_official_mutation(multibook_corpus):
+    conn = db.get_connection(TEST_DB)
+    conn.execute("UPDATE documents SET source_path=? WHERE id='without-toc'",
+                 (str(multibook_corpus / "missing.pdf"),))
+    conn.commit(); conn.close()
+    before = _official_hash(TEST_DB)
+    response = client.post("/api/validation/runs", json={"db": TEST_DB, "scope": {
+        "scope_type": "page", "document_id": "without-toc", "page": 1}})
+    assert response.status_code == 201
+    run_id = response.json()["id"]
+    blocked = client.post("/api/validation/runs/%s/execute" % run_id, params={"db": TEST_DB})
+    assert blocked.status_code == 202
+    assert blocked.json()["status"] == "BLOCKED"
+    detail = _poll_run(run_id)
+    assert detail["status"] == "BLOCKED"
+    assert "source" in detail["error_log"].lower()
+    assert _official_hash(TEST_DB) == before
+    rejected = client.post("/api/validation/runs/%s/reject" % run_id, params={"db": TEST_DB})
+    assert rejected.status_code == 200 and rejected.json()["working_db_deleted"] is True
+
+
+def test_validation_get_poll_recovers_completed_batch_state(multibook_corpus, monkeypatch):
+    """GET is the restart-safe reconciler even when the in-process monitor is absent."""
+    from api import routes_validation
+    monkeypatch.setenv("RAGDOM_VLM_PAGE_OCR", "false")
+    monkeypatch.setenv("RAGDOM_VLM_ARTIFACTS", "false")
+    monkeypatch.setattr(routes_validation, "_start_monitor", lambda _db, _run: None)
+    created, _ = _create_and_execute(
+        {"scope_type": "page", "document_id": "science-fr-native", "page": 2})
+    run = _poll_run(created["id"])
+    assert run["status"] == "COMPLETED" and run["progress"]["percent"] == 100.0
+    assert client.post("/api/validation/runs/%s/reject" % created["id"],
+                       params={"db": TEST_DB}).status_code == 200
+
+
+def test_validation_cancel_targets_only_working_batches(multibook_corpus, monkeypatch):
+    from api import routes_pipeline, routes_validation
+    response = client.post("/api/validation/runs", json={"db": TEST_DB, "scope": {
+        "scope_type": "page_range", "document_id": "science-fr-native",
+        "page_start": 1, "page_end": 2}})
+    created = response.json()
+    original_launch = routes_pipeline._launch
+    monkeypatch.setattr(routes_pipeline, "_launch", lambda _db_name: None)
+    executed = client.post("/api/validation/runs/%s/execute" % created["id"], params={"db": TEST_DB})
+    monkeypatch.setattr(routes_pipeline, "_launch", original_launch)
+    assert executed.status_code == 202
+    batch_ids = executed.json()["batch_ids"]
+    cancelled = client.post("/api/validation/runs/%s/cancel" % created["id"], params={"db": TEST_DB})
+    assert cancelled.status_code == 200
+    working = db.get_connection(created["working_db_filename"])
+    try:
+        marks = ",".join("?" for _ in batch_ids)
+        assert working.execute("SELECT COUNT(*) FROM pipeline_jobs WHERE batch_id IN (%s)" % marks,
+                               batch_ids).fetchone()[0] == 0
+        assert working.execute("SELECT COUNT(*) FROM ingestion_batches WHERE id IN (%s)"
+                               " AND status='STOPPED'" % marks, batch_ids).fetchone()[0] == len(batch_ids)
+    finally:
+        working.close()
+    assert _poll_run(created["id"])["status"] == "CANCELLED"
+    with routes_validation._EXECUTION_MONITORS_LOCK:
+        routes_validation._EXECUTION_MONITORS.pop(created["id"], None)
 
 
 @pytest.fixture()

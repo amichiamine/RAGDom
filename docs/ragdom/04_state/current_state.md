@@ -1,6 +1,6 @@
 # État Actuel du Projet RAGDom
 
-**Phase :** Studio de validation final intégré sur `feat/validation-integration`, au-dessus de la v1 complète/Web-Ready : scopes universels multi-documents, runs isolés, copies de travail, snapshots logiques, diffs, migrations 005/006, curriculum multi-livres, profils embeddings compatibles et UI Automation.
+**Phase :** Exécution end-to-end du Studio de validation sur `feat/validation-execution` : chaque run possède une copie SQLite physique isolée, exécute réellement reprocess/pipeline, expose progression/erreur et ne publie le scope qu'à l'acceptation.
 **Date de mise à jour :** 2026-08-22
 
 > **Mémoire de reprise :** `.hyperagent/` à la racine du dépôt sert de mémoire de
@@ -9,15 +9,15 @@
 
 ## OPÉRATIONNEL SUR LA BRANCHE D'INTÉGRATION (preuves rejouées)
 - [x] Backend complet : noyau agnostique, sci-engine, **8 routeurs / 82 opérations** (`auth 4 · curriculum 7 · library 13 · llm 10 · pipeline 12 · search 3 · system 15 · validation 18`).
-- [x] **Studio de validation final** : `/api/validation`, résolution préalable des scopes `base` multi-document, document, TOC/alias, page/plage/sélection; runs et copies isolées par document/page; snapshots logiques; diffs page/run; rapport et benchmarks.
-- [x] **Décision run-level** : accept/reject au niveau run uniquement. Acceptation atomique avec hash de baseline, garde des éditions humaines et validation de toutes les références cross-document avant publication; restauration page/run non officielle.
-- [x] **Migrations 005/006** : tables/provenance Validation, ownership curriculum terms/programs/assessments/links, profils embeddings, `baseline_hash`, événements document/page, unicité des jobs actifs par page; migration reprenable et schéma post-vérifié.
+- [x] **Studio de validation end-to-end** : `create_run` produit par `Connection.backup` une copie `validation_test_<run>.sqlite`; `/execute` lance le reprocess/pipeline complet uniquement dans cette copie, avec batches/jobs/pages/events et polling restart-safe.
+- [x] **Décision run-level** : reject supprime DB/WAL/SHM; accept contrôle hash optimiste et éditions humaines puis promeut transactionnellement uniquement les pages du scope depuis la copie physique avant suppression.
+- [x] **Migration 007** : colonnes additives/idempotentes copie/opération/batch(s)/état/progression/erreur/dates; copies confinées, masquées de la découverte et non exportables.
+- [x] **États et erreurs réels** : `CREATED/QUEUED/RUNNING/COMPLETED/BLOCKED/FAILED/CANCELLED`; source PDF absente explicitement bloquée sans mutation officielle; requalification `run_id` redirigée vers la copie seulement après completion.
 - [x] **Curriculum multi-document** : build isolé/non destructif entre livres, import et CRUD scopés, données legacy ambiguës signalées plutôt qu'attribuées silencieusement.
 - [x] **Embedding compatible** : FastEmbed MiniLM-L12-v2, pooling `mean`, 384d normalisées et contrat complet; profil absent/incompatible/multiple bloque le vectoriel, aucune réindexation silencieuse.
 - [x] **UI Validation Studio** : builder/preview, scope selector, runs paginés/deep-linkés, inspecteur/diff, restaurations et confirmation. Suivi du run ouvert par polling ciblé 5 s, aucun SSE Validation dédié. Readonly : contrôles désactivés et API masquée en 404.
 - [x] **Recherche hybride V5.1** : seuil BM25 et seuil vectoriel appliqués avant rangs/RRF, rang FTS unique par chunk, ordre stable.
-- [x] **Qualité** : pytest **149/149** normal et **149/149** avec `RAGDOM_LOW_MEMORY=true`; Vitest **13/13**; build TypeScript + Vite **8.2.2** vert; React Router DOM **7.18.2**; `npm audit` **0 vulnérabilité**.
-- [!] **Limite honnête** : requalification mutante Pipeline avec `run_id` refusée en 409 faute de staging des artefacts dans `working_json`; `dry_run` scopé possible.
+- [x] **Qualité** : pytest **154/154** normal et **154/154** avec `RAGDOM_LOW_MEMORY=true`; Vitest **13/13**; TypeScript/build Vite **8.2.2** verts; `npm audit` **0 vulnérabilité**. Les E2E Validation désactivent tout LLM/VLM externe.
 - [x] **Lot 1 sprint** : GET /library/page-scans (manifeste galerie), agrégats curriculum
       (per_term + global en SQL), filtres chunks (pedagogical_type/page_start/page_end/toc_id)
 - [x] **Frontend pixel-perfect COMPLET (vagues A/B/C/D + audit croisé)** :

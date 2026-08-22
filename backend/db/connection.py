@@ -23,6 +23,12 @@ SCHEMA_CORE = (_DB_DIR / "schema_core.sql").read_text(encoding="utf-8")
 SCHEMA_VEC = (_DB_DIR / "schema_vec.sql").read_text(encoding="utf-8")
 
 DB_NAME_RE = re.compile(r"^[A-Za-z0-9_\-]+\.sqlite$")
+VALIDATION_WORKING_DB_PREFIX = "validation_test_"
+
+
+def is_validation_working_db(db_name: str) -> bool:
+    """Return True only for the reserved, non-official validation copy namespace."""
+    return bool(DB_NAME_RE.fullmatch(db_name or "") and db_name.startswith(VALIDATION_WORKING_DB_PREFIX))
 
 # État vectoriel global du processus (exposé par /api/system/health)
 _vector_state = {"engine": "unknown", "status": "unknown", "message": "", "force": config.RAGDOM_FORCE_SQLITE_VEC}
@@ -39,6 +45,30 @@ def sanitize_db_name(db_name: str) -> str:
     return db_path
 
 
+def _confined_backup_destination(destination: str) -> str:
+    destination = os.path.realpath(destination)
+    root = os.path.realpath(config.DATABASES_DIR)
+    try:
+        confined = os.path.commonpath((root, destination)) == root
+    except ValueError:
+        confined = False
+    if not confined or destination == root:
+        raise ValueError("Destination backup hors DATABASES_DIR interdite")
+    return destination
+
+
+def backup_connection(source: sqlite3.Connection, destination: str) -> str:
+    """Back up an already-open source connection into a confined physical file."""
+    destination = _confined_backup_destination(destination)
+    target = sqlite3.connect(destination, check_same_thread=False)
+    try:
+        source.backup(target)
+        target.commit()
+    finally:
+        target.close()
+    return destination
+
+
 def backup_database(db_name: str, destination: Optional[str] = None) -> str:
     """Create a transactionally consistent SQLite image using Connection.backup."""
     source_path = sanitize_db_name(db_name)
@@ -47,14 +77,10 @@ def backup_database(db_name: str, destination: Optional[str] = None) -> str:
                                            dir=config.DATABASES_DIR)
         os.close(fd)
     source = sqlite3.connect(source_path, check_same_thread=False)
-    target = sqlite3.connect(destination, check_same_thread=False)
     try:
-        source.backup(target)
-        target.commit()
+        return backup_connection(source, destination)
     finally:
-        target.close()
         source.close()
-    return destination
 
 
 def init_vector_support(conn: sqlite3.Connection, force_strict: Optional[bool] = None) -> str:
@@ -128,7 +154,15 @@ def get_connection(db_name: str) -> sqlite3.Connection:
     db_path = sanitize_db_name(db_name)
     if not os.path.exists(db_path):
         raise FileNotFoundError("Base %s introuvable dans /databases/" % db_name)
-    conn = sqlite3.connect(db_path, check_same_thread=False)
+    # mode=rw closes the TOCTOU window between exists() and connect(): a database
+    # removed by reject/test teardown can never be silently recreated by a late poller.
+    uri = Path(db_path).resolve().as_uri() + "?mode=rw"
+    try:
+        conn = sqlite3.connect(uri, uri=True, check_same_thread=False)
+    except sqlite3.OperationalError as exc:
+        if not os.path.exists(db_path):
+            raise FileNotFoundError("Base %s introuvable dans /databases/" % db_name) from exc
+        raise
     conn.execute("PRAGMA foreign_keys = ON")
     conn.execute("PRAGMA journal_mode=WAL")
     init_vector_support(conn)
@@ -226,10 +260,15 @@ def _prepare_legacy_validation_schema(conn: sqlite3.Connection) -> None:
                                  ("bounding_box_json", "TEXT"), ("is_human_edited", "INTEGER DEFAULT 0"),
                                  ("updated_at", "DATETIME"), ("created_at", "DATETIME")),
         "processing_benchmarks": (("document_id", "TEXT"), ("page_number", "INTEGER"),
-                                  ("engine_used", "TEXT"), ("execution_time_ms", "INTEGER")),
+                                  ("engine_used", "TEXT"), ("vlm_provider_used", "TEXT"),
+                                  ("fallback_triggered", "INTEGER DEFAULT 0"),
+                                  ("linter_errors_json", "TEXT"), ("execution_time_ms", "INTEGER"),
+                                  ("ram_peak_mb", "REAL"), ("confidence_score", "REAL"),
+                                  ("blur_score", "REAL"), ("deskew_angle", "REAL"),
+                                  ("created_at", "DATETIME")),
         "page_scans": (("document_id", "TEXT"), ("page_number", "INTEGER"), ("width_px", "INTEGER"),
                        ("height_px", "INTEGER"), ("dpi", "INTEGER"), ("image_webp", "BLOB"),
-                       ("thumb_webp", "BLOB")),
+                       ("thumb_webp", "BLOB"), ("created_at", "DATETIME")),
         "curriculum_terms": (("term_index", "INTEGER"), ("label", "TEXT"), ("metadata_json", "TEXT")),
         "curriculum_programs": (("term_id", "TEXT"), ("seq_index", "INTEGER"), ("title", "TEXT"),
                                 ("source", "TEXT"), ("competencies_json", "TEXT")),
@@ -273,13 +312,18 @@ def _repair_legacy_curriculum_scope(conn: sqlite3.Connection) -> int:
 
 def _hardened_schema_present(conn: sqlite3.Connection) -> bool:
     required = {
-        "processing_benchmarks": {"validation_run_id"},
+        "processing_benchmarks": {"validation_run_id", "vlm_provider_used", "fallback_triggered",
+                                  "linter_errors_json", "ram_peak_mb", "confidence_score", "blur_score",
+                                  "deskew_angle", "created_at"},
+        "page_scans": {"created_at"},
         "curriculum_terms": {"document_id"},
         "curriculum_programs": {"document_id"},
         "content_links": {"document_id"},
         "scientific_artifacts": {"validation_run_id"},
         "assessments": {"document_id"},
-        "validation_runs": {"status", "scope_json"},
+        "validation_runs": {"status", "scope_json", "working_db_filename", "operation", "batch_id",
+                            "batch_ids_json", "execution_status", "progress_current", "progress_total",
+                            "error_log", "started_at", "completed_at"},
         "validation_run_pages": {"document_id", "baseline_json", "working_json", "baseline_hash"},
         "validation_events": {"document_id", "event_type", "payload_json"},
         "validation_snapshots": {"run_id", "snapshot_type", "payload_json"},
@@ -297,13 +341,18 @@ def _hardened_schema_present(conn: sqlite3.Connection) -> bool:
 
 def _verify_hardened_schema(conn: sqlite3.Connection) -> None:
     required = {
-        "processing_benchmarks": {"validation_run_id"},
+        "processing_benchmarks": {"validation_run_id", "vlm_provider_used", "fallback_triggered",
+                                  "linter_errors_json", "ram_peak_mb", "confidence_score", "blur_score",
+                                  "deskew_angle", "created_at"},
+        "page_scans": {"created_at"},
         "curriculum_terms": {"document_id"},
         "curriculum_programs": {"document_id"},
         "content_links": {"document_id"},
         "scientific_artifacts": {"validation_run_id"},
         "assessments": {"document_id"},
-        "validation_runs": {"status", "scope_json"},
+        "validation_runs": {"status", "scope_json", "working_db_filename", "operation", "batch_id",
+                            "batch_ids_json", "execution_status", "progress_current", "progress_total",
+                            "error_log", "started_at", "completed_at"},
         "validation_run_pages": {"document_id", "baseline_json", "working_json", "baseline_hash"},
         "validation_events": {"document_id", "event_type", "payload_json"},
         "validation_snapshots": {"run_id", "snapshot_type", "payload_json"},
@@ -347,8 +396,8 @@ def apply_migrations(conn: sqlite3.Connection) -> int:
         num = int(match.group(1))
         # Une version déclarée n'est pas une preuve que son DDL est complet : des
         # images historiques ont été interrompues après l'écriture schema_version.
-        # Rejouer V5/V6 est sûr (CREATE IF NOT EXISTS + ALTER duplicate toléré) et
-        # répare notamment validation_events/tables de studio manquantes.
+        # Rejouer V5+ est sûr (CREATE IF NOT EXISTS + ALTER duplicate toléré) et
+        # répare notamment validation_events et les colonnes d'exécution physique.
         if num in applied and not (repair_hardened and num >= 5):
             continue
         script = "\n".join(line for line in path.read_text(encoding="utf-8").splitlines()

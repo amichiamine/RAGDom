@@ -3,8 +3,13 @@
 import base64
 import hashlib
 import json
+import os
+import threading
+import time
 import uuid
 from typing import Any, Dict, List, Literal, Optional
+
+import config
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
@@ -15,6 +20,47 @@ from core.validation_scope import ScopeResolutionError, resolve_scope
 from db import connection as db
 
 router = APIRouter()
+
+_EXECUTION_MONITORS: Dict[str, threading.Thread] = {}
+_EXECUTION_MONITORS_LOCK = threading.Lock()
+_ACTIVE_JOB_STATES = ("QUEUED", "PROCESSING_CV", "SEGMENTING", "EXTRACTING", "LINTING",
+                      "VLM_RECOVERY", "INDEXED")
+_TERMINAL_JOB_STATES = ("READY", "QUARANTINE", "INVALID_SOURCE")
+
+
+def _working_db_filename(run_id: str) -> str:
+    return "%s%s.sqlite" % (db.VALIDATION_WORKING_DB_PREFIX, run_id.replace("-", ""))
+
+
+def _working_db_path(filename: str) -> str:
+    if not db.is_validation_working_db(filename):
+        raise HTTPException(409, "Copie de validation invalide ou non isolée")
+    return db.sanitize_db_name(filename)
+
+
+def _remove_working_db(filename: Optional[str]) -> None:
+    if not filename:
+        return
+    path = _working_db_path(filename)
+    for suffix in ("", "-wal", "-shm"):
+        try:
+            os.remove(path + suffix)
+        except FileNotFoundError:
+            pass
+
+
+def _public_run_status(stored_status: str, execution_status: str) -> str:
+    if stored_status in ("ACCEPTED", "REJECTED", "CANCELLED"):
+        return stored_status
+    return execution_status or stored_status
+
+
+def _batch_ids(run: dict) -> List[str]:
+    try:
+        values = json.loads(run.get("batch_ids_json") or "[]")
+    except (TypeError, ValueError):
+        values = []
+    return [str(value) for value in values if value]
 
 
 class StrictModel(BaseModel):
@@ -135,14 +181,26 @@ def _payload_sha256(payload: dict) -> str:
 
 def _run(conn, run_id: str):
     row = conn.execute("SELECT id, document_id, scope_type, scope_json, status, label,"
-                       " embedding_profile_id, created_at, updated_at, accepted_at, rejected_at"
+                       " embedding_profile_id, working_db_filename, operation, batch_id, batch_ids_json,"
+                       " execution_status, progress_current, progress_total, error_log, started_at, completed_at,"
+                       " created_at, updated_at, accepted_at, rejected_at"
                        " FROM validation_runs WHERE id=?", (run_id,)).fetchone()
     if row is None:
         raise HTTPException(404, "Run de validation introuvable")
-    keys = ("id", "document_id", "scope_type", "scope_json", "status", "label",
-            "embedding_profile_id", "created_at", "updated_at", "accepted_at", "rejected_at")
+    keys = ("id", "document_id", "scope_type", "scope_json", "stored_status", "label",
+            "embedding_profile_id", "working_db_filename", "operation", "batch_id", "batch_ids_json",
+            "execution_status", "progress_current", "progress_total", "error_log", "started_at", "completed_at",
+            "created_at", "updated_at", "accepted_at", "rejected_at")
     result = dict(zip(keys, row))
     result["scope"] = json.loads(result.pop("scope_json"))
+    result["status"] = _public_run_status(result["stored_status"], result["execution_status"])
+    result["working_db"] = {"filename": result["working_db_filename"],
+                            "exists": bool(result["working_db_filename"] and
+                                           os.path.exists(_working_db_path(result["working_db_filename"])))}
+    result["batch_ids"] = _batch_ids(result)
+    total = int(result["progress_total"] or 0)
+    result["progress"] = {"current": int(result["progress_current"] or 0), "total": total,
+                          "percent": round((int(result["progress_current"] or 0) / total) * 100, 2) if total else 0}
     return result
 
 
@@ -177,65 +235,388 @@ def resolve_scope_route(body: RunCreateDTO):
 
 @router.post("/runs", status_code=201)
 def create_run(body: RunCreateDTO):
+    if db.is_validation_working_db(body.db):
+        raise HTTPException(400, "Une copie de validation ne peut pas devenir une base officielle")
     conn = _conn(body.db)
+    working_filename = None
+    snapshot_conn = None
     try:
         targets = _scope(conn, body.scope)
         if body.embedding_profile_id and not conn.execute(
                 "SELECT 1 FROM embedding_profiles WHERE id=?", (body.embedding_profile_id,)).fetchone():
             raise HTTPException(404, "Profil d'embedding introuvable")
         run_id = str(uuid.uuid4())
+        working_filename = _working_db_filename(run_id)
+        working_path = _working_db_path(working_filename)
+        if os.path.exists(working_path):
+            raise HTTPException(409, "Collision de copie de validation")
+        # Connection.backup creates a transactionally consistent physical image.
+        # We then lock the official DB and verify each baseline still matches that
+        # image before publishing run metadata (a concurrent change yields 409).
+        db.backup_connection(conn, working_path)
+        snapshot_conn = db.get_connection(working_filename)
+        conn.execute("BEGIN IMMEDIATE")
         single_doc = targets[0].document_id if len(targets) == 1 else None
         scope_json = json.dumps(body.scope.model_dump(), ensure_ascii=False, sort_keys=True)
-        conn.execute("BEGIN")
+        count = sum(len(target.pages) for target in targets)
         conn.execute("INSERT INTO validation_runs (id, document_id, scope_type, scope_json, status, label,"
-                     " embedding_profile_id) VALUES (?,?,?,?, 'READY', ?,?)",
+                     " embedding_profile_id, working_db_filename, operation, execution_status, progress_total)"
+                     " VALUES (?,?,?,?, 'DRAFT', ?,?,?, 'REPROCESS', 'CREATED', ?)",
                      (run_id, single_doc, body.scope.scope_type, scope_json, body.label,
-                      body.embedding_profile_id))
-        count = 0
+                      body.embedding_profile_id, working_filename, count))
         for target in targets:
             for page_number in target.pages:
-                payload = _official_page(conn, target.document_id, page_number)
+                payload = _official_page(snapshot_conn, target.document_id, page_number)
+                if _payload_sha256(_official_page(conn, target.document_id, page_number)) != _payload_sha256(payload):
+                    raise HTTPException(409, "Base officielle modifiée pendant la création du run; réessayez")
                 encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True)
                 conn.execute("INSERT INTO validation_run_pages (id, run_id, document_id, page_number,"
                              " status, baseline_json, working_json, baseline_hash)"
-                             " VALUES (?,?,?,?, 'READY', ?,?,?)",
+                             " VALUES (?,?,?,?, 'PENDING', ?,?,?)",
                              (str(uuid.uuid4()), run_id, target.document_id, page_number, encoded, encoded,
                               _payload_sha256(payload)))
-                count += 1
-        _event(conn, run_id, "run.created", {"pages": count})
+        # Mirror only the run identity into the sandbox so provenance foreign keys
+        # (artifacts/benchmarks) remain valid there. Official lifecycle state stays
+        # authoritative in the official database.
+        snapshot_conn.execute("INSERT INTO validation_runs"
+                              " (id,document_id,scope_type,scope_json,status,label,embedding_profile_id,"
+                              " working_db_filename,operation,execution_status,progress_total)"
+                              " VALUES (?,?,?,?, 'DRAFT', ?,?,?, 'REPROCESS','CREATED',?)",
+                              (run_id, single_doc, body.scope.scope_type, scope_json, body.label,
+                               body.embedding_profile_id, working_filename, count))
+        snapshot_conn.commit()
+        _event(conn, run_id, "run.created", {"pages": count, "working_db": working_filename,
+                                             "operation": "REPROCESS"})
         conn.commit()
-        return {"id": run_id, "status": "READY", "page_count": count,
-                "scope_type": body.scope.scope_type, "official_mutated": False}
-    except HTTPException:
-        conn.rollback()
-        raise
+        return {"id": run_id, "status": "CREATED", "page_count": count,
+                "scope_type": body.scope.scope_type, "working_db_filename": working_filename,
+                "operation": "REPROCESS", "official_mutated": False}
     except Exception:
         conn.rollback()
+        if snapshot_conn is not None:
+            snapshot_conn.close()
+            snapshot_conn = None
+        if working_filename:
+            _remove_working_db(working_filename)
         raise
     finally:
+        if snapshot_conn is not None:
+            snapshot_conn.close()
         conn.close()
+
+
+def _targets_from_run_pages(conn, run_id: str):
+    grouped: Dict[str, List[int]] = {}
+    for document_id, page_number in conn.execute(
+            "SELECT document_id, page_number FROM validation_run_pages WHERE run_id=?"
+            " ORDER BY document_id, page_number", (run_id,)).fetchall():
+        grouped.setdefault(document_id, []).append(int(page_number))
+    return [type("ValidationTarget", (), {"document_id": document_id, "pages": tuple(pages),
+                                           "page_start": pages[0], "page_end": pages[-1]})
+            for document_id, pages in grouped.items()]
+
+
+def _sync_working_pages(official_conn, run: dict, execution_status: str,
+                        error_log: Optional[str] = None) -> None:
+    filename = run.get("working_db_filename")
+    if not filename or not os.path.exists(_working_db_path(filename)):
+        raise RuntimeError("Copie SQLite de validation absente")
+    working = db.get_connection(filename)
+    try:
+        rows = official_conn.execute(
+            "SELECT id, document_id, page_number FROM validation_run_pages WHERE run_id=?",
+            (run["id"],)).fetchall()
+        for page_id, document_id, page_number in rows:
+            payload = _official_page(working, document_id, page_number)
+            for artifact in payload["artifacts"]:
+                artifact["validation_run_id"] = run["id"]
+            encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+            job = working.execute(
+                "SELECT status, error_log FROM pipeline_jobs WHERE document_id=? AND page_number=?"
+                " AND batch_id IN (%s) ORDER BY updated_at DESC, rowid DESC LIMIT 1" %
+                ",".join("?" for _ in (_batch_ids(run) or [""])),
+                [document_id, page_number] + (_batch_ids(run) or [""])).fetchone()
+            page_status = "READY" if job and job[0] == "READY" else "FAILED"
+            page_error = job[1] if job and job[1] else (error_log if page_status == "FAILED" else None)
+            official_conn.execute(
+                "UPDATE validation_run_pages SET working_json=?, status=?, error_log=?,"
+                " updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                (encoded, page_status, page_error, page_id))
+        official_conn.execute(
+            "UPDATE validation_runs SET status=?, execution_status=?, error_log=?,"
+            " progress_current=progress_total, completed_at=CURRENT_TIMESTAMP,"
+            " updated_at=CURRENT_TIMESTAMP WHERE id=?",
+            ("READY" if execution_status == "COMPLETED" else "FAILED", execution_status,
+             error_log, run["id"]))
+        _event(official_conn, run["id"], "run.%s" % execution_status.lower(),
+               {"working_db": filename, "batch_ids": _batch_ids(run), "error": error_log})
+    finally:
+        working.close()
+
+
+def refresh_run_working_json(db_name: str, run_id: str, event_type: str = "run.working_refreshed") -> None:
+    """Refresh logical staging from the physical sandbox after a scoped mutation."""
+    official = _conn(db_name)
+    try:
+        run = _run(official, run_id)
+        filename = run.get("working_db_filename")
+        if not filename or not os.path.exists(_working_db_path(filename)):
+            raise HTTPException(409, "Copie SQLite de validation absente")
+        working = db.get_connection(filename)
+        try:
+            for page_id, document_id, page_number in official.execute(
+                    "SELECT id,document_id,page_number FROM validation_run_pages WHERE run_id=?",
+                    (run_id,)).fetchall():
+                payload = _official_page(working, document_id, page_number)
+                for artifact in payload["artifacts"]:
+                    artifact["validation_run_id"] = run_id
+                official.execute("UPDATE validation_run_pages SET working_json=?, updated_at=CURRENT_TIMESTAMP"
+                                 " WHERE id=?",
+                                 (json.dumps(payload, ensure_ascii=False, sort_keys=True), page_id))
+            _event(official, run_id, event_type, {"working_db": filename})
+            official.commit()
+        finally:
+            working.close()
+    finally:
+        official.close()
+
+
+def _refresh_execution_state(db_name: str, run_id: str) -> None:
+    official = _conn(db_name)
+    try:
+        run = _run(official, run_id)
+        if run["execution_status"] not in ("QUEUED", "RUNNING"):
+            return
+        filename = run.get("working_db_filename")
+        if not filename or not os.path.exists(_working_db_path(filename)):
+            official.execute("UPDATE validation_runs SET status='FAILED', execution_status='FAILED',"
+                             " error_log='Copie SQLite de validation absente', updated_at=CURRENT_TIMESTAMP"
+                             " WHERE id=?", (run_id,))
+            official.commit()
+            return
+        working = db.get_connection(filename)
+        try:
+            batch_ids = _batch_ids(run)
+            if not batch_ids:
+                return
+            marks = ",".join("?" for _ in batch_ids)
+            stats = working.execute(
+                "SELECT COUNT(*), SUM(status IN ('READY','QUARANTINE','INVALID_SOURCE')) ,"
+                " SUM(status='READY'), SUM(status IN ('QUARANTINE','INVALID_SOURCE')) ,"
+                " SUM(status IN ('PROCESSING_CV','SEGMENTING','EXTRACTING','LINTING','VLM_RECOVERY','INDEXED'))"
+                " FROM pipeline_jobs WHERE batch_id IN (%s)" % marks, batch_ids).fetchone()
+            total, terminal, ready, failed, active = [int(value or 0) for value in stats]
+            current = terminal
+            status = "RUNNING" if active or terminal < total else run["execution_status"]
+            official.execute("UPDATE validation_runs SET execution_status=?, progress_current=?,"
+                             " updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                             (status, current, run_id))
+            official.execute("UPDATE validation_run_pages SET status='PROCESSING',"
+                             " updated_at=CURRENT_TIMESTAMP WHERE run_id=? AND status='PENDING'", (run_id,))
+            if total and terminal == total:
+                errors = [row[0] for row in working.execute(
+                    "SELECT error_log FROM pipeline_jobs WHERE batch_id IN (%s)"
+                    " AND status IN ('QUARANTINE','INVALID_SOURCE') AND error_log IS NOT NULL" % marks,
+                    batch_ids).fetchall()]
+                outcome = "FAILED" if failed or ready != total else "COMPLETED"
+                _sync_working_pages(official, run, outcome, "; ".join(errors) or None)
+            official.commit()
+        finally:
+            working.close()
+    except Exception as exc:
+        official.rollback()
+        try:
+            official.execute("UPDATE validation_runs SET status='FAILED', execution_status='FAILED',"
+                             " error_log=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                             ("%s: %s" % (type(exc).__name__, exc), run_id))
+            _event(official, run_id, "run.failed", {"error": str(exc)})
+            official.commit()
+        except Exception:
+            official.rollback()
+    finally:
+        official.close()
+
+
+def _monitor_execution(db_name: str, run_id: str) -> None:
+    try:
+        for _ in range(36000):
+            try:
+                _refresh_execution_state(db_name, run_id)
+                conn = _conn(db_name)
+            except HTTPException:
+                return  # official test/runtime database removed while monitor exits
+            try:
+                try:
+                    run = _run(conn, run_id)
+                except HTTPException:
+                    return
+                if run["execution_status"] not in ("QUEUED", "RUNNING"):
+                    return
+            finally:
+                conn.close()
+            time.sleep(0.1)
+    finally:
+        with _EXECUTION_MONITORS_LOCK:
+            _EXECUTION_MONITORS.pop(run_id, None)
+
+
+def _start_monitor(db_name: str, run_id: str) -> None:
+    with _EXECUTION_MONITORS_LOCK:
+        current = _EXECUTION_MONITORS.get(run_id)
+        if current and current.is_alive():
+            return
+        monitor = threading.Thread(target=_monitor_execution, args=(db_name, run_id), daemon=True,
+                                   name="validation-%s" % run_id[:8])
+        _EXECUTION_MONITORS[run_id] = monitor
+        monitor.start()
+
+
+@router.post("/runs/{run_id}/execute", status_code=202)
+def execute_run(run_id: str, db_name: str = Query(alias="db")):
+    from api import routes_pipeline
+
+    official = _conn(db_name)
+    try:
+        official.execute("BEGIN IMMEDIATE")
+        run = _run(official, run_id)
+        if run["execution_status"] not in ("CREATED", "BLOCKED", "FAILED"):
+            raise HTTPException(409, "Ce run est déjà exécuté ou en cours")
+        filename = run.get("working_db_filename")
+        if not filename or not os.path.exists(_working_db_path(filename)):
+            raise HTTPException(409, "Copie SQLite de validation absente")
+        targets = _targets_from_run_pages(official, run_id)
+        sources = {}
+        missing = []
+        for target in targets:
+            row = official.execute("SELECT source_path FROM documents WHERE id=?",
+                                   (target.document_id,)).fetchone()
+            source = row[0] if row else None
+            if not source or not os.path.isfile(source):
+                missing.append({"document_id": target.document_id, "source_path": source})
+            else:
+                sources[target.document_id] = source
+        if missing:
+            message = "PDF source officiel absent — exécution impossible"
+            official.execute("UPDATE validation_runs SET status='FAILED', execution_status='BLOCKED',"
+                             " error_log=?, updated_at=CURRENT_TIMESTAMP WHERE id=?", (message, run_id))
+            official.execute("UPDATE validation_run_pages SET status='FAILED', error_log=?,"
+                             " updated_at=CURRENT_TIMESTAMP WHERE run_id=?", (message, run_id))
+            _event(official, run_id, "run.blocked", {"reason": "SOURCE_MISSING", "sources": missing})
+            official.commit()
+            return {"id": run_id, "status": "BLOCKED", "error": message,
+                    "missing_sources": missing, "official_mutated": False}
+        official.commit()
+
+        working = db.get_connection(filename)
+        try:
+            working.execute("BEGIN IMMEDIATE")
+            # A backup may contain official queues.  They are historical data in this
+            # sandbox and must never be drained by the validation worker.
+            working.execute("DELETE FROM pipeline_jobs WHERE status IN"
+                            " ('QUEUED','PROCESSING_CV','SEGMENTING','EXTRACTING','LINTING',"
+                            " 'VLM_RECOVERY','INDEXED')")
+            working.execute("UPDATE ingestion_batches SET status='STOPPED', updated_at=CURRENT_TIMESTAMP"
+                            " WHERE status IN ('QUEUED','RUNNING')")
+            purge_scope = "document" if run["scope_type"] == "base" else run["scope_type"]
+            body = routes_pipeline.ReprocessBody(db=filename, scope=purge_scope,
+                                                 preserve_human_edits=True)
+            routes_pipeline._purge_for_reprocess(working, body, targets)
+            batches = []
+            for target in targets:
+                groups: List[List[int]] = []
+                for selected in target.pages:
+                    if not groups or selected != groups[-1][-1] + 1:
+                        groups.append([selected])
+                    else:
+                        groups[-1].append(selected)
+                for group in groups:
+                    batches.append(routes_pipeline.orchestrator.enqueue_batch(
+                        filename, target.document_id, sources[target.document_id], "page_range",
+                        group[0], group[-1], conn=working, commit=False, emit=False))
+            working.commit()
+        except Exception:
+            working.rollback()
+            raise
+        finally:
+            working.close()
+
+        batch_ids = [batch["batch_id"] for batch in batches]
+        official.execute("UPDATE validation_runs SET status='RUNNING', execution_status='QUEUED',"
+                         " batch_id=?, batch_ids_json=?, progress_current=0, error_log=NULL,"
+                         " started_at=CURRENT_TIMESTAMP, completed_at=NULL, updated_at=CURRENT_TIMESTAMP"
+                         " WHERE id=?", (batch_ids[0] if batch_ids else None,
+                                         json.dumps(batch_ids), run_id))
+        official.execute("UPDATE validation_run_pages SET status='PROCESSING', error_log=NULL,"
+                         " updated_at=CURRENT_TIMESTAMP WHERE run_id=?", (run_id,))
+        _event(official, run_id, "run.queued", {"working_db": filename, "batch_ids": batch_ids})
+        official.commit()
+        for batch in batches:
+            routes_pipeline.orchestrator._emit(
+                "queue_update", {"queue_length": batch["pages_total"] - batch["skipped_ready"] -
+                                 batch["skipped_active"], "batch_id": batch["batch_id"]})
+        routes_pipeline._launch(filename)
+        _start_monitor(db_name, run_id)
+        return {"id": run_id, "status": "QUEUED", "working_db_filename": filename,
+                "batch_id": batch_ids[0] if batch_ids else None, "batch_ids": batch_ids,
+                "operation": run["operation"], "official_mutated": False}
+    except HTTPException:
+        official.rollback()
+        raise
+    except Exception as exc:
+        official.rollback()
+        try:
+            official.execute("UPDATE validation_runs SET status='FAILED', execution_status='FAILED',"
+                             " error_log=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                             ("%s: %s" % (type(exc).__name__, exc), run_id))
+            _event(official, run_id, "run.failed", {"error": str(exc)})
+            official.commit()
+        except Exception:
+            official.rollback()
+        raise
+    finally:
+        try:
+            official.close()
+        except Exception:
+            pass
 
 
 @router.get("/runs")
 def list_runs(db_name: str = Query(alias="db"), document_id: Optional[str] = None):
     conn = _conn(db_name)
     try:
-        sql = ("SELECT r.id, r.document_id, r.scope_type, r.status, r.label, r.created_at, r.updated_at,"
+        sql = ("SELECT r.id, r.document_id, r.scope_type, r.status, r.execution_status, r.label,"
+               " r.working_db_filename, r.operation, r.batch_id, r.batch_ids_json,"
+               " r.progress_current, r.progress_total, r.error_log, r.created_at, r.updated_at,"
                " COUNT(p.id) FROM validation_runs r LEFT JOIN validation_run_pages p ON p.run_id=r.id")
         args = []
         if document_id:
             sql += " WHERE EXISTS (SELECT 1 FROM validation_run_pages vp WHERE vp.run_id=r.id AND vp.document_id=?)"
             args.append(document_id)
         sql += " GROUP BY r.id ORDER BY r.created_at DESC"
-        return {"runs": [{"id": r[0], "document_id": r[1], "scope_type": r[2], "status": r[3],
-                          "label": r[4], "created_at": r[5], "updated_at": r[6], "page_count": r[7]}
-                         for r in conn.execute(sql, args).fetchall()]}
+        runs = []
+        for row in conn.execute(sql, args).fetchall():
+            try:
+                batch_ids = json.loads(row[9] or "[]")
+            except (TypeError, ValueError):
+                batch_ids = []
+            total = int(row[11] or 0)
+            runs.append({"id": row[0], "document_id": row[1], "scope_type": row[2],
+                         "status": _public_run_status(row[3], row[4]), "execution_status": row[4],
+                         "label": row[5], "working_db_filename": row[6],
+                         "working_db_exists": bool(row[6] and os.path.exists(_working_db_path(row[6]))),
+                         "operation": row[7], "batch_id": row[8], "batch_ids": batch_ids,
+                         "progress_current": int(row[10] or 0), "progress_total": total,
+                         "progress_percent": round((int(row[10] or 0) / total) * 100, 2) if total else 0,
+                         "error_log": row[12], "created_at": row[13], "updated_at": row[14],
+                         "page_count": row[15]})
+        return {"runs": runs}
     finally:
         conn.close()
 
 
 @router.get("/runs/{run_id}")
 def get_run(run_id: str, db_name: str = Query(alias="db")):
+    _refresh_execution_state(db_name, run_id)
     conn = _conn(db_name)
     try:
         result = _run(conn, run_id)
@@ -267,8 +648,8 @@ def update_working_page(run_id: str, page_number: int, body: WorkingCopyDTO,
     conn = _conn(db_name)
     try:
         run = _run(conn, run_id)
-        if run["status"] in ("ACCEPTED", "REJECTED", "CANCELLED"):
-            raise HTTPException(409, "Run terminal non modifiable")
+        if run["status"] != "COMPLETED":
+            raise HTTPException(409, "La copie n'est modifiable qu'après exécution COMPLETED")
         row = _page_row(conn, run_id, page_number, document_id)
         working = dict(body.working)
         if working.get("document_id") != row[1] or working.get("page_number") != row[2]:
@@ -276,6 +657,23 @@ def update_working_page(run_id: str, page_number: int, body: WorkingCopyDTO,
         if not isinstance(working.get("chunks", []), list) or not isinstance(working.get("artifacts", []), list):
             raise HTTPException(400, "chunks et artifacts doivent être des listes")
         encoded = json.dumps(working, ensure_ascii=False, sort_keys=True)
+        filename = run.get("working_db_filename")
+        if not filename or not os.path.exists(_working_db_path(filename)):
+            raise HTTPException(409, "Copie SQLite de validation absente")
+        working_conn = db.get_connection(filename)
+        try:
+            working_conn.execute("BEGIN IMMEDIATE")
+            _validate_accept_references(working_conn, [working])
+            deferred = _replace_official_page(working_conn, working)
+            for linked_id, chunk_id in deferred:
+                working_conn.execute("UPDATE document_chunks SET linked_solution_chunk_id=? WHERE id=?",
+                                     (linked_id, chunk_id))
+            working_conn.commit()
+        except Exception:
+            working_conn.rollback()
+            raise
+        finally:
+            working_conn.close()
         conn.execute("UPDATE validation_run_pages SET working_json=?, status='READY',"
                      " updated_at=CURRENT_TIMESTAMP WHERE id=?", (encoded, row[0]))
         conn.execute("UPDATE validation_runs SET updated_at=CURRENT_TIMESTAMP WHERE id=?", (run_id,))
@@ -327,21 +725,39 @@ def restore_snapshot(run_id: str, snapshot_id: str, db_name: str = Query(alias="
     conn = _conn(db_name)
     try:
         run = _run(conn, run_id)
-        if run["status"] in ("ACCEPTED", "REJECTED", "CANCELLED"):
-            raise HTTPException(409, "Run terminal non restaurable")
+        if run["status"] != "COMPLETED":
+            raise HTTPException(409, "Le run n'est restaurable qu'après exécution COMPLETED")
         row = conn.execute("SELECT payload_json FROM validation_snapshots WHERE id=? AND run_id=?",
                            (snapshot_id, run_id)).fetchone()
         if row is None:
             raise HTTPException(404, "Snapshot introuvable")
         payload = json.loads(row[0])
+        filename = run.get("working_db_filename")
+        if not filename or not os.path.exists(_working_db_path(filename)):
+            raise HTTPException(409, "Copie SQLite de validation absente")
         conn.execute("BEGIN")
+        working_conn = db.get_connection(filename)
         restored = 0
-        for page in payload.get("pages", []):
-            cur = conn.execute("UPDATE validation_run_pages SET working_json=?, status='READY',"
-                               " updated_at=CURRENT_TIMESTAMP WHERE run_id=? AND document_id=? AND page_number=?",
-                               (json.dumps(page["working"], ensure_ascii=False, sort_keys=True), run_id,
-                                page["document_id"], page["page_number"]))
-            restored += cur.rowcount
+        try:
+            working_conn.execute("BEGIN IMMEDIATE")
+            deferred = []
+            for page in payload.get("pages", []):
+                cur = conn.execute("UPDATE validation_run_pages SET working_json=?, status='READY',"
+                                   " updated_at=CURRENT_TIMESTAMP WHERE run_id=? AND document_id=? AND page_number=?",
+                                   (json.dumps(page["working"], ensure_ascii=False, sort_keys=True), run_id,
+                                    page["document_id"], page["page_number"]))
+                if cur.rowcount:
+                    deferred.extend(_replace_official_page(working_conn, page["working"]))
+                restored += cur.rowcount
+            for linked_id, chunk_id in deferred:
+                working_conn.execute("UPDATE document_chunks SET linked_solution_chunk_id=? WHERE id=?",
+                                     (linked_id, chunk_id))
+            working_conn.commit()
+        except Exception:
+            working_conn.rollback()
+            raise
+        finally:
+            working_conn.close()
         _event(conn, run_id, "snapshot.restored", {"snapshot_id": snapshot_id, "pages": restored})
         conn.commit()
         return {"restored": True, "pages": restored, "official_mutated": False}
@@ -522,34 +938,69 @@ def _replace_official_page(conn, payload: dict) -> List[tuple]:
 
 @router.post("/runs/{run_id}/accept")
 def accept_run(run_id: str, db_name: str = Query(alias="db")):
+    _refresh_execution_state(db_name, run_id)
     conn = _conn(db_name)
+    working = None
+    filename = None
     try:
         conn.execute("BEGIN IMMEDIATE")
         run = _run(conn, run_id)
-        if run["status"] != "READY":
-            raise HTTPException(409, "Seul un run READY peut être accepté")
+        if run["execution_status"] != "COMPLETED" or run["stored_status"] != "READY":
+            raise HTTPException(409, "Seul un run COMPLETED peut être accepté")
+        filename = run.get("working_db_filename")
+        if not filename or not os.path.exists(_working_db_path(filename)):
+            raise HTTPException(409, "Copie SQLite de validation absente")
+        working = db.get_connection(filename)
         rows = conn.execute("SELECT id, document_id, page_number, baseline_json, working_json, baseline_hash"
                             " FROM validation_run_pages WHERE run_id=? ORDER BY document_id, page_number",
                             (run_id,)).fetchall()
         prepared = []
-        for page_id, document_id, page_number, baseline, working, baseline_hash in rows:
+        for page_id, document_id, page_number, baseline, staged, baseline_hash in rows:
             try:
                 baseline_payload = json.loads(baseline)
-                working_payload = json.loads(working)
             except (TypeError, ValueError):
-                raise HTTPException(400, "Copie de travail JSON invalide")
+                raise HTTPException(400, "Baseline JSON invalide")
+            working_payload = _official_page(working, document_id, page_number)
+            for artifact in working_payload["artifacts"]:
+                artifact["validation_run_id"] = run_id
+            if json.loads(staged) != working_payload:
+                conn.execute("UPDATE validation_run_pages SET working_json=?, updated_at=CURRENT_TIMESTAMP"
+                             " WHERE id=?", (json.dumps(working_payload, ensure_ascii=False, sort_keys=True), page_id))
             current_hash = _payload_sha256(_official_page(conn, document_id, page_number))
             expected_hash = baseline_hash or _payload_sha256(baseline_payload)
             if current_hash != expected_hash:
                 raise HTTPException(409, "Données officielles modifiées depuis la création du run")
             _assert_human_edits_preserved(baseline_payload, working_payload)
             prepared.append((page_id, working_payload))
-        # Toutes les références, y compris celles entre deux pages du run et celles
-        # détenues par le curriculum, sont validées avant le premier DELETE/UPDATE.
         _validate_accept_references(conn, [payload for _, payload in prepared])
         deferred_links = []
         for page_id, working_payload in prepared:
+            document_id = working_payload["document_id"]
+            page_number = int(working_payload["page_number"])
             deferred_links.extend(_replace_official_page(conn, working_payload))
+            scan = working.execute(
+                "SELECT id, width_px, height_px, dpi, image_webp, thumb_webp, created_at"
+                " FROM page_scans WHERE document_id=? AND page_number=?",
+                (document_id, page_number)).fetchone()
+            conn.execute("DELETE FROM page_scans WHERE document_id=? AND page_number=?",
+                         (document_id, page_number))
+            if scan:
+                conn.execute("INSERT INTO page_scans"
+                             " (id,document_id,page_number,width_px,height_px,dpi,image_webp,thumb_webp,created_at)"
+                             " VALUES (?,?,?,?,?,?,?,?,?)",
+                             (scan[0], document_id, page_number, *scan[1:]))
+            conn.execute("DELETE FROM processing_benchmarks WHERE document_id=? AND page_number=?"
+                         " AND validation_run_id IS NULL", (document_id, page_number))
+            bench_cols = ("id", "document_id", "page_number", "engine_used", "vlm_provider_used",
+                          "fallback_triggered", "linter_errors_json", "execution_time_ms", "ram_peak_mb",
+                          "confidence_score", "blur_score", "deskew_angle", "created_at")
+            for bench in working.execute(
+                    "SELECT %s FROM processing_benchmarks WHERE document_id=? AND page_number=?" %
+                    ",".join(bench_cols), (document_id, page_number)).fetchall():
+                conn.execute("INSERT OR REPLACE INTO processing_benchmarks (%s, validation_run_id)"
+                             " VALUES (%s,?)" % (",".join(bench_cols),
+                                                 ",".join("?" for _ in bench_cols)),
+                             tuple(bench) + (run_id,))
             conn.execute("UPDATE validation_run_pages SET status='ACCEPTED',"
                          " updated_at=CURRENT_TIMESTAMP WHERE id=?", (page_id,))
         for linked_id, chunk_id in deferred_links:
@@ -557,48 +1008,76 @@ def accept_run(run_id: str, db_name: str = Query(alias="db")):
                          (linked_id, chunk_id))
         conn.execute("UPDATE validation_runs SET status='ACCEPTED', accepted_at=CURRENT_TIMESTAMP,"
                      " updated_at=CURRENT_TIMESTAMP WHERE id=?", (run_id,))
-        _event(conn, run_id, "run.accepted", {"pages": len(rows)})
+        _event(conn, run_id, "run.accepted", {"pages": len(rows), "working_db_deleted": True})
         conn.commit()
-        return {"accepted": True, "run_id": run_id, "pages": len(rows), "official_mutated": True}
+        working.close()
+        working = None
+        _remove_working_db(filename)
+        return {"accepted": True, "run_id": run_id, "pages": len(rows), "official_mutated": True,
+                "working_db_deleted": True}
     except Exception:
         conn.rollback()
         raise
     finally:
+        if working is not None:
+            working.close()
         conn.close()
 
 
 @router.post("/runs/{run_id}/cancel")
 def cancel_run(run_id: str, db_name: str = Query(alias="db")):
     conn = _conn(db_name)
+    working = None
     try:
         run = _run(conn, run_id)
         if run["status"] in ("ACCEPTED", "REJECTED", "CANCELLED"):
             raise HTTPException(409, "Run déjà terminal")
+        filename = run.get("working_db_filename")
+        batch_ids = _batch_ids(run)
+        removed_jobs = 0
+        if filename and os.path.exists(_working_db_path(filename)) and batch_ids:
+            working = db.get_connection(filename)
+            marks = ",".join("?" for _ in batch_ids)
+            removed_jobs = working.execute(
+                "DELETE FROM pipeline_jobs WHERE batch_id IN (%s) AND status='QUEUED'" % marks,
+                batch_ids).rowcount
+            working.execute("UPDATE ingestion_batches SET status='STOPPED', updated_at=CURRENT_TIMESTAMP"
+                            " WHERE id IN (%s) AND status IN ('QUEUED','RUNNING')" % marks, batch_ids)
+            working.commit()
         conn.execute("UPDATE validation_run_pages SET status='CANCELLED', updated_at=CURRENT_TIMESTAMP"
                      " WHERE run_id=? AND status NOT IN ('ACCEPTED','REJECTED')", (run_id,))
-        conn.execute("UPDATE validation_runs SET status='CANCELLED', updated_at=CURRENT_TIMESTAMP"
-                     " WHERE id=?", (run_id,))
-        _event(conn, run_id, "run.cancelled")
+        conn.execute("UPDATE validation_runs SET status='CANCELLED', execution_status='CANCELLED',"
+                     " updated_at=CURRENT_TIMESTAMP WHERE id=?", (run_id,))
+        _event(conn, run_id, "run.cancelled", {"batch_ids": batch_ids,
+                                                "removed_queued_jobs": removed_jobs})
         conn.commit()
-        return {"cancelled": True, "run_id": run_id, "official_mutated": False}
+        return {"cancelled": True, "run_id": run_id, "batch_ids": batch_ids,
+                "removed_queued_jobs": removed_jobs, "official_mutated": False}
     finally:
+        if working is not None:
+            working.close()
         conn.close()
 
 
 @router.post("/runs/{run_id}/reject")
 def reject_run(run_id: str, db_name: str = Query(alias="db")):
+    _refresh_execution_state(db_name, run_id)
     conn = _conn(db_name)
+    filename = None
     try:
         run = _run(conn, run_id)
-        if run["status"] != "READY":
-            raise HTTPException(409, "Seul un run READY peut être rejeté")
+        if run["execution_status"] not in ("COMPLETED", "BLOCKED", "FAILED"):
+            raise HTTPException(409, "Seul un run terminé peut être rejeté")
+        filename = run.get("working_db_filename")
         conn.execute("UPDATE validation_run_pages SET status='REJECTED', updated_at=CURRENT_TIMESTAMP"
                      " WHERE run_id=?", (run_id,))
         conn.execute("UPDATE validation_runs SET status='REJECTED', rejected_at=CURRENT_TIMESTAMP,"
                      " updated_at=CURRENT_TIMESTAMP WHERE id=?", (run_id,))
-        _event(conn, run_id, "run.rejected")
+        _event(conn, run_id, "run.rejected", {"working_db_deleted": True})
         conn.commit()
-        return {"rejected": True, "run_id": run_id, "official_mutated": False}
+        _remove_working_db(filename)
+        return {"rejected": True, "run_id": run_id, "official_mutated": False,
+                "working_db_deleted": True}
     finally:
         conn.close()
 
@@ -659,8 +1138,20 @@ def report(run_id: str, db_name: str = Query(alias="db")):
         benchmarks = [r[0] for r in conn.execute(
             "SELECT id FROM processing_benchmarks WHERE validation_run_id=?"
             " ORDER BY document_id, page_number, id", (run_id,))]
+        filename = run.get("working_db_filename")
+        if filename and os.path.exists(_working_db_path(filename)):
+            working = db.get_connection(filename)
+            try:
+                for document_id, page_number in conn.execute(
+                        "SELECT document_id,page_number FROM validation_run_pages WHERE run_id=?",
+                        (run_id,)).fetchall():
+                    benchmarks.extend(r[0] for r in working.execute(
+                        "SELECT id FROM processing_benchmarks WHERE document_id=? AND page_number=?"
+                        " ORDER BY id", (document_id, page_number)).fetchall())
+            finally:
+                working.close()
         return {"schema": "ragdom.validation-report.v1", "run": run, "diff": diff,
-                "events": events, "benchmark_ids": benchmarks}
+                "events": events, "benchmark_ids": sorted(set(benchmarks))}
     finally:
         conn.close()
 
@@ -675,24 +1166,32 @@ def attach_benchmarks(run_id: str, body: BenchmarkAttachDTO, db_name: str = Quer
             raise HTTPException(409, "Provenance benchmark immutable après terminalisation du run")
         allowed = {(r[0], r[1]) for r in conn.execute(
             "SELECT document_id, page_number FROM validation_run_pages WHERE run_id=?", (run_id,))}
+        filename = run.get("working_db_filename")
+        if not filename or not os.path.exists(_working_db_path(filename)):
+            raise HTTPException(409, "Copie SQLite de validation absente")
+        working = db.get_connection(filename)
         attached = []
-        for benchmark_id in body.benchmark_ids:
-            row = conn.execute("SELECT document_id, page_number FROM processing_benchmarks WHERE id=?",
-                               (benchmark_id,)).fetchone()
-            if row is None:
-                raise HTTPException(404, "Benchmark introuvable : %s" % benchmark_id)
-            if (row[0], row[1]) not in allowed:
-                raise HTTPException(409, "Benchmark hors périmètre : %s" % benchmark_id)
-            owner = conn.execute("SELECT validation_run_id FROM processing_benchmarks WHERE id=?",
-                                 (benchmark_id,)).fetchone()[0]
-            if owner not in (None, run_id):
-                raise HTTPException(409, "Benchmark déjà rattaché à un autre run : %s" % benchmark_id)
-            conn.execute("UPDATE processing_benchmarks SET validation_run_id=?"
-                         " WHERE id=? AND validation_run_id IS NULL", (run_id, benchmark_id))
-            attached.append(benchmark_id)
+        try:
+            for benchmark_id in body.benchmark_ids:
+                row = working.execute("SELECT document_id, page_number FROM processing_benchmarks WHERE id=?",
+                                      (benchmark_id,)).fetchone()
+                if row is None:
+                    raise HTTPException(404, "Benchmark introuvable : %s" % benchmark_id)
+                if (row[0], row[1]) not in allowed:
+                    raise HTTPException(409, "Benchmark hors périmètre : %s" % benchmark_id)
+                owner = working.execute("SELECT validation_run_id FROM processing_benchmarks WHERE id=?",
+                                        (benchmark_id,)).fetchone()[0]
+                if owner not in (None, run_id):
+                    raise HTTPException(409, "Benchmark déjà rattaché à un autre run : %s" % benchmark_id)
+                working.execute("UPDATE processing_benchmarks SET validation_run_id=?"
+                                " WHERE id=? AND validation_run_id IS NULL", (run_id, benchmark_id))
+                attached.append(benchmark_id)
+            working.commit()
+        finally:
+            working.close()
         _event(conn, run_id, "benchmarks.attached", {"ids": attached})
         conn.commit()
-        return {"run_id": run_id, "attached": attached}
+        return {"run_id": run_id, "attached": attached, "working_db": filename}
     finally:
         conn.close()
 

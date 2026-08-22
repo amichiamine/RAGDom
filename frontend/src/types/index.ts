@@ -313,15 +313,18 @@ export interface ValidationRunRequest {
 }
 
 export type ValidationRunStatus =
-  | 'DRAFT' | 'RUNNING' | 'READY' | 'ACCEPTED' | 'REJECTED' | 'CANCELLED' | 'FAILED';
+  | 'DRAFT' | 'CREATED' | 'QUEUED' | 'RUNNING' | 'READY' | 'COMPLETED' | 'BLOCKED'
+  | 'ACCEPTED' | 'REJECTED' | 'CANCELLED' | 'FAILED';
 export type ValidationPageStatus =
   | 'PENDING' | 'PROCESSING' | 'READY' | 'ACCEPTED' | 'REJECTED' | 'CANCELLED' | 'FAILED';
 
 export interface ValidationRunCreateResponse {
   id: string;
-  status: 'READY';
+  status: 'CREATED';
   page_count: number;
   scope_type: ValidationScopeType;
+  working_db_filename: string;
+  operation: 'REPROCESS';
   official_mutated: false;
 }
 
@@ -334,6 +337,16 @@ export interface ValidationRunListItemResponse {
   created_at: string;
   updated_at: string;
   page_count: number;
+  execution_status: string;
+  working_db_filename: string | null;
+  working_db_exists: boolean;
+  operation: string;
+  batch_id: string | null;
+  batch_ids: string[];
+  progress_current: number;
+  progress_total: number;
+  progress_percent: number;
+  error_log: string | null;
 }
 
 export interface ValidationRunPageSummaryResponse {
@@ -355,6 +368,16 @@ export interface ValidationRunDetailResponse {
   updated_at: string;
   accepted_at: string | null;
   rejected_at: string | null;
+  working_db_filename: string | null;
+  working_db: { filename: string | null; exists: boolean };
+  operation: string;
+  batch_id: string | null;
+  batch_ids: string[];
+  execution_status: string;
+  progress: { current: number; total: number; percent: number };
+  error_log: string | null;
+  started_at: string | null;
+  completed_at: string | null;
   pages: ValidationRunPageSummaryResponse[];
 }
 
@@ -368,6 +391,12 @@ export interface ValidationRunSummary {
   pages_total: number;
   pages_ready: number;
   progress: number;
+  working_db_filename: string | null;
+  working_db_exists: boolean;
+  operation: string;
+  batch_id: string | null;
+  batch_ids: string[];
+  error_log: string | null;
 }
 
 export interface ValidationMetricDiff {

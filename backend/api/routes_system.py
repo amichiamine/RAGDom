@@ -43,7 +43,7 @@ def list_databases() -> dict:
     """Scanne physiquement /databases/ — le Frontend n'a AUCUNE donnée hardcodée."""
     items = []
     for name in sorted(os.listdir(config.DATABASES_DIR)):
-        if not db.DB_NAME_RE.fullmatch(name):
+        if not db.DB_NAME_RE.fullmatch(name) or db.is_validation_working_db(name):
             continue
         path = os.path.join(config.DATABASES_DIR, name)
         stat = os.stat(path)
@@ -67,7 +67,7 @@ def health() -> dict:
     validation_failed = 0
     curriculum_ambiguities = 0
     for name in sorted(os.listdir(config.DATABASES_DIR)):
-        if not db.DB_NAME_RE.fullmatch(name):
+        if not db.DB_NAME_RE.fullmatch(name) or db.is_validation_working_db(name):
             continue
         try:
             conn = db.get_connection(name)
@@ -167,7 +167,7 @@ def _sources_tree(base: str, rel: str = "") -> dict:
 def _ingested_paths() -> set:
     paths = set()
     for db_file in os.listdir(config.DATABASES_DIR):
-        if not db.DB_NAME_RE.fullmatch(db_file):
+        if not db.DB_NAME_RE.fullmatch(db_file) or db.is_validation_working_db(db_file):
             continue
         try:
             conn = db.get_connection(db_file)
@@ -234,6 +234,8 @@ def sources_delete(rel_path: str = Query(...)):
 @router.get("/databases/{filename}/export")
 def database_export(filename: str):
     """Téléchargement du .sqlite autonome (wal_checkpoint TRUNCATE préalable — §7.6)."""
+    if db.is_validation_working_db(filename):
+        raise HTTPException(404, "Copie de validation non exportable")
     path = db.sanitize_db_name(filename)
     if not os.path.exists(path):
         raise HTTPException(404, "Base introuvable")
@@ -248,6 +250,8 @@ class DuplicateBody(BaseModel):
 
 @router.post("/databases/{filename}/duplicate")
 def database_duplicate(filename: str, body: DuplicateBody):
+    if db.is_validation_working_db(filename) or db.is_validation_working_db(body.new_name):
+        raise HTTPException(400, "Namespace validation_test_ réservé")
     src = db.sanitize_db_name(filename)
     dst = db.sanitize_db_name(body.new_name)
     if not os.path.exists(src):
@@ -266,6 +270,8 @@ class DeleteDbBody(BaseModel):
 
 @router.delete("/databases/{filename}")
 def database_delete(filename: str, body: DeleteDbBody):
+    if db.is_validation_working_db(filename):
+        raise HTTPException(404, "Copie de validation gérée uniquement par son run")
     if body.confirm != filename:
         raise HTTPException(400, "confirm doit être le nom exact de la base (double garde-fou)")
     current = orch.orchestrator.current_job

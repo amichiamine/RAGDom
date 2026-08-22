@@ -1,3 +1,10 @@
+# 2026-08-23 — Validation end-to-end sur copie SQLite physique
+
+- Migration 007 additive/idempotente : working DB, opération, batchs, état/progression, erreur et dates d'exécution.
+- `create_run` utilise `Connection.backup`; `/execute` lance le vrai pipeline sur `validation_test_<run>.sqlite` uniquement, avec polling et reprise.
+- Accept scoped transactionnel depuis la copie; reject supprime DB/WAL/SHM; source absente → BLOCKED explicite; cancel cible uniquement les batchs de la copie.
+- UI create→execute, progression/états/erreurs réels; tests temporaires sans LLM/VLM externe.
+
 # 2026-08-22 — Studio de validation final
 
 - Routeur admin `/api/validation` finalisé : scopes universels dont `base` multi-documents, runs/copies de travail document-page, snapshots logiques/restauration, diffs page/run, rapport, benchmarks, profils et diagnostic embeddings.
