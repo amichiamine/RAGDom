@@ -51,6 +51,16 @@
 - Accès vérifiés : PAT GitHub (scope `repo`, push:true), RENDER_API_KEY (service
   ragdom non suspendu, branche main). Skills créées : `ragdom-live-admin`
   (RAGDOM_AUTH_TOKEN — les routes admin sont derrière Bearer), `render-ragdom`.
+- **VÉRIFIÉ EN PRODUCTION (14:39)** : deploy dep-da4qcbjm8hqs73d67d3g LIVE sur
+  commit b0027e8. Bases intactes après redémarrage (993 + 30 artefacts) grâce à la
+  republication. Test de fumée `{"explode":true,"limit":1}` : la boucle a
+  sélectionné la page **14** (premier cadre NEUF) au lieu de repiocher les pages
+  1-13 déjà traitées → correctif confirmé de bout en bout en réel.
+- **Piège découvert** : le redéploiement réinitialise AUSSI `ragdom_config.sqlite`
+  → les `key_id` changent à chaque boot et `active_model` est perdu. Après deploy,
+  toujours refaire `GET /api/llm/keys`. Nouveaux états : clé1 (BuDQ) **429** quota
+  épuisé (se réarme), clé3 (bZEg) **OK** flash-lite, clés 2/4 **403** définitif.
+  Le contraste 429 vs 403 prouve que 2/4 ne sont PAS un problème de quota.
 
 ## 2026-08-22 12:45 — V4.1 : EXPLOSION des cadres pleine page (dernière passe, suite)
 - Comparaison PDF↔base (p27) : la couche CV ne segmente qu'UN bloc pleine page sur
