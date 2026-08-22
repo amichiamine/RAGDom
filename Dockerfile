@@ -32,8 +32,16 @@ COPY backend/requirements.txt backend/requirements.txt
 RUN grep -v "^llama-cpp-python" backend/requirements.txt > /tmp/requirements.web.txt \
     && pip install -r /tmp/requirements.web.txt
 # Procédure post-install OBLIGATOIRE tech_specs §8 (étapes séparées : un échec = build rouge).
+# PIÈGE PIP (payé cher — V4.4) : opencv-python et opencv-python-headless partagent le
+# MÊME dossier cv2/. Le uninstall de l'un SUPPRIME les fichiers de l'autre, et le
+# `pip install` suivant répond « already satisfied » (métadonnées intactes) sans rien
+# réécrire → image SANS cv2 (ModuleNotFoundError au runtime, constaté en production).
+# → --force-reinstall --no-deps réécrit réellement les fichiers ; --no-deps protège
+#   le pin numpy d'un écrasement transitif.
 RUN pip uninstall -y opencv-python || true
-RUN pip install opencv-python-headless==4.10.0.84 numpy==1.26.4
+RUN pip install --force-reinstall --no-deps opencv-python-headless==4.10.0.84 \
+    && pip install numpy==1.26.4 \
+    && python -c "import cv2; print('cv2 OK', cv2.__version__)"
 
 COPY backend/ backend/
 COPY engines/ engines/
