@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
-import katex from 'katex'
 import DOMPurify from 'dompurify'
 import {
   useReactTable, getCoreRowModel, getSortedRowModel, flexRender,
@@ -9,6 +8,7 @@ import { Copy, Check, Layers, Image as ImageIcon, GitCompare, ChevronDown, Arrow
 import type { Artifact } from '@/types'
 import { useLanguage } from '@/contexts/LanguageContext'
 import MarkdownKatex from '@/components/library/MarkdownKatex'
+import { stripMathDelimiters, renderKatexStrict } from '@/lib/markdownKatex'
 
 // Types de `plotly.js-dist-min` (bundle sans types) : déclarés dans le shim
 // ambiant `@/plotly-shim.d.ts`. Un `declare module` inline ici produirait TS2665
@@ -450,15 +450,19 @@ export default function ArtifactRenderer({ artifact, fallbackImageUrl, onEnlarge
   const rawData = artifact.raw_data ?? ''
   const hasRawData = rawData.trim().length > 0
 
-  // matrix → LaTeX displayMode
+  // Les données réelles (OCR/VLM) embarquent souvent leurs PROPRES délimiteurs
+  // ($$…$$ dans raw_data) et certains tableaux réparés par la Couche 5 portent
+  // du LaTeX array au lieu de markdown : on assainit et on redirige AVANT rendu.
+  const mathSource = useMemo(() => stripMathDelimiters(rawData), [rawData])
+  const looksLatex = /^\\begin\{|^begin\{/.test(mathSource)
+
+  // matrix → LaTeX displayMode. Rendu STRICT + auto-réparation (V4.4) : réussit
+  // proprement ou renvoie null → repli honnête (image/panneau), JAMAIS de rouge.
   const katexHtml = useMemo(() => {
-    if (family !== 'matrix' || !hasRawData) return null
-    try {
-      return katex.renderToString(rawData, { throwOnError: false, strict: 'ignore', output: 'html', displayMode: true })
-    } catch {
-      return null
-    }
-  }, [family, rawData, hasRawData])
+    const isMathFamily = family === 'matrix' || (family === 'data_table' && looksLatex)
+    if (!isMathFamily || !hasRawData) return null
+    return renderKatexStrict(mathSource, true)
+  }, [family, mathSource, looksLatex, hasRawData])
 
   // geometry_vector → SVG autonome sanitisé (profil SVG DOMPurify)
   const svgHtml = useMemo(() => {
@@ -468,11 +472,13 @@ export default function ArtifactRenderer({ artifact, fallbackImageUrl, onEnlarge
   }, [family, rawData, hasRawData])
 
   // data_table → parse markdown GFM pour tanstack-table (repli markdown si échec).
+  // Un data_table dont le raw_data est en réalité du LaTeX array (réparation
+  // Couche 5) est redirigé vers KaTeX (katexHtml ci-dessus), jamais vers la table.
   const parsedTable = useMemo(() => {
-    if (family !== 'data_table' || !hasRawData) return null
+    if (family !== 'data_table' || !hasRawData || looksLatex) return null
     return parseMarkdownTable(rawData)
-  }, [family, rawData, hasRawData])
-  const hasTable = family === 'data_table' && hasRawData
+  }, [family, rawData, hasRawData, looksLatex])
+  const hasTable = family === 'data_table' && hasRawData && !looksLatex
 
   // mermaid / plotly : rendu asynchrone → état remonté par le composant enfant.
   const [mermaidOk, setMermaidOk] = useState<boolean | null>(null)
@@ -480,7 +486,7 @@ export default function ArtifactRenderer({ artifact, fallbackImageUrl, onEnlarge
 
   // Éligibilité au rendu natif « synchrone » (svg/katex/table) — connu immédiatement.
   const nativeSyncOk =
-    (family === 'matrix' && !!katexHtml) ||
+    !!katexHtml ||
     (family === 'geometry_vector' && !!svgHtml) ||
     hasTable
 
@@ -516,7 +522,7 @@ export default function ArtifactRenderer({ artifact, fallbackImageUrl, onEnlarge
 
   // ── Rendu natif (structuré) réutilisable ─────────────────────────────────
   const renderNative = (): ReactNode => {
-    if (family === 'matrix' && katexHtml) {
+    if (katexHtml) {
       return <div className="bidi-isolate" style={{ overflowX: 'auto' }} dangerouslySetInnerHTML={{ __html: katexHtml }} />
     }
     if (family === 'geometry_vector' && svgHtml) {

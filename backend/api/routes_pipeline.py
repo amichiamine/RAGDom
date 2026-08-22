@@ -442,8 +442,12 @@ def reset(db_name: str = Query(alias="db"), document_id: Optional[str] = None):
 
 class RequalifyBody(BaseModel):
     explode: bool = False  # True = exploser les cadres pleine page en sous-artefacts
+    # Stratégie d'explosion : "cv" (défaut) = segmentation LOCALE CPU sans LLM
+    # (frame_segmenter) puis qualification aval par PETITS crops (mécanisme
+    # éprouvé) ; "vlm" = comportement historique (un gros appel VLM par cadre).
+    strategy: str = "cv"
     retry_failed: bool = False
-    pace_s: float = 4.0  # cadence anti-RPM entre appels VLM
+    pace_s: float = 4.0  # cadence anti-RPM entre appels VLM (stratégie vlm uniquement)
     """Requalification VLM du corpus EXISTANT (contrat consolidé §12) : reprend les
     dense_illustration à raw_binary NON NULL et ≤70 % de page, les RE-TYPE +
     STRUCTURE + SÉMANTIQUE, et (option) les ANCRE dans le chunk à leur vraie
@@ -496,14 +500,51 @@ def _requalify_area_ratio(bbox_json, width_px, height_px):
 
 
 _PARA_RE = re.compile(r"\n\n+")
+# Détection des délimiteurs mathématiques pour la garde d'ancrage : on compte les
+# blocs $$ (display) d'abord, puis les $ simples restants (inline). Un point
+# d'insertion « à l'intérieur » d'un bloc a une parité IMPAIRE de délimiteurs
+# ouverts avant lui — y insérer une image casserait le LaTeX (rouge en flux).
+_DISPLAY_MATH_RE = re.compile(r"\$\$")
+_INLINE_MATH_RE = re.compile(r"(?<!\$)\$(?!\$)")
+
+
+def _inside_math_block(md: str, offset: int) -> bool:
+    """True si `offset` tombe à l'intérieur d'un bloc mathématique ouvert.
+
+    Parité IMPAIRE de `$$` avant l'offset → bloc display ouvert. Sinon, parité
+    IMPAIRE de `$` simples (hors `$$`) → bloc inline ouvert. Les `$$` sont retirés
+    avant le comptage des `$` simples pour ne pas les compter deux fois."""
+    head = md[:offset]
+    if len(_DISPLAY_MATH_RE.findall(head)) % 2 == 1:
+        return True  # au milieu d'un $$…$$
+    head_no_display = _DISPLAY_MATH_RE.sub("", head)
+    return len(_INLINE_MATH_RE.findall(head_no_display)) % 2 == 1
+
+
+def _safe_anchor_offset(md: str, seps: list, preferred: int):
+    """Choisit un point d'insertion d'ancre qui NE COUPE PAS un bloc mathématique.
+
+    Part du séparateur `preferred` (le plus proche du ratio vertical) ; s'il tombe
+    dans un bloc `$$…$$` (ou `$…$`), essaie les autres séparateurs par distance
+    croissante jusqu'à en trouver un hors bloc. Renvoie l'offset sûr, ou None si
+    aucun séparateur n'est sûr (l'appelant ajoutera alors l'ancre en FIN de
+    chunk, position toujours hors bloc)."""
+    if not _inside_math_block(md, preferred):
+        return preferred
+    for off in sorted(seps, key=lambda s: abs(s - preferred)):
+        if not _inside_math_block(md, off):
+            return off
+    return None
 
 
 def _anchor_in_chunk(conn, artifact_id: str, caption: Optional[str], document_id: str,
                      page_number: int, y0: Optional[float], page_height: Optional[int]) -> bool:
     """Ancre idempotente `![caption](asset://artifacts/{id})` dans le chunk (même
     doc+page) au \\n\\n le plus proche du ratio y0/page_height. Ne réinsère pas si
-    l'ancre existe déjà (idempotent). Déclenche le trigger FTS via UPDATE. True si
-    modifié."""
+    l'ancre existe déjà (idempotent). GARDE : l'ancre n'est jamais insérée AU
+    MILIEU d'un bloc mathématique `$$…$$` / `$…$` (sinon LaTeX cassé) — on décale
+    au séparateur sûr le plus proche, ou en fin de chunk. Déclenche le trigger
+    FTS via UPDATE. True si modifié."""
     marker = "asset://artifacts/%s" % artifact_id
     row = conn.execute(
         "SELECT id, content_markdown FROM document_chunks"
@@ -516,12 +557,16 @@ def _anchor_in_chunk(conn, artifact_id: str, caption: Optional[str], document_id
         return False  # déjà ancré (idempotent)
     image_md = "![%s](%s)" % (caption or "", marker)
     seps = [m.start() for m in _PARA_RE.finditer(md)]
+    offset = None
     if seps and page_height and y0 is not None:
         ratio = max(0.0, min(1.0, float(y0) / float(page_height)))
         target = ratio * max(1, len(md))
-        offset = min(seps, key=lambda s: abs(s - target))
+        preferred = min(seps, key=lambda s: abs(s - target))
+        offset = _safe_anchor_offset(md, seps, preferred)
+    if offset is not None:
         new_md = md[:offset] + "\n\n" + image_md + md[offset:]
     else:
+        # Aucun séparateur (ou tous dans un bloc math) → ajout en fin de chunk.
         new_md = (md + "\n\n" + image_md) if md else image_md
     conn.execute("UPDATE document_chunks SET content_markdown=? WHERE id=?", (new_md, chunk_id))
     return True
@@ -529,11 +574,134 @@ def _anchor_in_chunk(conn, artifact_id: str, caption: Optional[str], document_id
 
 
 
-def _explode_fullpage_frames(conn, body, rows):
-    """Explosion des cadres quasi-pleine-page (>70 %) en SOUS-ARTEFACTS individuels
-    (contrat multimodal complet : les éléments visuels internes — opérations posées,
-    encadrés, schémas — deviennent des artefacts structurés ancrés, chacun avec son
-    crop WebP comparateur). Le cadre d'origine est conservé et marqué vlm_exploded_at."""
+# Seuil « cadre quasi-pleine-page » (>70 % de page) — cohérent avec layer_2/route.
+_EXPLODE_AREA_RATIO_MIN = 0.70
+# Nombre max de cadres traités par appel d'explosion (garde-fou charge/quota).
+_EXPLODE_MAX_FRAMES = 50
+# Nombre max de sous-régions renvoyées par cadre (stratégie CV, borne mémoire).
+_CV_MAX_REGIONS = 20
+# render_config des sous-artefacts CV : openseadragon (dense_illustration) +
+# provenance additive (origin/parent). Ces clés NE contiennent AUCUN marqueur
+# vlm_* → les sous-artefacts restent candidats de la requalification standard.
+_RC_DENSE_CV = {"renderer": "openseadragon", "tileSources": None, "showNavigator": True}
+
+
+def _select_explode_frames(conn, body, rows):
+    """Sélectionne les cadres pleine page (>70 %) à exploser, avec la garde
+    d'idempotence vlm_exploded_at (jamais re-soumis, même sous retry_failed).
+    Partagé par les stratégies CV et VLM."""
+    frames = []
+    for r in rows:
+        ratio = _requalify_area_ratio(r[3], r[5], r[6])
+        if ratio is None or ratio <= _EXPLODE_AREA_RATIO_MIN:
+            continue
+        # Garde défensive (idempotence) : un cadre déjà explosé n'est JAMAIS
+        # re-soumis (sinon doublons de sous-artefacts / quota brûlé).
+        done = conn.execute("SELECT render_config_json FROM scientific_artifacts"
+                            " WHERE id=?", (r[0],)).fetchone()
+        if done and done[0] and "vlm_exploded_at" in done[0]:
+            continue
+        frames.append(r)
+        if len(frames) >= max(1, min(body.limit, _EXPLODE_MAX_FRAMES)):
+            break
+    return frames
+
+
+def _mark_frame_exploded(conn, art_id, marker):
+    """Fusionne un marqueur (vlm_exploded_at / vlm_failed_at [+ explode_strategy])
+    dans le render_config_json du cadre parent (idempotence)."""
+    prev = conn.execute("SELECT render_config_json FROM scientific_artifacts WHERE id=?",
+                        (art_id,)).fetchone()
+    try:
+        cfg = json.loads(prev[0]) if prev and prev[0] else {}
+    except ValueError:
+        cfg = {}
+    cfg.update(marker)
+    conn.execute("UPDATE scientific_artifacts SET render_config_json=? WHERE id=?",
+                 (json.dumps(cfg, ensure_ascii=False), art_id))
+
+
+def _explode_frames_cv(conn, body, frames):
+    """Stratégie « CV-first » (défaut) : segmentation LOCALE CPU (frame_segmenter,
+    ZÉRO LLM, zéro réseau) de chaque cadre pleine page. Chaque sous-région devient
+    un dense_illustration (crop WebP + bbox ABSOLUE) qui redevient AUTOMATIQUEMENT
+    candidat de la requalification standard par PETITS crops — le mécanisme
+    éprouvé (98/98 le même jour). Aucun appel LLM, aucune cadence nécessaire.
+    Le cadre parent est marqué vlm_exploded_at + explode_strategy=cv."""
+    import uuid as _uuid
+    import datetime as _dt
+    try:
+        from core import engine_registry
+        active = engine_registry.active_engine()
+        seg = engine_registry.load_layer(active["id"], "frame_segmenter")
+    except Exception:  # noqa: BLE001 — moteur/segmenteur indisponible
+        raise HTTPException(503, "Segmentation CV indisponible (moteur inactif)")
+    if body.dry_run:
+        return {"dry_run": True, "mode": "explode", "strategy": "cv",
+                "frames": len(frames), "created": 0, "skipped_text_regions": 0}
+    created = anchored = failed = skipped_text = 0
+    by_type: dict = {}
+    for art_id, doc_id, page_number, bbox_json, _c, _w, page_h in frames:
+        row = conn.execute("SELECT raw_binary, chunk_id, domain FROM scientific_artifacts"
+                           " WHERE id=?", (art_id,)).fetchone()
+        if not row or not row[0]:
+            failed += 1
+            continue
+        try:
+            regions = seg.segment_frame(row[0], max_regions=_CV_MAX_REGIONS)
+        except Exception:  # noqa: BLE001 — le segmenteur ne lève jamais, ceinture+bretelles
+            regions = []
+        # Décalage bbox : le cadre a son propre bbox (absolu) dans la page.
+        try:
+            fb = json.loads(bbox_json)
+            off_x, off_y = int(fb["x0"]), int(fb["y0"])
+        except (ValueError, TypeError, KeyError):
+            off_x = off_y = 0
+        # Marqueur d'idempotence sur le cadre parent (toujours, même si 0 région :
+        # une page 100 % texte n'a rien à exploser mais ne doit pas être re-soumise).
+        _mark_frame_exploded(conn, art_id, {
+            "vlm_exploded_at": _dt.datetime.utcnow().isoformat(),
+            "explode_strategy": "cv"})
+        for reg in (regions or []):
+            # Les régions jugées « texte pur » sont comptées mais PAS créées :
+            # inutile de les faire passer par la qualification aval (bruit). On
+            # préfère toutefois garder celles au doute (is_text=False).
+            if reg.get("is_text"):
+                skipped_text += 1
+                continue
+            new_id = str(_uuid.uuid4())
+            x0, y0, x1, y1 = reg["bbox_rel"]
+            bbox_abs = json.dumps({"x0": off_x + x0, "y0": off_y + y0,
+                                   "x1": off_x + x1, "y1": off_y + y1})
+            rc = dict(_RC_DENSE_CV)
+            rc["origin"] = "cv_explode"
+            rc["parent_artifact_id"] = art_id
+            conn.execute(
+                "INSERT INTO scientific_artifacts (id, chunk_id, document_id, page_number,"
+                " domain, artifact_type, raw_data, raw_binary, render_config_json, caption,"
+                " searchable_text, bounding_box_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                (new_id, row[1], doc_id, page_number, row[2] or "general",
+                 "dense_illustration", None, reg["raw_binary"],
+                 json.dumps(rc, ensure_ascii=False), None,
+                 "illustration page %d" % page_number, bbox_abs))
+            created += 1
+            by_type["dense_illustration"] = by_type.get("dense_illustration", 0) + 1
+            # Ancrage in-situ (caption vide à ce stade — la qualification aval la
+            # renseignera). Garde anti-bloc-mathématique intégrée à _anchor_in_chunk.
+            if body.anchor and _anchor_in_chunk(conn, new_id, None, doc_id,
+                                                page_number, float(off_y + y0), page_h):
+                anchored += 1
+    conn.commit()
+    return {"dry_run": False, "mode": "explode", "strategy": "cv",
+            "frames": len(frames), "created": created, "anchored": anchored,
+            "by_type": by_type, "skipped_text_regions": skipped_text,
+            "failed_frames": failed}
+
+
+def _explode_frames_vlm(conn, body, frames):
+    """Stratégie « vlm » (historique, conservée) : UN gros appel VLM par cadre qui
+    liste tous les éléments (type + forme structurée + bbox %). Fragile sur les
+    grosses pages (429 sur la clé forte) — d'où le défaut CV. raw_binary conservé."""
     import time as _time
     import uuid as _uuid
     import datetime as _dt
@@ -544,23 +712,9 @@ def _explode_fullpage_frames(conn, body, rows):
         from llm.key_manager import generate as generate_fn
     except Exception:  # noqa: BLE001
         raise HTTPException(503, "Explosion VLM indisponible")
-    frames = []
-    for r in rows:
-        ratio = _requalify_area_ratio(r[3], r[5], r[6])
-        if ratio is None or ratio <= 0.70:
-            continue
-        # Garde défensive (idempotence) : un cadre déjà explosé n'est JAMAIS re-soumis,
-        # même si l'appelant a forcé retry_failed ou si la clause SQL évolue — sinon
-        # doublons de sous-artefacts et quota VLM brûlé sur du travail déjà fait.
-        done = conn.execute("SELECT render_config_json FROM scientific_artifacts"
-                            " WHERE id=?", (r[0],)).fetchone()
-        if done and done[0] and "vlm_exploded_at" in done[0]:
-            continue
-        frames.append(r)
-        if len(frames) >= max(1, min(body.limit, 50)):
-            break
     if body.dry_run:
-        return {"dry_run": True, "mode": "explode", "frames": len(frames), "created": 0}
+        return {"dry_run": True, "mode": "explode", "strategy": "vlm",
+                "frames": len(frames), "created": 0}
     created = anchored = failed = 0
     by_type: dict = {}
     for art_id, doc_id, page_number, bbox_json, _c, _w, page_h in frames:
@@ -582,19 +736,12 @@ def _explode_fullpage_frames(conn, body, rows):
             off_x, off_y = int(fb["x0"]), int(fb["y0"])
         except (ValueError, TypeError, KeyError):
             off_x = off_y = 0
-        marker = {"vlm_exploded_at": _dt.datetime.utcnow().isoformat()}
+        marker = {"vlm_exploded_at": _dt.datetime.utcnow().isoformat(),
+                  "explode_strategy": "vlm"}
         if elements is None:
-            marker = {"vlm_failed_at": marker["vlm_exploded_at"]}
+            marker = {"vlm_failed_at": marker["vlm_exploded_at"], "explode_strategy": "vlm"}
             failed += 1
-        prev = conn.execute("SELECT render_config_json FROM scientific_artifacts WHERE id=?",
-                            (art_id,)).fetchone()
-        try:
-            cfg = json.loads(prev[0]) if prev and prev[0] else {}
-        except ValueError:
-            cfg = {}
-        cfg.update(marker)
-        conn.execute("UPDATE scientific_artifacts SET render_config_json=? WHERE id=?",
-                     (json.dumps(cfg, ensure_ascii=False), art_id))
+        _mark_frame_exploded(conn, art_id, marker)
         for el in (elements or []):
             new_id = str(_uuid.uuid4())
             x0, y0, x1, y1 = el["bbox_rel"]
@@ -614,8 +761,24 @@ def _explode_fullpage_frames(conn, body, rows):
                                                 page_number, float(off_y + y0), page_h):
                 anchored += 1
     conn.commit()
-    return {"dry_run": False, "mode": "explode", "frames": len(frames), "created": created,
+    return {"dry_run": False, "mode": "explode", "strategy": "vlm",
+            "frames": len(frames), "created": created,
             "anchored": anchored, "by_type": by_type, "failed_frames": failed}
+
+
+def _explode_fullpage_frames(conn, body, rows):
+    """Explosion des cadres quasi-pleine-page (>70 %) en SOUS-ARTEFACTS individuels.
+
+    Deux stratégies (body.strategy) :
+      - "cv" (DÉFAUT) : segmentation LOCALE CPU sans LLM → sous-crops
+        dense_illustration requalifiés ensuite par PETITS appels (éprouvé) ;
+      - "vlm" (historique) : un gros appel VLM par cadre (fragile, 429).
+    Le cadre d'origine est conservé et marqué vlm_exploded_at (idempotence)."""
+    frames = _select_explode_frames(conn, body, rows)
+    strategy = (body.strategy or "cv").strip().lower()
+    if strategy == "vlm":
+        return _explode_frames_vlm(conn, body, frames)
+    return _explode_frames_cv(conn, body, frames)
 
 
 @router.post("/requalify-artifacts")
@@ -659,12 +822,15 @@ def requalify_artifacts(body: RequalifyBody):
                 if len(candidates) >= cap:
                     break
 
+        # Explosion (CV ou VLM) : branchée AVANT le dry_run générique pour que le
+        # dry_run d'explosion renvoie le décompte de CADRES pleine page (et non le
+        # décompte de candidats ≤70 %). _explode_fullpage_frames gère son dry_run.
+        if body.explode:
+            return _explode_fullpage_frames(conn, body, rows)
+
         if body.dry_run:
             return {"dry_run": True, "candidates": len(candidates), "requalified": 0,
                     "anchored": 0, "by_type": {}, "by_semantic": {}, "skipped_failures": 0}
-
-        if body.explode:
-            return _explode_fullpage_frames(conn, body, rows)
 
         qualify_fn, generate_fn = _qualifier_and_generate()
         if qualify_fn is None or generate_fn is None:

@@ -79,6 +79,52 @@ function selfHealRawText(raw: string): string {
 }
 
 // ──────────────────────────────────────────────────────────────────────────
+// 1bis. Hygiène LaTeX partagée (V4.4) — les sorties OCR/VLM réelles portent
+// parfois leurs PROPRES délimiteurs ($$…$$ dans raw_data) ou des commandes
+// mutilées (begin{array} sans backslash, backslash orphelin final). Sans ces
+// réparations déterministes, KaTeX affiche du rouge brut (constaté en prod).
+// ──────────────────────────────────────────────────────────────────────────
+
+/** Retire les délimiteurs mathématiques embarqués en tête/queue d'une source
+ *  destinée à katex.renderToString (qui n'attend JAMAIS de délimiteurs). */
+export function stripMathDelimiters(src: string): string {
+  let s = (src || '').trim()
+  for (const [open, close] of [['$$', '$$'], ['\\[', '\\]'], ['\\(', '\\)'], ['$', '$']] as const) {
+    if (s.length > open.length + close.length && s.startsWith(open) && s.endsWith(close)) {
+      s = s.slice(open.length, s.length - close.length).trim()
+    }
+  }
+  return s
+}
+
+// Commandes fréquemment « démanchées » par l'OCR/VLM (backslash perdu).
+const BROKEN_CMD_RE = /(^|[^\\a-zA-Z])(begin|end)\{/g
+const BROKEN_WORD_RE = /(^|[^\\a-zA-Z])(hline|frac|sqrt|overline|underline|quad|qquad|times|div|cdot|dots|ldots)(?![a-zA-Z])/g
+
+/** Répare déterministement les défauts LaTeX récurrents des sorties OCR/VLM.
+ *  À n'appliquer QUE sur du contenu déjà identifié comme mathématique. */
+export function repairLatex(src: string): string {
+  let s = (src || '').trim()
+  s = s.replace(BROKEN_CMD_RE, '$1\\$2{')
+  s = s.replace(BROKEN_WORD_RE, '$1\\$2')
+  // Backslash orphelin final (hors \\ légitime de fin de rangée).
+  while (s.endsWith('\\') && !s.endsWith('\\\\')) s = s.slice(0, -1).trimEnd()
+  return s
+}
+
+/** Rendu KaTeX STRICT : réussit proprement ou renvoie null — jamais de rouge.
+ *  Tente la source telle quelle, puis sa version réparée. */
+export function renderKatexStrict(math: string, displayMode: boolean): string | null {
+  const attempts = [math, repairLatex(math)]
+  for (const attempt of attempts) {
+    try {
+      return katex.renderToString(attempt, { displayMode, throwOnError: true, strict: 'ignore', output: 'html' })
+    } catch { /* tentative suivante */ }
+  }
+  return null
+}
+
+// ──────────────────────────────────────────────────────────────────────────
 // 2. Protection des blocs mathématiques — port EXACT (l.2177-2191)
 // ──────────────────────────────────────────────────────────────────────────
 export interface MathBlock { type: 'display' | 'inline'; math: string }
@@ -207,16 +253,14 @@ function renderMathBlocks(html: string, blocks: MathBlock[]): string {
   let out = html
   blocks.forEach((item, idx) => {
     const placeholder = PLACEHOLDER_PREFIX + idx + '%%%'
-    try {
-      const rendered = katex.renderToString(item.math, {
-        displayMode: item.type === 'display',
-        throwOnError: false,
-        strict: 'ignore',
-        output: 'html',
-      })
+    // Rendu STRICT avec auto-réparation (V4.4) : plus jamais de LaTeX rouge en
+    // flux — un bloc irrécupérable s'affiche en code neutre, pas en erreur criarde.
+    const rendered = renderKatexStrict(item.math, item.type === 'display')
+    if (rendered !== null) {
       out = out.split(placeholder).join(rendered)
-    } catch {
-      out = out.split(placeholder).join('<span class="text-danger">' + item.math + '</span>')
+    } else {
+      const esc = item.math.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      out = out.split(placeholder).join('<code class="math-raw" dir="ltr">' + esc + '</code>')
     }
   })
   return out

@@ -53,6 +53,56 @@ _VALID_TYPES = {"geometry", "drawing", "operation", "diagram", "flowchart",
                 "plot", "matrix", "table", "chemistry", "code", "photo", "other"}
 _VALID_SEMANTICS = {"demonstration", "illustration", "exercise_support"}
 
+# ── Sanitation LaTeX (bug production : délimiteurs embarqués + commandes mutilées) ──
+# (a) Délimiteurs mathématiques en tête/queue à retirer : le renderer frontend
+#     (katex) fournit SES PROPRES délimiteurs — un $$…$$ embarqué casse le rendu.
+_LATEX_LEAD_RE = re.compile(r"^\s*(?:\$\$|\$|\\\[|\\\()\s*")
+_LATEX_TAIL_RE = re.compile(r"\s*(?:\$\$|\$|\\\]|\\\))\s*$")
+# (b) Commandes fréquemment mutilées (backslash perdu à l'OCR/au VLM). On répare
+#     UNIQUEMENT en DÉBUT de mot (précédé d'un non-lettre) et NON déjà précédé
+#     d'un backslash — sinon on double des commandes déjà correctes.
+_LATEX_FIX_COMMANDS = ("begin", "end", "hline", "frac", "quad", "times",
+                       "div", "cdot")
+_LATEX_FIX_RES = [
+    (re.compile(r"(?<![\\A-Za-z])(" + cmd + r")\b"), r"\\\1")
+    for cmd in _LATEX_FIX_COMMANDS
+]
+# (c) Backslash orphelin en toute fin de chaîne (sans commande derrière).
+_LATEX_TRAIL_BACKSLASH_RE = re.compile(r"\\+\s*$")
+
+
+def _sanitize_latex(s):
+    """Nettoie une chaîne LaTeX AVANT persistance (matrix/latex) : retire les
+    délimiteurs mathématiques embarqués (tête/queue), répare les commandes
+    évidentes dont le backslash a été perdu (begin{, end{, hline, frac{, quad,
+    times, div, cdot), et supprime un backslash orphelin final. Idempotent et
+    sans exception : une entrée non-str renvoie l'entrée telle quelle."""
+    if not isinstance(s, str):
+        return s
+    out = s.strip()
+    # (a) délimiteurs en tête/queue, retirés en boucle ($$...$$, $...$, \[...\], \(...\)).
+    changed = True
+    while changed and out:
+        changed = False
+        m = _LATEX_LEAD_RE.match(out)
+        if m and m.end() > 0:
+            out = out[m.end():]
+            changed = True
+        m = _LATEX_TAIL_RE.search(out)
+        # On ne coupe que si le délimiteur final n'est pas déjà le début de chaîne
+        # (évite de vider une chaîne réduite à un simple "$").
+        if m and m.start() > 0:
+            out = out[:m.start()]
+            changed = True
+    # (b) réparation des commandes mutilées.
+    for rx, repl in _LATEX_FIX_RES:
+        out = rx.sub(repl, out)
+    # (c) backslash orphelin final (mais on préserve un "\\" de saut de ligne
+    #     LaTeX SEULEMENT s'il est suivi de contenu — ici on est en fin de chaîne,
+    #     donc un backslash terminal est toujours orphelin).
+    out = _LATEX_TRAIL_BACKSLASH_RE.sub("", out)
+    return out.strip()
+
 _PROMPT = (
     "Tu es un extracteur d'artefacts scientifiques. On te donne l'image d'UNE figure "
     "issue d'un manuel scolaire (langue arabe, sens RTL). Analyse-la et réponds "
@@ -206,7 +256,11 @@ def _map_result(parsed):
     elif art_type == "flowchart" and mermaid:
         new_type, raw_data, base_rc = "flowchart", mermaid, _RC_FLOWCHART
     elif art_type in ("operation", "matrix") and latex:
-        new_type, raw_data, base_rc = "matrix", "$$%s$$" % latex.strip("$"), _RC_MATRIX
+        # Sanitation : délimiteurs embarqués retirés + commandes mutilées réparées
+        # (le renderer katex fournit ses propres $$). raw_binary/base intacts.
+        new_type = "matrix"
+        raw_data = "$$%s$$" % _sanitize_latex(latex)
+        base_rc = _RC_MATRIX
     elif art_type == "plot" and plotly:
         new_type, raw_data, base_rc = "signal_waveform", plotly, _RC_PLOT
     elif art_type == "table" and markdown:
