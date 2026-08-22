@@ -274,3 +274,71 @@ def qualify_visual_artifact(webp_bytes, generate_fn, timeout_s=60):
     if mapped is not None and result.get("provider"):
         mapped["vlm_provider"] = result.get("provider")
     return mapped
+
+
+_EXPLODE_PROMPT = (
+    "Analyse cette page de manuel scolaire. Liste CHAQUE élément visuel distinct "
+    "(opération posée, tableau, figure géométrique, schéma fléché, encadré de méthode, "
+    "graphique, dessin) — PAS les paragraphes de texte simple. Réponds UNIQUEMENT en JSON : "
+    '{"elements":[{"type":"geometry"|"drawing"|"operation"|"diagram"|"flowchart"|"plot"|"matrix"|"table"|"chemistry"|"code"|"photo",'
+    '"semantic":"demonstration"|"illustration"|"exercise_support"|null,'
+    '"caption_ar":"légende courte arabe",'
+    '"bbox_pct":{"x0":0-100,"y0":0-100,"x1":0-100,"y1":0-100} (position en POURCENTAGE de l\'image),'
+    '"svg":str|null,"latex":str|null (opération posée → \\begin{array} fidèle avec retenues),'
+    '"mermaid":str|null,"plotly_json":str|null,"markdown":str|null,"smiles":str|null,"code":str|null,"lang":str|null}]}. '
+    "Maximum 12 éléments, les plus significatifs d'abord.")
+
+
+def explode_full_page(webp_bytes, generate_fn, timeout_s=90):
+    """Explose un cadre quasi-pleine-page en SOUS-ARTEFACTS individuels :
+    le VLM liste chaque élément visuel (type + forme structurée + bbox %),
+    chaque élément reçoit son PROPRE crop WebP découpé de l'original
+    (comparateur) + son raw_data structuré. Retourne une liste (possiblement
+    vide) de dicts prêts à insérer ; None si l'appel VLM échoue."""
+    import base64 as _b64
+    result = generate_fn(_EXPLODE_PROMPT,
+                         image_b64=_b64.b64encode(webp_bytes).decode("ascii"),
+                         timeout_s=timeout_s)
+    if not result or not result.get("content"):
+        return None
+    parsed = _extract_json(result["content"])
+    if not parsed or not isinstance(parsed.get("elements"), list):
+        return None
+    try:
+        import cv2
+        import numpy as np
+        img = cv2.imdecode(np.frombuffer(webp_bytes, np.uint8), cv2.IMREAD_COLOR)
+        H, W = img.shape[:2]
+    except Exception:  # noqa: BLE001 — pas de découpe possible : abandon propre
+        return None
+    out = []
+    for el in parsed["elements"][:12]:
+        if not isinstance(el, dict):
+            continue
+        bb = el.get("bbox_pct") or {}
+        try:
+            vals = [float(bb[k]) for k in ("x0", "y0", "x1", "y1")]
+            # Échelle auto : les VLM répondent en % (0-100) OU en norme 0-1000 (Gemini box_2d).
+            scale = 1000.0 if max(vals) > 100.0 else 100.0
+            x0 = max(0, int(W * vals[0] / scale)); y0 = max(0, int(H * vals[1] / scale))
+            x1 = min(W, int(W * vals[2] / scale)); y1 = min(H, int(H * vals[3] / scale))
+        except (KeyError, TypeError, ValueError):
+            continue
+        if x1 - x0 < 20 or y1 - y0 < 20:
+            continue
+        ok, buf = cv2.imencode(".webp", img[y0:y1, x0:x1], [cv2.IMWRITE_WEBP_QUALITY, 80])
+        crop = buf.tobytes() if ok else None
+        mapped = _map_result(el)  # même mapping §12 que la qualification unitaire
+        if mapped is None or not mapped.get("artifact_type"):
+            import json as _json
+            sem = el.get("semantic") if el.get("semantic") in _VALID_SEMANTICS else None
+            mapped = {"artifact_type": "dense_illustration", "raw_data": None,
+                      "render_config_json": _json.dumps(_with_semantic(dict(_RC_DENSE), sem),
+                                                        ensure_ascii=False)}
+        caption = (el.get("caption_ar") or "").strip() or None
+        out.append({"artifact_type": mapped["artifact_type"], "raw_data": mapped.get("raw_data"),
+                    "render_config_json": mapped["render_config_json"], "caption": caption,
+                    "searchable_text": caption or mapped["artifact_type"],
+                    "raw_binary": crop, "bbox_rel": (x0, y0, x1, y1),
+                    "semantic": el.get("semantic")})
+    return out

@@ -1,5 +1,17 @@
 # JOURNAL des passes (le plus récent en premier)
 
+## 2026-08-22 12:45 — V4.1 : EXPLOSION des cadres pleine page (dernière passe, suite)
+- Comparaison PDF↔base (p27) : la couche CV ne segmente qu'UN bloc pleine page sur
+  les pages denses → les opérations posées/encadrés/schémas internes n'étaient pas
+  extraits individuellement. REMÈDE LIVRÉ : requalify-artifacts {"explode":true} —
+  le VLM liste chaque élément visuel (type+forme structurée+bbox norme 0-1000
+  auto-détectée), chacun reçoit SON crop WebP découpé (comparateur), son ancre
+  in-situ, sa sémantique. 124 sous-artefacts créés/ancrés en réel (dont matrices
+  d'opérations posées LaTeX + tableaux + géométrie).
+- RESTE À FAIRE (quotas/budget) : ~127 cadres du manuel — commande de reprise :
+  POST /pipeline/requalify-artifacts {"db":"1AM_math_official-books.sqlite",
+  "explode":true,"limit":12,"pace_s":4} en boucle jusqu'à frames=0 ; puis
+  re-publier les 2 .sqlite en assets de la release corpus-1am-v1 et redéployer.
 ## 2026-08-22 12:10 — Passe finale : consultation visuelle + consignation
 - Vérification navigateur directe du live V4.0 : texte+KaTeX+SVG in-situ+comparateurs
   +galerie+badges opérationnels, 0 erreur console. Voir BILAN_FINAL.md (limites

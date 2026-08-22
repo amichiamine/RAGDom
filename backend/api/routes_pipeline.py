@@ -441,6 +441,7 @@ def reset(db_name: str = Query(alias="db"), document_id: Optional[str] = None):
 
 
 class RequalifyBody(BaseModel):
+    explode: bool = False  # True = exploser les cadres pleine page en sous-artefacts
     retry_failed: bool = False
     pace_s: float = 4.0  # cadence anti-RPM entre appels VLM
     """Requalification VLM du corpus EXISTANT (contrat consolidé §12) : reprend les
@@ -526,6 +527,89 @@ def _anchor_in_chunk(conn, artifact_id: str, caption: Optional[str], document_id
     return True
 
 
+
+
+def _explode_fullpage_frames(conn, body, rows):
+    """Explosion des cadres quasi-pleine-page (>70 %) en SOUS-ARTEFACTS individuels
+    (contrat multimodal complet : les éléments visuels internes — opérations posées,
+    encadrés, schémas — deviennent des artefacts structurés ancrés, chacun avec son
+    crop WebP comparateur). Le cadre d'origine est conservé et marqué vlm_exploded_at."""
+    import time as _time
+    import uuid as _uuid
+    import datetime as _dt
+    try:
+        from core import engine_registry
+        active = engine_registry.active_engine()
+        qual = engine_registry.load_layer(active["id"], "artifact_qualifier")
+        from llm.key_manager import generate as generate_fn
+    except Exception:  # noqa: BLE001
+        raise HTTPException(503, "Explosion VLM indisponible")
+    frames = []
+    for r in rows:
+        ratio = _requalify_area_ratio(r[3], r[5], r[6])
+        if ratio is not None and ratio > 0.70:
+            frames.append(r)
+            if len(frames) >= max(1, min(body.limit, 50)):
+                break
+    if body.dry_run:
+        return {"dry_run": True, "mode": "explode", "frames": len(frames), "created": 0}
+    created = anchored = failed = 0
+    by_type: dict = {}
+    for art_id, doc_id, page_number, bbox_json, _c, _w, page_h in frames:
+        row = conn.execute("SELECT raw_binary, chunk_id, domain FROM scientific_artifacts"
+                           " WHERE id=?", (art_id,)).fetchone()
+        if not row or not row[0]:
+            failed += 1
+            continue
+        try:
+            elements = qual.explode_full_page(row[0], generate_fn,
+                                              timeout_s=int(config.VLM_TIMEOUT_SECONDS) * 3)
+        except Exception:  # noqa: BLE001
+            elements = None
+        if body.pace_s > 0:
+            _time.sleep(min(body.pace_s, 15.0))
+        # Décalage bbox : le cadre a son propre bbox dans la page.
+        try:
+            fb = json.loads(bbox_json)
+            off_x, off_y = int(fb["x0"]), int(fb["y0"])
+        except (ValueError, TypeError, KeyError):
+            off_x = off_y = 0
+        marker = {"vlm_exploded_at": _dt.datetime.utcnow().isoformat()}
+        if elements is None:
+            marker = {"vlm_failed_at": marker["vlm_exploded_at"]}
+            failed += 1
+        prev = conn.execute("SELECT render_config_json FROM scientific_artifacts WHERE id=?",
+                            (art_id,)).fetchone()
+        try:
+            cfg = json.loads(prev[0]) if prev and prev[0] else {}
+        except ValueError:
+            cfg = {}
+        cfg.update(marker)
+        conn.execute("UPDATE scientific_artifacts SET render_config_json=? WHERE id=?",
+                     (json.dumps(cfg, ensure_ascii=False), art_id))
+        for el in (elements or []):
+            new_id = str(_uuid.uuid4())
+            x0, y0, x1, y1 = el["bbox_rel"]
+            bbox_abs = json.dumps({"x0": off_x + x0, "y0": off_y + y0,
+                                   "x1": off_x + x1, "y1": off_y + y1})
+            conn.execute(
+                "INSERT INTO scientific_artifacts (id, chunk_id, document_id, page_number,"
+                " domain, artifact_type, raw_data, raw_binary, render_config_json, caption,"
+                " searchable_text, bounding_box_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                (new_id, row[1], doc_id, page_number, row[2] or "general",
+                 el["artifact_type"], el.get("raw_data"), el.get("raw_binary"),
+                 el["render_config_json"], el.get("caption"), el.get("searchable_text"),
+                 bbox_abs))
+            created += 1
+            by_type[el["artifact_type"]] = by_type.get(el["artifact_type"], 0) + 1
+            if body.anchor and _anchor_in_chunk(conn, new_id, el.get("caption"), doc_id,
+                                                page_number, float(off_y + y0), page_h):
+                anchored += 1
+    conn.commit()
+    return {"dry_run": False, "mode": "explode", "frames": len(frames), "created": created,
+            "anchored": anchored, "by_type": by_type, "failed_frames": failed}
+
+
 @router.post("/requalify-artifacts")
 def requalify_artifacts(body: RequalifyBody):
     """Requalification VLM du corpus existant (§12). dry_run = comptes ; réel =
@@ -563,6 +647,9 @@ def requalify_artifacts(body: RequalifyBody):
         if body.dry_run:
             return {"dry_run": True, "candidates": len(candidates), "requalified": 0,
                     "anchored": 0, "by_type": {}, "by_semantic": {}, "skipped_failures": 0}
+
+        if body.explode:
+            return _explode_fullpage_frames(conn, body, rows)
 
         qualify_fn, generate_fn = _qualifier_and_generate()
         if qualify_fn is None or generate_fn is None:
