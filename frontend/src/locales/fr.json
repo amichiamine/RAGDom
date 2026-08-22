@@ -114,7 +114,16 @@
     "editor_hide_scan": "Masquer le scan",
     "editor_original_scan": "Scan original (rappel)",
     "back_workspace": "Espace bibliothèque",
-    "no_exercises_typed": "Aucun exercice détecté par le typage automatique dans cette base. Le contenu extrait reste consultable en intégralité dans l'onglet Cours."
+    "no_exercises_typed": "Aucun exercice détecté par le typage automatique dans cette base. Le contenu extrait reste consultable en intégralité dans l'onglet Cours.",
+    "media_section": "Matériels extraits",
+    "media_count_unit": "médias",
+    "media_loading": "… Chargement des matériels extraits",
+    "media_zoom": "Agrandir",
+    "media_empty": "Aucun contenu disponible pour ce média.",
+    "eval_loading": "… Chargement des modèles d'évaluation",
+    "no_evaluations_typed": "Aucun sujet d'évaluation détecté par le typage automatique dans cette base.",
+    "eval_subject_title": "Sujet d'évaluation",
+    "eval_correction_only": "Corrigé d'évaluation"
   },
   "search": {
     "placeholder": "Rechercher dans cette base...",

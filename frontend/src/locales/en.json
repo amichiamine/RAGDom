@@ -114,7 +114,16 @@
     "editor_hide_scan": "Hide scan",
     "editor_original_scan": "Original scan (reference)",
     "back_workspace": "Library workspace",
-    "no_exercises_typed": "No exercise detected by automatic typing in this database. The extracted content is fully available in the Courses tab."
+    "no_exercises_typed": "No exercise detected by automatic typing in this database. The extracted content is fully available in the Courses tab.",
+    "media_section": "Extracted materials",
+    "media_count_unit": "media",
+    "media_loading": "… Loading extracted materials",
+    "media_zoom": "Enlarge",
+    "media_empty": "No content available for this media.",
+    "eval_loading": "… Loading assessment models",
+    "no_evaluations_typed": "No assessment subject detected by automatic typing in this database.",
+    "eval_subject_title": "Assessment subject",
+    "eval_correction_only": "Assessment solution"
   },
   "search": {
     "placeholder": "Search this database...",

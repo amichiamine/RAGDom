@@ -56,10 +56,10 @@ export function ProgrammeTabConnector({ curriculum, activeDb }: ConnectorProps) 
 }
 
 export function CoursTabConnector({ curriculum, activeDb }: ConnectorProps) {
-  const { documentId, toc, loading, error } = useCurriculumDoc(activeDb)
+  const { documentId, toc, documents, loading, error } = useCurriculumDoc(activeDb)
   return (
     <TabFrame loading={loading} error={error}>
-      <CoursTab curriculum={curriculum} toc={toc} documentId={documentId} activeDb={activeDb} />
+      <CoursTab curriculum={curriculum} toc={toc} documentId={documentId} documents={documents} activeDb={activeDb} />
     </TabFrame>
   )
 }
@@ -67,19 +67,19 @@ export function CoursTabConnector({ curriculum, activeDb }: ConnectorProps) {
 // ── Connecteurs des onglets 4-6 (Vague C) : mêmes conventions, props {curriculum, documentId, activeDb}. ──
 
 export function ExercicesTabConnector({ curriculum, activeDb }: ConnectorProps) {
-  const { documentId, loading, error } = useCurriculumDoc(activeDb)
+  const { documentId, documents, loading, error } = useCurriculumDoc(activeDb)
   return (
     <TabFrame loading={loading} error={error}>
-      <ExercicesTab curriculum={curriculum} documentId={documentId ?? ''} activeDb={activeDb} />
+      <ExercicesTab curriculum={curriculum} documentId={documentId ?? ''} documents={documents} activeDb={activeDb} />
     </TabFrame>
   )
 }
 
 export function EvaluationsTabConnector({ curriculum, activeDb }: ConnectorProps) {
-  const { documentId, loading, error } = useCurriculumDoc(activeDb)
+  const { documentId, documents, loading, error } = useCurriculumDoc(activeDb)
   return (
     <TabFrame loading={loading} error={error}>
-      <EvaluationsTab curriculum={curriculum} documentId={documentId ?? ''} activeDb={activeDb} />
+      <EvaluationsTab curriculum={curriculum} documentId={documentId ?? ''} documents={documents} activeDb={activeDb} />
     </TabFrame>
   )
 }

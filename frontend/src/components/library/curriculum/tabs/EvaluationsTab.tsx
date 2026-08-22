@@ -1,21 +1,25 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Columns2, FileText, CircleCheck, X } from 'lucide-react'
-import type { Artifact, Assessment, Chunk, CurriculumPayload } from '@/types'
+import type { Artifact, Assessment, Chunk, CurriculumPayload, Document } from '@/types'
 import { api } from '@/lib/api'
 import { useCurriculumBridge, HighlightTarget } from '@/contexts/CurriculumBridgeContext'
+import { useLanguage } from '@/contexts/LanguageContext'
 import MarkdownKatex from '@/components/library/MarkdownKatex'
 import BridgeButton from '@/components/library/BridgeButton'
 import ImageModal from '../ImageModal'
-import { fetchAllChunks } from './curriculumData'
+import { fetchAllChunks, fetchEvaluationGroups, type EvaluationGroup } from './curriculumData'
 
 interface Props {
   curriculum: CurriculumPayload
   activeDb: string
   documentId: string
+  /** Tous les documents de la base — repli chunks quand la table `assessments` est vide. */
+  documents?: Document[]
 }
 
-export default function EvaluationsTab({ curriculum, activeDb, documentId }: Props) {
+export default function EvaluationsTab({ curriculum, activeDb, documentId, documents }: Props) {
   const { trimFilter, searchQuery } = useCurriculumBridge()
+  const { t } = useLanguage()
 
   // Index de tous les chunks du document par id (résolution sujet/corrigé à la demande).
   // Écart assumé : pas de « GET chunk par id » dans l'API ⇒ pagination complète + index.
@@ -50,7 +54,39 @@ export default function EvaluationsTab({ curriculum, activeDb, documentId }: Pro
     })
   }, [assessments, trimFilter, searchQuery, termIndexById])
 
-  const totalAggregate = curriculum.aggregates?.global?.assessments ?? assessments.length
+  // ── Repli §5.2 : table `assessments` vide → on dérive les évaluations des chunks
+  //    typés (evaluation_exam + solution_only) groupés PAR DOCUMENT. Réutilise la
+  //    même mise en page vis-à-vis sujet/corrigé. ──
+  const useFallback = assessments.length === 0
+  const [groups, setGroups] = useState<EvaluationGroup[] | null>(null)
+  const docIds = useMemo(() => {
+    const ids = (documents ?? []).map(d => d.id)
+    return ids.length > 0 ? ids : (documentId ? [documentId] : [])
+  }, [documents, documentId])
+
+  useEffect(() => {
+    if (!useFallback) { setGroups(null); return }
+    let alive = true
+    setGroups(null)
+    if (docIds.length === 0) { setGroups([]); return }
+    fetchEvaluationGroups(activeDb, docIds)
+      .then(g => { if (alive) setGroups(g) })
+      .catch(() => { if (alive) setGroups([]) })
+    return () => { alive = false }
+  }, [useFallback, activeDb, docIds])
+
+  const filteredGroups = useMemo(() => {
+    if (!groups) return []
+    const q = searchQuery.trim().toLowerCase()
+    if (!q) return groups
+    return groups.filter(g =>
+      (g.subject?.content_markdown ?? '').toLowerCase().includes(q) ||
+      g.corrections.some(c => c.content_markdown.toLowerCase().includes(q)))
+  }, [groups, searchQuery])
+
+  const totalAggregate = useFallback
+    ? (groups?.length ?? 0)
+    : (curriculum.aggregates?.global?.assessments ?? assessments.length)
 
   return (
     <div>
@@ -61,22 +97,41 @@ export default function EvaluationsTab({ curriculum, activeDb, documentId }: Pro
         </div>
       </div>
 
-      {filtered.length === 0 && (
-        <div className="content-box" style={{ textAlign: 'center', color: 'var(--text-muted)' }} dir="auto">
-          لا توجد نماذج مطابقة للمعايير الحالية.
-        </div>
+      {/* ── Chemin normatif : table assessments peuplée ── */}
+      {!useFallback && (
+        <>
+          {filtered.length === 0 && (
+            <div className="content-box" style={{ textAlign: 'center', color: 'var(--text-muted)' }} dir="auto">
+              لا توجد نماذج مطابقة للمعايير الحالية.
+            </div>
+          )}
+          {filtered.map((ev, i) => (
+            <EvaluationCard
+              key={ev.id}
+              index={i + 1}
+              assessment={ev}
+              termIndex={ev.term_id ? termIndexById.get(ev.term_id) ?? null : null}
+              activeDb={activeDb}
+              chunksById={chunksById}
+              onOpenImage={(src, title, fallback) => setModal({ src, title, fallback })}
+            />
+          ))}
+        </>
       )}
 
-      {filtered.map((ev, i) => (
-        <EvaluationCard
-          key={ev.id}
-          index={i + 1}
-          assessment={ev}
-          termIndex={ev.term_id ? termIndexById.get(ev.term_id) ?? null : null}
-          activeDb={activeDb}
-          chunksById={chunksById}
-          onOpenImage={(src, title, fallback) => setModal({ src, title, fallback })}
-        />
+      {/* ── Repli chunks : evaluation_exam / solution_only groupés par document ── */}
+      {useFallback && groups === null && (
+        <div className="content-box" style={{ textAlign: 'center', color: 'var(--text-muted)' }} dir="auto" aria-busy="true">
+          {t('library.eval_loading')}
+        </div>
+      )}
+      {useFallback && groups !== null && filteredGroups.length === 0 && (
+        <div className="content-box" style={{ textAlign: 'center', color: 'var(--text-muted)' }} dir="auto">
+          {t('library.no_evaluations_typed')}
+        </div>
+      )}
+      {useFallback && filteredGroups.map((g, i) => (
+        <EvaluationFallbackCard key={`${g.documentId}_${i}`} index={i + 1} group={g} />
       ))}
 
       <ImageModal
@@ -87,6 +142,77 @@ export default function EvaluationsTab({ curriculum, activeDb, documentId }: Pro
         onClose={() => setModal(null)}
       />
     </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Carte d'évaluation de repli (sans table assessments) : sujet (evaluation_exam)
+ * et corrigé (solution_only) du même document, en vis-à-vis quand les deux
+ * existent — sinon simple liste lisible. Rendu Markdown+KaTeX.
+ */
+function EvaluationFallbackCard({ index, group }: { index: number; group: EvaluationGroup }) {
+  const { t } = useLanguage()
+  const [sideBySide, setSideBySide] = useState(false)
+  const [renderedOnce, setRenderedOnce] = useState(false)
+  useEffect(() => { if (sideBySide && !renderedOnce) setRenderedOnce(true) }, [sideBySide, renderedOnce])
+
+  const hasBoth = group.subject !== null && group.corrections.length > 0
+
+  return (
+    <HighlightTarget id={`eval_fb_${group.documentId}_${index}`} className="content-box eval-item-card">
+      <div className="eval-card-head">
+        <div className="d-flex" style={{ gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          <span className="badge badge-primary">نموذج {index}</span>
+          <h5 className="eval-title" dir="auto">
+            {group.subject ? t('library.eval_subject_title') : t('library.eval_correction_only')}
+          </h5>
+        </div>
+        {hasBoth && (
+          <div className="d-flex" style={{ gap: 8, flexWrap: 'wrap' }}>
+            <button
+              type="button"
+              className={`btn btn-sm rounded-pill ${sideBySide ? 'btn-success' : 'btn-outline-success'}`}
+              onClick={() => setSideBySide(s => !s)}
+              aria-pressed={sideBySide}
+            >
+              <Columns2 size={14} /> معاينة متوازية (موضوع + تصحيح)
+            </button>
+          </div>
+        )}
+      </div>
+
+      <div className={`eval-panes ${sideBySide ? 'is-split' : ''}`}>
+        {group.subject && (
+          <div className="fluid-pane eval-pane eval-pane-subject">
+            <div className="eval-pane-inner eval-pane-inner-subject">
+              <h6 className="eval-pane-title eval-pane-title-subject">📄 نص موضوع الاختبار الرسمي :</h6>
+              <MarkdownKatex lazy raw={group.subject.content_markdown} />
+            </div>
+          </div>
+        )}
+
+        {/* Corrigés : en vis-à-vis si sujet + toggle actif, sinon empilés sous le sujet. */}
+        {group.corrections.length > 0 && (sideBySide || !group.subject) && (
+          <div className="fluid-pane eval-pane eval-pane-correction">
+            <div className="eval-pane-inner eval-pane-inner-correction">
+              <div className="eval-correction-head">
+                <h6 className="eval-pane-title eval-pane-title-correction" style={{ margin: 0 }}>✅ عناصر الإجابة النموذجية وسلّم التنقيط :</h6>
+                {sideBySide && (
+                  <button type="button" className="btn btn-sm btn-outline-secondary" onClick={() => setSideBySide(false)} title="إغلاق العرض المتوازي">
+                    <X size={14} />
+                  </button>
+                )}
+              </div>
+              {(sideBySide && group.subject && !renderedOnce)
+                ? <div style={{ minHeight: 40 }} aria-busy="true" />
+                : group.corrections.map(c => <MarkdownKatex key={c.id} lazy raw={c.content_markdown} />)}
+            </div>
+          </div>
+        )}
+      </div>
+    </HighlightTarget>
   )
 }
 

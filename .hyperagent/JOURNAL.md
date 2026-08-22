@@ -1,5 +1,16 @@
 # JOURNAL des passes (le plus récent en premier)
 
+## 2026-08-22 01:40 — V3.11 : Library rend enfin TOUT (multimodal inclus)
+- Causes racines corrigées : api.ts typait {chunks} alors que l'API renvoie {data}
+  (chargement infini) ; useCurriculumDoc ne chargeait qu'UN document par base
+  (exercices/évaluations invisibles sur bases multi-docs) ; onglet Cours exigeait
+  un TOC niveau 1 (base examens illisible) ; assessments vide → Évaluations vide.
+- Rendu MULTIMODAL ajouté (PageMedia) : 252 illustrations/schémas WebP, 8 tableaux,
+  formules-images — affichés sous le texte de chaque page (Cours + mode classic),
+  clic → HD. Repli documents-comme-chapitres ; Évaluations en vis-à-vis
+  sujet/corrigé depuis les chunks typés ; Exercices agrégés multi-documents.
+- Preuves curl sur bases réelles ; tsc 0 erreur ; build vert.
+
 ## 2026-08-22 (nuit) — Tests réels corpus 1AM → V3.8→V3.9.2 + .hyperagent/
 - Corpus utilisateur ingéré en réel (230 p) ; 3 bugs pipeline corrigés en direct
   (OCR arabe scanné → VLM Tier 2 ; sommaire scans → dérivation titres ; worker

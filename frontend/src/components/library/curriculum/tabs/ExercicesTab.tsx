@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { BookOpen, Image as ImageIcon, Eye, Maximize2, PenLine, ChevronDown } from 'lucide-react'
-import type { Chunk, CurriculumPayload } from '@/types'
+import type { Chunk, CurriculumPayload, Document } from '@/types'
 import { api } from '@/lib/api'
 import { useCurriculumBridge, HighlightTarget } from '@/contexts/CurriculumBridgeContext'
 import { useLanguage } from '@/contexts/LanguageContext'
@@ -9,13 +9,15 @@ import MarkdownKatex from '@/components/library/MarkdownKatex'
 import BridgeButton from '@/components/library/BridgeButton'
 import ImageModal from '../ImageModal'
 import {
-  fetchExerciseBank, resolveSolutionFor, resolveCourseFor, buildExerciseTermResolver,
+  fetchExerciseBank, resolveSolutionFor, resolveSolutionByDocument, resolveCourseFor, buildExerciseTermResolver,
 } from './curriculumData'
 
 interface Props {
   curriculum: CurriculumPayload
   activeDb: string
   documentId: string
+  /** Tous les documents de la base — agrégation des exercices répartis sur plusieurs documents. */
+  documents?: Document[]
 }
 
 /** Exercice enrichi (corrigé lié, cours lié, trimestre déduit) prêt à afficher. */
@@ -24,11 +26,13 @@ interface ExoRow {
   solution: Chunk | null
   courseId: string | null
   termIndex: number | null
+  /** document_id d'origine (scans corrects même quand les exercices sont multi-documents). */
+  docId: string
 }
 
 const CARD_ESTIMATE = 380 // px — hauteur estimée d'une rangée de 2 cartes (mesure dynamique ensuite)
 
-export default function ExercicesTab({ curriculum, activeDb, documentId }: Props) {
+export default function ExercicesTab({ curriculum, activeDb, documentId, documents }: Props) {
   const bridge = useCurriculumBridge()
   const { t } = useLanguage()
   const { trimFilter, searchQuery, exoFilter, expandedIds } = bridge
@@ -39,29 +43,38 @@ export default function ExercicesTab({ curriculum, activeDb, documentId }: Props
 
   const termResolver = useMemo(() => buildExerciseTermResolver(curriculum), [curriculum])
   const links = useMemo(() => curriculum.links ?? [], [curriculum.links])
+  // Tous les documents de la base (repli cause D) ; à défaut, le document actif seul.
+  const docIds = useMemo(() => {
+    const ids = (documents ?? []).map(d => d.id)
+    return ids.length > 0 ? ids : (documentId ? [documentId] : [])
+  }, [documents, documentId])
 
   // Chargement de la banque d'exercices + liaison corrigés (SolutionLinker).
   useEffect(() => {
     let alive = true
     setRows(null)
     setError(null)
-    if (!documentId) { setRows([]); return }
-    fetchExerciseBank(activeDb, documentId)
-      .then(({ exercises, solutionsByIndex, solutionsById }) => {
+    if (docIds.length === 0) { setRows([]); return }
+    fetchExerciseBank(activeDb, docIds)
+      .then(({ exercises, solutionsByIndex, solutionsById, docByChunkId }) => {
         if (!alive) return
+        const allSolutions = Array.from(solutionsById.values())
         const built: ExoRow[] = exercises.map(chunk => ({
           chunk,
           // has_solution est un indice ; la liaison réelle passe par le SolutionLinker
-          // (course_exercise) puis, à défaut, par pedagogical_index — null si rien.
-          solution: resolveSolutionFor(chunk, links, solutionsByIndex, solutionsById),
+          // (course_exercise), puis pedagogical_index, puis — repli sans curriculum —
+          // la première solution du MÊME document. null si rien.
+          solution: resolveSolutionFor(chunk, links, solutionsByIndex, solutionsById)
+            ?? resolveSolutionByDocument(chunk, docByChunkId, allSolutions),
           courseId: resolveCourseFor(chunk, links),
           termIndex: termResolver(chunk),
+          docId: docByChunkId.get(chunk.id) ?? documentId,
         }))
         setRows(built)
       })
       .catch(e => { if (alive) { setError(String(e?.message ?? e)); setRows([]) } })
     return () => { alive = false }
-  }, [activeDb, documentId, links, termResolver])
+  }, [activeDb, docIds, documentId, links, termResolver])
 
   // Filtres croisés : exoFilter (cours/page) + trimestre + recherche.
   const filtered = useMemo(() => {
@@ -172,10 +185,10 @@ export default function ExercicesTab({ curriculum, activeDb, documentId }: Props
                       solutionOpen={expandedIds.has(`exo_sol_${row.chunk.id}`)}
                       onToggleSolution={() => bridge.toggleExpanded(`exo_sol_${row.chunk.id}`)}
                       onOpenScan={(page) => setModal({
-                        src: api.library.getPageScanUrl(activeDb, documentId, page, false),
+                        src: api.library.getPageScanUrl(activeDb, row.docId, page, false),
                         title: `📖 صفحة الكتاب المدرسي رقم ${page}`,
                       })}
-                      documentId={documentId}
+                      documentId={row.docId}
                     />
                   ))}
                 </div>

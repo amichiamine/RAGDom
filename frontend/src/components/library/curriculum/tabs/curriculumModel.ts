@@ -1,6 +1,6 @@
 import type {
   CurriculumPayload, CurriculumProgram, CurriculumTerm, Assessment,
-  ContentLink, TocNode,
+  ContentLink, TocNode, Document,
 } from '@/types'
 
 /**
@@ -32,6 +32,9 @@ export interface CoursNode {
   title: string
   pageStart: number
   pageEnd: number
+  /** Repli « document = unité de lecture » : id du document propre à cette carte
+   *  (null pour un vrai chapitre TOC → on utilise le documentId global). */
+  documentId?: string | null
   /** Numéro de leçon (pedagogical_index si connu, sinon rang 1-based du chapitre). */
   lessonNumber: number
   /** Programme (مقطع) rattaché via un lien `course_program`, s'il existe. */
@@ -77,6 +80,9 @@ export function buildCurriculumModel(
   curriculum: CurriculumPayload,
   toc: TocNode[],
   lessonIndexByTocId?: Map<string, number>,
+  /** Repli §5.2 : documents de la base — utilisés comme unités de lecture quand
+   *  aucun chapitre TOC niveau 1 n'existe (base examens, sources sans sommaire). */
+  documentsFallback?: Document[],
 ): CurriculumModel {
   const terms = [...curriculum.terms].sort((a, b) => a.term_index - b.term_index)
   const programs = [...curriculum.programs]
@@ -110,7 +116,7 @@ export function buildCurriculumModel(
     .filter(n => n.level === 1)
     .sort((a, b) => a.page_start - b.page_start)
 
-  const cours: CoursNode[] = chapters.map((ch, i) => {
+  let cours: CoursNode[] = chapters.map((ch, i) => {
     const programId = programByToc.get(ch.id) ?? null
     const termIndex = programId ? (programTermIndex.get(programId) ?? 0) : 0
     return {
@@ -124,6 +130,23 @@ export function buildCurriculumModel(
       termIndex,
     }
   })
+
+  // Repli §5.2 : aucun chapitre TOC niveau 1 → chaque DOCUMENT devient une unité
+  // de lecture (carte par document, plage = tout le document). Rend la base examens
+  // (ainsi que toute base sans sommaire) lisible dans l'onglet Cours.
+  if (cours.length === 0 && documentsFallback && documentsFallback.length > 0) {
+    cours = documentsFallback.map((doc, i) => ({
+      tocId: `doc_${doc.id}`,
+      documentId: doc.id,
+      title: doc.title || doc.filename,
+      pageStart: 1,
+      pageEnd: Math.max(1, doc.total_pages || 1),
+      lessonNumber: i + 1,
+      programId: null,
+      exercisesCount: 0,
+      termIndex: 0,
+    }))
+  }
 
   const coursByTocId = new Map<string, CoursNode>()
   for (const c of cours) coursByTocId.set(c.tocId, c)

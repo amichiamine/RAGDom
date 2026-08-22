@@ -40,15 +40,31 @@ export async function fetchAllChunks(
  * énoncé ↔ corrigé (SolutionLinker : même `pedagogical_index`, `link_type`
  * `course_exercise`, champ `has_solution`).
  */
-export async function fetchExerciseBank(db: string, documentId: string): Promise<{
+export async function fetchExerciseBank(db: string, documentIds: string | string[]): Promise<{
   exercises: Chunk[]
   solutionsByIndex: Map<number, Chunk>
   solutionsById: Map<string, Chunk>
+  /** document_id d'origine de chaque chunk (liaison corrigé par document — repli sans curriculum). */
+  docByChunkId: Map<string, string>
 }> {
+  // Cause D (repli sans curriculum) : les chunks typés se répartissent sur PLUSIEURS
+  // documents (base sources/examens) ; on agrège donc TOUS les documents, pas seulement
+  // le premier — sinon un exercice typé n'apparaît jamais s'il est dans un autre document.
+  const ids = Array.isArray(documentIds) ? documentIds : [documentIds]
+  const docByChunkId = new Map<string, string>()
+  const collect = async (type: string): Promise<Chunk[]> => {
+    const out: Chunk[] = []
+    for (const docId of ids) {
+      const list = await fetchAllChunks(db, docId, { pedagogical_type: type })
+      for (const c of list) docByChunkId.set(c.id, docId)
+      out.push(...list)
+    }
+    return out
+  }
   const [solved, unsolved, solutions] = await Promise.all([
-    fetchAllChunks(db, documentId, { pedagogical_type: 'exercise_solved' }),
-    fetchAllChunks(db, documentId, { pedagogical_type: 'exercise_unsolved' }),
-    fetchAllChunks(db, documentId, { pedagogical_type: 'solution_only' }),
+    collect('exercise_solved'),
+    collect('exercise_unsolved'),
+    collect('solution_only'),
   ])
   const exercises = [...solved, ...unsolved].sort((a, b) => {
     const ai = a.pedagogical_index ?? Number.MAX_SAFE_INTEGER
@@ -62,7 +78,59 @@ export async function fetchExerciseBank(db: string, documentId: string): Promise
     solutionsById.set(s.id, s)
     if (s.pedagogical_index != null) solutionsByIndex.set(s.pedagogical_index, s)
   }
-  return { exercises, solutionsByIndex, solutionsById }
+  return { exercises, solutionsByIndex, solutionsById, docByChunkId }
+}
+
+/**
+ * Corrigé de repli PAR DOCUMENT quand ni lien `course_exercise` ni
+ * `pedagogical_index` ne matchent : première solution `solution_only` du MÊME
+ * document que l'exercice. Garantit un corrigé lié même sans curriculum.
+ */
+export function resolveSolutionByDocument(
+  exo: Chunk,
+  docByChunkId: Map<string, string>,
+  solutions: Chunk[],
+): Chunk | null {
+  const exoDoc = docByChunkId.get(exo.id)
+  if (!exoDoc) return null
+  for (const s of solutions) if (docByChunkId.get(s.id) === exoDoc) return s
+  return null
+}
+
+/** Un modèle d'évaluation de repli (sans table `assessments`), dérivé des chunks. */
+export interface EvaluationGroup {
+  documentId: string
+  /** Sujet (evaluation_exam) du document, s'il existe. */
+  subject: Chunk | null
+  /** Corrigé(s) (solution_only) du document. */
+  corrections: Chunk[]
+}
+
+/**
+ * Repli §5.2 pour l'onglet Évaluations quand la table `assessments` est vide :
+ * agrège les chunks `evaluation_exam` (sujets) et `solution_only` (corrigés) de
+ * TOUS les documents, groupés PAR DOCUMENT (vis-à-vis sujet/corrigé quand les deux
+ * existent). Aucune donnée en dur — tout vient des chunks typés.
+ */
+export async function fetchEvaluationGroups(db: string, documentIds: string[]): Promise<EvaluationGroup[]> {
+  const groups: EvaluationGroup[] = []
+  for (const docId of documentIds) {
+    const [exams, solutions] = await Promise.all([
+      fetchAllChunks(db, docId, { pedagogical_type: 'evaluation_exam' }),
+      fetchAllChunks(db, docId, { pedagogical_type: 'solution_only' }),
+    ])
+    if (exams.length === 0 && solutions.length === 0) continue
+    // Un groupe par sujet ; si plusieurs sujets, chacun récupère les corrigés du document.
+    if (exams.length > 0) {
+      exams.forEach((subject, i) => {
+        groups.push({ documentId: docId, subject, corrections: i === 0 ? solutions : [] })
+      })
+    } else {
+      // Corrigés seuls (sujet absent) — restent lisibles.
+      groups.push({ documentId: docId, subject: null, corrections: solutions })
+    }
+  }
+  return groups
 }
 
 /** Corrigé lié à un exercice : par lien `course_exercise` si possible, sinon par `pedagogical_index`. */

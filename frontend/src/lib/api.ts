@@ -148,9 +148,11 @@ export const api = {
     getCurriculum: (db: string) =>
       request<CurriculumPayload>(withDb('/library/curriculum', db)), // V3.1 — D1-B
     getChunks: (db: string, documentId: string, page = 1, filters?: { pedagogical_type?: string; page_start?: number; page_end?: number; toc_id?: string; term_index?: number }) =>
-      // Backend renvoie { data, chunks, pagination:{total_pages} } (routes_library.py) — on
-      // normalise en exposant `total_pages` au niveau racine attendu par les appelants.
-      request<{ chunks: Chunk[]; pagination: { total_pages: number } }>(withDb('/library/chunks', db, {
+      // VÉRITÉ backend (routes_library.py `chunks`) : { data:[…], pagination:{page,limit,total,total_pages} }.
+      // Certaines versions ajoutent aussi `chunks` (alias) ; on lit `data` EN PREMIER (source canonique)
+      // et on retombe sur `chunks` — sinon `first.chunks` était undefined → chargements infinis/vides.
+      // On normalise en exposant `chunks` + `total_pages` à plat pour ne casser aucun consommateur.
+      request<{ data?: Chunk[]; chunks?: Chunk[]; pagination?: { page: number; limit: number; total: number; total_pages: number } }>(withDb('/library/chunks', db, {
         document_id: documentId,
         page: String(page),
         ...(filters?.pedagogical_type ? { pedagogical_type: filters.pedagogical_type } : {}),
@@ -158,9 +160,19 @@ export const api = {
         ...(filters?.page_end != null ? { page_end: String(filters.page_end) } : {}),
         ...(filters?.toc_id ? { toc_id: filters.toc_id } : {}),
         ...(filters?.term_index != null ? { term_index: String(filters.term_index) } : {}),
-      })).then(r => ({ chunks: r.chunks ?? [], total_pages: r.pagination?.total_pages ?? 1 })),
-    getArtifacts: (db: string, chunkId: string) =>
-      request<{ artifacts: Artifact[] }>(withDb('/library/artifacts', db, { chunk_id: chunkId })),
+      })).then(r => ({ chunks: r.data ?? r.chunks ?? [], total_pages: r.pagination?.total_pages ?? 1 })),
+    // Artefacts scientifiques : par chunk_id (rétrocompat) OU par {document_id, page_number}
+    // (rendu multimodal côté lecture — l'endpoint backend accepte déjà ces 3 filtres).
+    getArtifacts: (db: string, target: string | { document_id?: string; page_number?: number; chunk_id?: string }) =>
+      request<{ artifacts: Artifact[] }>(withDb('/library/artifacts', db,
+        typeof target === 'string'
+          ? { chunk_id: target }
+          : {
+              ...(target.chunk_id ? { chunk_id: target.chunk_id } : {}),
+              ...(target.document_id ? { document_id: target.document_id } : {}),
+              ...(target.page_number != null ? { page_number: String(target.page_number) } : {}),
+            },
+      )).then(r => ({ artifacts: r.artifacts ?? [] })),
     getPageScanUrl: (db: string, documentId: string, pageNumber: number, thumb = false) =>
       // V3.5 : servi depuis la table page_scans (base autonome). thumb=true → vignette pour galeries virtualisées.
       `${BASE_URL}${withDb('/library/page-scan', db, { document_id: documentId, page: String(pageNumber), ...(thumb ? { thumb: 'true' } : {}) })}`,

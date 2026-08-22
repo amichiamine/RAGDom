@@ -72,6 +72,8 @@ export interface Artifact {
   render_config_json: string;
   caption: string | null;
   bounding_box_json: string | null;
+  page_number?: number | null;   // V3.5 : page d'origine (rendu multimodal côté lecture)
+  has_binary?: boolean;          // V3.5 : crop WebP disponible via /library/artifact-binary
 }
 
 export interface FacetItem {

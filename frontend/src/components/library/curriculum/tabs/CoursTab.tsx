@@ -3,11 +3,12 @@ import {
   BookOpen, ChevronsDown, ChevronsUp, ChevronDown, FileImage, PenTool,
   GraduationCap, Image as ImageIcon, X, Expand,
 } from 'lucide-react'
-import type { Chunk, CurriculumPayload, PedagogicalType, TocNode } from '@/types'
+import type { Chunk, CurriculumPayload, Document, PedagogicalType, TocNode } from '@/types'
 import { api } from '@/lib/api'
 import { useCurriculumBridge, HighlightTarget } from '@/contexts/CurriculumBridgeContext'
 import BridgeButton from '@/components/library/BridgeButton'
 import MarkdownKatex from '@/components/library/MarkdownKatex'
+import PageMedia from '@/components/library/PageMedia'
 import ImageModal from '@/components/library/curriculum/ImageModal'
 import {
   buildCurriculumModel, type CoursNode, type CurriculumModel,
@@ -17,6 +18,8 @@ interface Props {
   curriculum: CurriculumPayload
   toc: TocNode[]
   documentId: string | null
+  /** Tous les documents (repli « document = unité de lecture » si aucun TOC niveau 1). */
+  documents?: Document[]
   activeDb: string
 }
 
@@ -40,12 +43,15 @@ const PEDAGOGICAL_LABEL: Record<PedagogicalType, string> = {
  * (chapitres TOC niveau 1) repliables, contenu course_theory rendu par
  * MarkdownKatex, mode côte-à-côte fluide (texte 100% ↔ 50/50 + rail de scans).
  */
-export default function CoursTab({ curriculum, toc, documentId, activeDb }: Props) {
+export default function CoursTab({ curriculum, toc, documentId, documents, activeDb }: Props) {
   const { searchQuery, trimFilter, expandedIds, toggleExpanded, expandAll } = useCurriculumBridge()
 
-  const model = useMemo<CurriculumModel>(() => buildCurriculumModel(curriculum, toc), [curriculum, toc])
+  const model = useMemo<CurriculumModel>(
+    () => buildCurriculumModel(curriculum, toc, undefined, documents),
+    [curriculum, toc, documents],
+  )
 
-  const [modal, setModal] = useState<{ page: number } | null>(null)
+  const [modal, setModal] = useState<{ page: number; documentId: string } | null>(null)
 
   const q = searchQuery.trim().toLowerCase()
   const visible = model.cours.filter(c => {
@@ -58,7 +64,7 @@ export default function CoursTab({ curriculum, toc, documentId, activeDb }: Prop
   const openAll = () => expandAll(COURS_PREFIX, allIds, true)
   const collapseAll = () => expandAll(COURS_PREFIX, allIds, false)
 
-  const openScanModal = useCallback((page: number) => setModal({ page }), [])
+  const openScanModal = useCallback((page: number, docId: string) => setModal({ page, documentId: docId }), [])
 
   return (
     <div dir="rtl">
@@ -93,7 +99,7 @@ export default function CoursTab({ curriculum, toc, documentId, activeDb }: Prop
           open={expandedIds.has(coursId(c.tocId))}
           onToggle={() => toggleExpanded(coursId(c.tocId))}
           activeDb={activeDb}
-          documentId={documentId}
+          documentId={c.documentId ?? documentId}
           termIndex={c.termIndex}
           onOpenScanModal={openScanModal}
         />
@@ -102,7 +108,7 @@ export default function CoursTab({ curriculum, toc, documentId, activeDb }: Prop
       <ImageModal
         open={modal !== null}
         title={modal ? `صفحة كتاب مدرسي رقم ${modal.page}` : ''}
-        src={modal && documentId ? api.library.getPageScanUrl(activeDb, documentId, modal.page) : ''}
+        src={modal ? api.library.getPageScanUrl(activeDb, modal.documentId, modal.page) : ''}
         onClose={() => setModal(null)}
       />
     </div>
@@ -116,7 +122,7 @@ interface CardProps {
   activeDb: string
   documentId: string | null
   termIndex: number
-  onOpenScanModal: (page: number) => void
+  onOpenScanModal: (page: number, documentId: string) => void
 }
 
 /**
@@ -166,6 +172,12 @@ function CoursCard({ cours, open, onToggle, activeDb, documentId, termIndex, onO
     [activeDb],
   )
 
+  // Ouverture du scan liée au document propre de cette carte (repli document = unité).
+  const openScan = useCallback(
+    (page: number) => { if (documentId) onOpenScanModal(page, documentId) },
+    [onOpenScanModal, documentId],
+  )
+
   // Pages du chapitre pour le rail de scans (page_start..page_end).
   const scanPages = useMemo(() => {
     const out: number[] = []
@@ -178,6 +190,18 @@ function CoursCard({ cours, open, onToggle, activeDb, documentId, termIndex, onO
     if (!chunks) return []
     return [...chunks].sort((a, b) => a.page_number - b.page_number || a.chunk_index - b.chunk_index)
   }, [chunks])
+
+  // Groupe les chunks par page (ordre de lecture) → rendu du texte PUIS de la
+  // section « الوسائط المستخرجة » de cette page (schémas, tableaux, formules-images).
+  const pageGroups = useMemo(() => {
+    const map = new Map<number, Chunk[]>()
+    for (const ch of sortedChunks) {
+      const arr = map.get(ch.page_number) ?? []
+      arr.push(ch)
+      map.set(ch.page_number, arr)
+    }
+    return Array.from(map.entries()).sort((a, b) => a[0] - b[0])
+  }, [sortedChunks])
 
   return (
     <HighlightTarget id={`cours_${cours.tocId}`} className="content-box cours-item-card" style={{ marginBottom: 24 }}>
@@ -206,7 +230,7 @@ function CoursCard({ cours, open, onToggle, activeDb, documentId, termIndex, onO
           {cours.programId && (
             <BridgeButton variant="prog" icon={<GraduationCap size={14} />} label="المنهاج" onClick={() => jumpTo('programme', `programme_${cours.programId}`)} />
           )}
-          <BridgeButton variant="scan" icon={<ImageIcon size={14} />} label={`مسح ص ${cours.pageStart}`} onClick={() => onOpenScanModal(cours.pageStart)} />
+          <BridgeButton variant="scan" icon={<ImageIcon size={14} />} label={`مسح ص ${cours.pageStart}`} onClick={() => openScan(cours.pageStart)} />
           <button type="button" className="btn btn-sm btn-outline-secondary" onClick={onToggle} aria-label="toggle body">
             <ChevronDown size={15} className={`matrix-chevron${open ? ' open' : ''}`} />
           </button>
@@ -230,19 +254,25 @@ function CoursCard({ cours, open, onToggle, activeDb, documentId, termIndex, onO
                 {!loading && !error && sortedChunks.length === 0 && (
                   <div className="alert-secondary-box">لا يوجد نص مرقمن لهذا الدرس بعد.</div>
                 )}
-                {sortedChunks.map(ch => (
-                  <div key={ch.id} style={{ marginBottom: 12 }}>
-                    {ch.pedagogical_type && (
-                      <span className="badge badge-secondary" style={{ marginBottom: 6, display: 'inline-block' }}>
-                        {PEDAGOGICAL_LABEL[ch.pedagogical_type] ?? ch.pedagogical_type}
-                      </span>
-                    )}
-                    <MarkdownKatex
-                      raw={ch.content_markdown}
-                      lazy
-                      onPageJump={onOpenScanModal}
-                      resolveAsset={resolveAsset}
-                    />
+                {documentId && pageGroups.map(([pageNo, pageChunks]) => (
+                  <div key={pageNo} style={{ marginBottom: 16 }}>
+                    {pageChunks.map(ch => (
+                      <div key={ch.id} style={{ marginBottom: 12 }}>
+                        {ch.pedagogical_type && (
+                          <span className="badge badge-secondary" style={{ marginBottom: 6, display: 'inline-block' }}>
+                            {PEDAGOGICAL_LABEL[ch.pedagogical_type] ?? ch.pedagogical_type}
+                          </span>
+                        )}
+                        <MarkdownKatex
+                          raw={ch.content_markdown}
+                          lazy
+                          onPageJump={openScan}
+                          resolveAsset={resolveAsset}
+                        />
+                      </div>
+                    ))}
+                    {/* Matériels multimodaux extraits de cette page (schémas, tableaux, formules-images). */}
+                    <PageMedia db={activeDb} documentId={documentId} page={pageNo} />
                   </div>
                 ))}
               </div>
@@ -265,7 +295,7 @@ function CoursCard({ cours, open, onToggle, activeDb, documentId, termIndex, onO
                           <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 700 }}>
                             <ImageIcon size={14} style={{ color: 'var(--warning)' }} /> صفحة كتاب مدرسي رقم {p}
                           </span>
-                          <button type="button" className="btn btn-sm" style={{ background: 'transparent', color: '#fff', border: '1px solid rgba(255,255,255,0.4)', padding: '2px 8px', fontSize: '0.75rem' }} onClick={() => onOpenScanModal(p)}>
+                          <button type="button" className="btn btn-sm" style={{ background: 'transparent', color: '#fff', border: '1px solid rgba(255,255,255,0.4)', padding: '2px 8px', fontSize: '0.75rem' }} onClick={() => openScan(p)}>
                             <Expand size={12} /> تكبير
                           </button>
                         </div>
@@ -274,7 +304,7 @@ function CoursCard({ cours, open, onToggle, activeDb, documentId, termIndex, onO
                             src={api.library.getPageScanUrl(activeDb, documentId, p, true)}
                             loading="lazy"
                             style={{ width: '100%', display: 'block', cursor: 'pointer' }}
-                            onClick={() => onOpenScanModal(p)}
+                            onClick={() => openScan(p)}
                             alt={`صفحة ${p}`}
                             onError={e => { e.currentTarget.style.display = 'none' }}
                           />

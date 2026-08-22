@@ -4,6 +4,7 @@ import type { Chunk } from '@/types'
 import { api } from '@/lib/api'
 import { useLanguage } from '@/contexts/LanguageContext'
 import MarkdownContent from '@/components/common/MarkdownContent'
+import PageMedia from '@/components/library/PageMedia'
 import { EmptyState } from '@/components/common/Feedback'
 
 interface Props {
@@ -78,6 +79,8 @@ export default function SideBySideViewer({ db, documentId, page, totalPages, chu
                   <MarkdownContent source={c.content_markdown} className="content-box" />
                 </div>
               ))}
+              {/* Matériels multimodaux extraits de la page affichée (schémas, tableaux, formules-images). */}
+              <PageMedia db={db} documentId={documentId} page={page} />
             </div>
           )}
         </div>
