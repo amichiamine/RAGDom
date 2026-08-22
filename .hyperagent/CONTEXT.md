@@ -1,4 +1,4 @@
-# CONTEXT — État complet du projet RAGDom (MAJ 2026-08-22 16:05 UTC+1 — V4.3)
+# CONTEXT — État complet du projet RAGDom (MAJ 2026-08-22 20:58 UTC+1 — V5.1)
 
 ## Identité du projet
 Bibliothèque numérique scientifique **local-first** + version web complète.
@@ -27,7 +27,8 @@ Cible locale utilisateur : Windows, c:\xampp\htdocs\RAGDom, `npm run dev` racine
   DATABASES_DIR au démarrage (main.py). La bibliothèque live renaît pré-chargée.
 
 ## État fonctionnel (tout VÉRIFIÉ en exécution réelle)
-- 53/53 tests pytest verts ; tsc 0 erreur ; build vert.
+- 106/106 tests pytest verts en mode hybride complet ET faible mémoire ; tsc 0 erreur ; build vert.
+- Recherche RRF V5.1 : chaque canal BM25/vectoriel est filtré par son seuil avant fusion ; rangs FTS uniques par chunk et déterministes.
 - Ingestion réelle 230/230 pages : sommaire 45 entrées (dérivé des titres),
   613 formules LaTeX, 230 scans WebP, corrections typées, réponse Gemini réelle
   sourcée (document+page+section) via /api/search/ask.

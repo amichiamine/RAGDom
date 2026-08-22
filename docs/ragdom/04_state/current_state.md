@@ -1,6 +1,6 @@
 # État Actuel du Projet RAGDom
 
-**Phase :** V4.3 — v1 complète + extensions Web-Ready et Parallélisme D4-B
+**Phase :** V5.1 — v1 complète + extensions Web-Ready, composition didactique et fusion RRF fiabilisée
 **fusionnées sur une BRANCHE UNIQUE `main`** (plus de branche `post-v1` : tout est
 sur `main`). Correctifs pipeline/structure/rendu V4.2 (fix boucle explode, déployé)
 et V4.3 (équivalence v1/v2, sommaire incrémental + plages fiables, classification AR
@@ -17,6 +17,8 @@ renforcée, liaisons relationnelles exposées, contrat de rendu §12 appliqué) 
       auth 4 · curriculum 5 · library 13 · llm 10 · pipeline 11 · search 3 · system 14),
       Key Manager (modèle par clé + auto-détection live), purge scopée, `/pipeline/reprocess`,
       reprise auto des files + chaînage multi-bases, OCR VLM de page entière (Tier 2), ask RAG, SSE
+- [x] **Recherche hybride V5.1** : seuil BM25 et seuil vectoriel appliqués avant rangs/RRF,
+      rang FTS unique par chunk, ordre stable ; 106/106 tests dans les deux modes
 - [x] **Lot 1 sprint** : GET /library/page-scans (manifeste galerie), agrégats curriculum
       (per_term + global en SQL), filtres chunks (pedagogical_type/page_start/page_end/toc_id)
 - [x] **Frontend pixel-perfect COMPLET (vagues A/B/C/D + audit croisé)** :

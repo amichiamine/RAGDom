@@ -1,5 +1,19 @@
 # JOURNAL des passes (le plus récent en premier)
 
+## 2026-08-22 20:58 — V5.1 : seuils par canal avant fusion RRF
+- **Cause racine mesurée** : les 20 voisins vectoriels contribuaient tous au RRF,
+  même avec une distance supérieure au seuil 0,45, dès que le chunk restait éligible
+  par BM25. Sur le mini-manuel réel, les distances 4,20 / 5,33 / 5,61 (toutes hors
+  seuil) inversaient le rang lexical : le chunk BM25 n°2 + vecteur n°1 passait devant
+  le chunk BM25 n°1 + vecteur n°3.
+- **Correctif** : filtrage indépendant BM25/vectoriel AVANT calcul des rangs et fusion ;
+  ordre FTS déterministe ; rang BM25 unique par chunk en conservant sa meilleure ligne
+  FTS (un artefact lié peut indexer une seconde ligne pour le même chunk).
+- **Non-régression** : nouveau test synthétique avec voisins vectoriels hors seuil +
+  ligne FTS d'artefact dupliquée ; test API qui échouait désormais vert en mode hybride.
+- **Qualité locale** : pytest 106/106 en mode hybride complet ET 106/106 avec
+  RAGDOM_LOW_MEMORY=true ; tsc strict 0 ; build Vite vert.
+
 ## 2026-08-22 20:15 — V5 : composition didactique + familles paramétriques + CURRICULUM AUTO
 - **CURRICULUM AUTOMATIQUE (zéro LLM)** : nouveau curriculum_builder.py — peuple
   terms/programs/assessments/content_links depuis TOC L1 + chunks classés +

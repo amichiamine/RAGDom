@@ -1,3 +1,9 @@
+# 2026-08-22 — V5.1 : fusion RRF filtrée par canal
+
+- Les rangs BM25 et vectoriels sont désormais calculés uniquement après application de leur seuil brut respectif ; un voisin vectoriel hors seuil ne peut plus reclasser un résultat lexical valide.
+- Les lignes FTS multiples d'un même chunk sont dédupliquées en conservant son meilleur score, avec un ordre stable pour les égalités.
+- Test de non-régression dédié ajouté ; pytest 106/106 dans les modes hybride et faible mémoire, TypeScript strict et build Vite verts.
+
 # 2026-08-22 — V5 : composition didactique + familles paramétriques + curriculum auto
 
 - **curriculum_builder.py** (nouveau, zéro LLM) : curriculum généré automatiquement au

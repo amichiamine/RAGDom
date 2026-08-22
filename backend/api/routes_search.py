@@ -48,6 +48,16 @@ def _thresholds():
     return vec_t, bm25_t
 
 
+def _eligible_ranks(rows, threshold: float) -> dict:
+    """Rangs uniques et déterministes parmi les seuls résultats sous seuil."""
+    ranked = {}
+    for item_id, score in rows:
+        if score > threshold or item_id in ranked:
+            continue
+        ranked[item_id] = (len(ranked) + 1, score)
+    return ranked
+
+
 def _query_embedding(text: str) -> Optional[bytes]:
     try:
         active = engine_registry.active_engine()
@@ -79,9 +89,11 @@ def _hybrid_search(db_name: str, body: SearchBody) -> List[dict]:
             "SELECT si.chunk_id, bm25(search_index) AS score FROM search_index si"
             " JOIN document_chunks c ON c.id = si.chunk_id"
             " WHERE search_index MATCH ? AND si.chunk_id IS NOT NULL%s"
-            " ORDER BY score ASC LIMIT 20" % where_extra,
+            " ORDER BY score ASC, si.chunk_id ASC, si.rowid ASC LIMIT 20" % where_extra,
             [_fts_escape(body.query)] + extra_args).fetchall()
-        bm25_rank = {row[0]: (rank + 1, row[1]) for rank, row in enumerate(bm25_rows)}
+        # Un canal ne contribue au RRF que s'il franchit son propre seuil.
+        # Sinon un rang vectoriel hors seuil peut inverser un résultat BM25 valide.
+        bm25_rank = _eligible_ranks(bm25_rows, bm25_t)
 
         # ── Passe vectorielle (si mode hybride + embedding disponible) ──
         vec_rank = {}
@@ -91,7 +103,7 @@ def _hybrid_search(db_name: str, body: SearchBody) -> List[dict]:
                 vec_rows = conn.execute(
                     "SELECT chunk_id, distance FROM vec_chunks WHERE embedding MATCH ?"
                     " ORDER BY distance LIMIT 20", (embedding,)).fetchall()
-                vec_rank = {row[0]: (rank + 1, row[1]) for rank, row in enumerate(vec_rows)}
+                vec_rank = _eligible_ranks(vec_rows, vec_t)
             except Exception:  # noqa: BLE001 — table vec absente en fallback
                 vec_rank = {}
 
