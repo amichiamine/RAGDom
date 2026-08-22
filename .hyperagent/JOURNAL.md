@@ -1,5 +1,57 @@
 # JOURNAL des passes (le plus récent en premier)
 
+## 2026-08-22 14:30 — V4.2 : FIX boucle explode + GRAND AUDIT multimodal + bases sécurisées
+- **BUG BLOQUANT CORRIGÉ (routes_pipeline.py)** : le filtre d'exclusion de
+  `/pipeline/requalify-artifacts` omettait `vlm_exploded_at` (il ne retirait que
+  `vlm_failed_at`/`vlm_qualified_at`). Conséquence mesurée sur le live : avec
+  `{"explode":true,"limit":12}`, le lot sélectionné était **12/12 cadres DÉJÀ
+  explosés** (pages 1-9) → doublons de sous-artefacts + d'ancres, quota Gemini
+  brûlé, boucle ne convergeant JAMAIS vers frames=0. Correctif : `vlm_exploded_at`
+  TOUJOURS exclu (même sous `retry_failed`, qui vise les échecs, pas les succès)
+  + garde défensive d'idempotence dans `_explode_fullpage_frames`.
+  Preuve par exécution (SQLite reproduisant l'état live) : ancienne clause = 12
+  doublons ; nouvelle = 0 doublon et convergence frames=0 en 2 passes.
+  Non-régression : pytest 73 passés / 11 échoués AVANT comme APRÈS (échecs dus aux
+  deps absentes du sandbox, baseline identique vérifiée par git stash).
+- **BASES ENRICHIES SÉCURISÉES** : les assets de la release `corpus-1am-v1`
+  dataient du 22/08 11:30 UTC, soit AVANT l'enrichissement V4.1 — le disque Render
+  étant ÉPHÉMÈRE, tout redémarrage/spin-down aurait PERDU les 12 cadres explosés et
+  leurs sous-artefacts. Export authentifié des 2 bases live
+  (`GET /api/system/databases/{f}/export`) → republication en assets de release.
+  Le TODO de republication du 12:45 est donc SOLDÉ ; un redéploiement est sûr.
+- **ÉTAT RÉEL MESURÉ** (SQL direct sur la base live, 993 artefacts) :
+  latex_formula 613 (605 structurés), dense_illustration 312 (**0 structuré**),
+  data_table 37 (32), geometry_vector 21 (21), matrix 7, signal_waveform 2,
+  flowchart 1 → **67 % structurés / 33 % restés bitmap**. Marqueurs :
+  exploded 12, qualified 43, failed 4. Sémantique : exercise_support 72,
+  illustration 26, demonstration 5. Ancrage in-situ : 45/255 chunks.
+  Renderers déclarés : katex 620, openseadragon 213, tanstack-table 37, svg 21,
+  plotly 2, mermaid 1 (→ 99 dense_illustration sans render_config_json du tout).
+- **RESTE À TRAITER** : 155 cadres pleine page à exploser + 98 illustrations
+  ≤70 % JAMAIS soumises au VLM (quotas Gemini quotidiens).
+- **AUDIT — écarts doc↔code identifiés** (détail dans AUDIT_MULTIMODAL.md) :
+  1) `layer_2_extract_v2.py` (mode parallèle, RAGDOM_INTRA_PAGE_WORKERS>=2) NE
+     QUALIFIE JAMAIS les illustrations — aucun appel au qualifier => 0 % structuré
+     dans cette configuration.
+  2) PDF natif : tout bloc non-texte typé `image` (layer_1_triage) et branches
+     formula/table mortes en natif => formules/tableaux vectoriels → images.
+  3) Frontend : `render_config_json.renderer` JAMAIS lu ; routage par sous-chaîne
+     de `artifact_type` (detectFamily). 5 des 9 familles « v1 garanties » sont
+     dégradées en image (flowchart/signal_waveform/smiles_chem/code_snippet/
+     dense_illustration) ; data_table rendu en markdown, pas tanstack-table.
+  4) Renderers mermaid/plotly/ketcher/shiki NON installés (confirmé package.json).
+  5) AUCUN indicateur ne distingue « rendu structuré fidèle » de « image de repli »
+     → c'est exactement la confusion signalée par l'utilisateur.
+  6) `MarkdownContent`/`lib/markdown.ts` ne résolvent pas `asset://artifacts/{id}`
+     => images cassées dans SideBySideViewer.
+- **Clés Gemini 2 et 4 : verdict définitif** — 403 PERMISSION_DENIED constant
+  (listing des modèles OK, `generateContent` refusé), reproduit 2x à 3 s d'écart.
+  Ce n'est PAS un rate-limit (qui renverrait 429) : projets Google bannis/API non
+  activée. Diagnostic antérieur CONFIRMÉ par test live.
+- Accès vérifiés : PAT GitHub (scope `repo`, push:true), RENDER_API_KEY (service
+  ragdom non suspendu, branche main). Skills créées : `ragdom-live-admin`
+  (RAGDOM_AUTH_TOKEN — les routes admin sont derrière Bearer), `render-ragdom`.
+
 ## 2026-08-22 12:45 — V4.1 : EXPLOSION des cadres pleine page (dernière passe, suite)
 - Comparaison PDF↔base (p27) : la couche CV ne segmente qu'UN bloc pleine page sur
   les pages denses → les opérations posées/encadrés/schémas internes n'étaient pas

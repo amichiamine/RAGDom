@@ -547,10 +547,18 @@ def _explode_fullpage_frames(conn, body, rows):
     frames = []
     for r in rows:
         ratio = _requalify_area_ratio(r[3], r[5], r[6])
-        if ratio is not None and ratio > 0.70:
-            frames.append(r)
-            if len(frames) >= max(1, min(body.limit, 50)):
-                break
+        if ratio is None or ratio <= 0.70:
+            continue
+        # Garde défensive (idempotence) : un cadre déjà explosé n'est JAMAIS re-soumis,
+        # même si l'appelant a forcé retry_failed ou si la clause SQL évolue — sinon
+        # doublons de sous-artefacts et quota VLM brûlé sur du travail déjà fait.
+        done = conn.execute("SELECT render_config_json FROM scientific_artifacts"
+                            " WHERE id=?", (r[0],)).fetchone()
+        if done and done[0] and "vlm_exploded_at" in done[0]:
+            continue
+        frames.append(r)
+        if len(frames) >= max(1, min(body.limit, 50)):
+            break
     if body.dry_run:
         return {"dry_run": True, "mode": "explode", "frames": len(frames), "created": 0}
     created = anchored = failed = 0
@@ -619,6 +627,13 @@ def requalify_artifacts(body: RequalifyBody):
         where, args = ["a.artifact_type='dense_illustration'", "a.raw_binary IS NOT NULL"], []
         if body.document_id:
             where.append("a.document_id=?"); args.append(body.document_id)
+        # `vlm_exploded_at` = marqueur de SUCCÈS de l'explosion : TOUJOURS exclu, même
+        # sous retry_failed (qui vise les ÉCHECS à retenter, pas les succès à refaire).
+        # Sans cette exclusion, les cadres déjà explosés restent éligibles à chaque
+        # passe (ORDER BY page_number + limit → toujours le MÊME lot) : la boucle ne
+        # converge jamais vers frames=0 et re-crée des sous-artefacts en doublon.
+        where.append("(a.render_config_json IS NULL OR a.render_config_json"
+                     " NOT LIKE '%vlm_exploded_at%')")
         if not body.retry_failed:  # ne pas retenter en boucle les échecs marqués
             where.append("(a.render_config_json IS NULL OR (a.render_config_json"
                          " NOT LIKE '%vlm_failed_at%' AND a.render_config_json"
