@@ -20,6 +20,7 @@ from api.routes_pipeline import router as pipeline_router  # noqa: E402
 from api.routes_llm import router as llm_router  # noqa: E402
 from api.routes_curriculum import router as curriculum_router  # noqa: E402
 from api.routes_auth import router as auth_router  # noqa: E402
+from api.routes_validation import router as validation_router  # noqa: E402
 from db.connection import init_config_db  # noqa: E402
 from core import engine_registry  # noqa: E402
 
@@ -105,6 +106,7 @@ app.include_router(pipeline_router, prefix="/api/pipeline", tags=["Pipeline"])
 app.include_router(llm_router, prefix="/api/llm", tags=["LLM"])
 app.include_router(curriculum_router, prefix="/api/curriculum", tags=["Curriculum"])
 app.include_router(auth_router, prefix="/api/auth", tags=["Auth"])
+app.include_router(validation_router, prefix="/api/validation", tags=["Validation"])
 
 # ── Single-Origin (Phase 7) : FastAPI sert l'UI compilée s'il la trouve ──
 # UN SEUL processus sert tout (UI + API) : zéro CORS inter-origines, zéro

@@ -61,7 +61,7 @@ _PATTERNS = [
     ("course_theory", re.compile(r"(?:^|\n)\s*[#>*\-|\s]*(?:Définition|Definition|Théorème|Theoreme|Propriété|Propriete|Règle|Regle|Cours|Leçon|Lecon)\b|(?:تعريف|مبرهنة|خاصية|قاعدة|الدرس|أتعلم|أكتشف|أتذكر|أستحضر|أتحقق|مكتسباتي)", re.I)),
 ]
 _H2_RE = re.compile(r"\n(?=##?#?\s)")
-_embedder = {"tried": False, "model": None}
+_embedder = {"tried": False, "model": None, "name": None}
 
 
 def _qualify(text: str):
@@ -107,6 +107,7 @@ def _get_embedder():
                        "sentence-transformers/all-MiniLM-L6-v2"):
         try:
             _embedder["model"] = TextEmbedding(model_name)
+            _embedder["name"] = model_name
             return _embedder["model"]
         except Exception:  # noqa: BLE001 — hors-ligne / modèle absent : essaie le repli
             _embedder["model"] = None
@@ -228,7 +229,16 @@ def run(ctx: dict) -> dict:
             "token_count": _token_len(text, encoder), "embedding_vector": embedding_blob,
         })
 
-    ctx.update(chunks=chunk_rows,
+    profile = None
+    if embedder is not None and any(row["embedding_vector"] is not None for row in chunk_rows):
+        try:
+            import importlib.metadata as _metadata
+            version = _metadata.version("fastembed")
+        except Exception:  # noqa: BLE001
+            version = "unknown"
+        profile = {"model_name": _embedder.get("name") or "unknown", "model_version": version,
+                   "pooling": "mean", "dimensions": 384, "normalized": True}
+    ctx.update(chunks=chunk_rows, embedding_profile=profile,
                qualification_latency_ms=int((time.perf_counter() - started) * 1000))
     ctx.setdefault("latencies", {})["layer_3_qualify"] = ctx["qualification_latency_ms"]
     return ctx

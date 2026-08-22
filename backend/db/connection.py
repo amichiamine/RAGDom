@@ -97,6 +97,7 @@ def get_connection(db_name: str) -> sqlite3.Connection:
     conn.execute("PRAGMA foreign_keys = ON")
     conn.execute("PRAGMA journal_mode=WAL")
     init_vector_support(conn)
+    apply_migrations(conn)
     return conn
 
 
@@ -133,18 +134,43 @@ def create_database(db_name: str) -> sqlite3.Connection:
 
 
 def apply_migrations(conn: sqlite3.Connection) -> int:
-    """Applique les migrations numérotées manquantes (tech_specs §6). Retourne le nb appliqué."""
+    """Applique les migrations numérotées manquantes.
+
+    Les migrations restent additives et reprenables après une interruption : les
+    ``ALTER TABLE ... ADD COLUMN`` déjà appliqués sont ignorés explicitement, puis
+    la version n'est inscrite qu'après succès de tous les autres statements.
+    """
     mig_dir = _DB_DIR / "migrations"
+    conn.execute("CREATE TABLE IF NOT EXISTS schema_version (version INTEGER PRIMARY KEY,"
+                 " applied_at DATETIME DEFAULT CURRENT_TIMESTAMP, description TEXT)")
     applied = {r[0] for r in conn.execute("SELECT version FROM schema_version")}
     count = 0
     for path in sorted(mig_dir.glob("migration_*.sql")):
-        num = int(re.match(r"migration_(\d+)", path.name).group(1))
+        match = re.match(r"migration_(\d+)", path.name)
+        if not match:
+            continue
+        num = int(match.group(1))
         if num in applied:
             continue
-        conn.executescript(path.read_text(encoding="utf-8"))
-        conn.execute("INSERT OR IGNORE INTO schema_version (version, description) VALUES (?, ?)",
-                     (num, path.stem))
-        conn.commit()
+        script = "\n".join(line for line in path.read_text(encoding="utf-8").splitlines()
+                           if not line.lstrip().startswith("--"))
+        statements = [part.strip() for part in script.split(";") if part.strip()]
+        try:
+            conn.execute("BEGIN")
+            for statement in statements:
+                try:
+                    conn.execute(statement)
+                except sqlite3.OperationalError as exc:
+                    if statement.lstrip().upper().startswith("ALTER TABLE") and \
+                            "duplicate column name" in str(exc).lower():
+                        continue
+                    raise
+            conn.execute("INSERT OR IGNORE INTO schema_version (version, description) VALUES (?, ?)",
+                         (num, path.stem))
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
         count += 1
     return count
 
@@ -197,6 +223,10 @@ def get_config_db() -> sqlite3.Connection:
     conn = sqlite3.connect(config.CONFIG_DB_PATH, check_same_thread=False)
     conn.execute("PRAGMA foreign_keys = ON")
     conn.execute("PRAGMA journal_mode=WAL")
+    # Initialisation paresseuse : les appels TestClient sans contexte lifespan et
+    # les workers CLI disposent quand même toujours du schéma de configuration.
+    conn.executescript(_CONFIG_DDL)
+    conn.commit()
     return conn
 
 

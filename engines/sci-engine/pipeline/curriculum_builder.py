@@ -107,14 +107,18 @@ def _purge_auto_rows(conn, document_id) -> None:
 
     Ordre de suppression = enfants avant parents (content_links puis assessments,
     puis programs, puis terms) pour ne pas laisser de lien orphelin. Le périmètre
-    est le document quand document_id est fourni (assessments.document_id), sinon
-    toute la base. Les programs/terms/links n'ont pas de colonne document_id : on
-    les purge par marqueur auto (base mono-document en pratique)."""
-    # content_links auto (from_id/to_id ne portent pas de doc — filtre par marqueur).
-    conn.execute(
-        "DELETE FROM content_links WHERE link_type IN (?,?,?)"
-        " AND metadata_json IS NOT NULL AND json_extract(metadata_json,'$.source')=?",
-        (_LINK_PROGRAM_TERM, _LINK_COURSE_PROGRAM, _LINK_COURSE_EXERCISE, _AUTO_MARKER))
+    est le document quand document_id est fourni, sinon toute la base. Depuis V5,
+    programs/terms/links portent aussi document_id : aucune reconstruction d'un
+    document ne peut supprimer le curriculum automatique d'un autre."""
+    # content_links auto : V5 porte document_id, donc un build document ne touche
+    # jamais les liens d'un autre document.
+    link_sql = ("DELETE FROM content_links WHERE link_type IN (?,?,?)"
+                " AND metadata_json IS NOT NULL AND json_extract(metadata_json,'$.source')=?")
+    link_args = [_LINK_PROGRAM_TERM, _LINK_COURSE_PROGRAM, _LINK_COURSE_EXERCISE, _AUTO_MARKER]
+    if document_id:
+        link_sql += " AND document_id=?"
+        link_args.append(document_id)
+    conn.execute(link_sql, link_args)
     # assessments auto (scopables par document).
     if document_id:
         conn.execute(
@@ -125,28 +129,30 @@ def _purge_auto_rows(conn, document_id) -> None:
         conn.execute(
             "DELETE FROM assessments WHERE scale_json IS NOT NULL"
             " AND json_extract(scale_json,'$.source')=?", (_AUTO_MARKER,))
-    # programs + terms auto (pas de doc_id dans le DDL → purge par marqueur).
+    # programs + terms auto, scopés par document depuis V5.
+    suffix = " AND document_id=?" if document_id else ""
+    args = (_AUTO_MARKER, document_id) if document_id else (_AUTO_MARKER,)
     conn.execute(
         "DELETE FROM curriculum_programs WHERE competencies_json IS NOT NULL"
-        " AND json_extract(competencies_json,'$.source')=?", (_AUTO_MARKER,))
+        " AND json_extract(competencies_json,'$.source')=?" + suffix, args)
     conn.execute(
         "DELETE FROM curriculum_terms WHERE metadata_json IS NOT NULL"
-        " AND json_extract(metadata_json,'$.source')=?", (_AUTO_MARKER,))
+        " AND json_extract(metadata_json,'$.source')=?" + suffix, args)
 
 
-def _ensure_default_term(conn) -> str:
-    """Retourne l'id du terme auto par défaut, en le RÉUTILISANT s'il existe déjà
-    (jamais deux termes auto), sinon en le créant. Ne touche pas un terme humain."""
+def _ensure_default_term(conn, document_id) -> str:
+    """Retourne le terme auto du document courant, sans collision inter-document."""
     row = conn.execute(
         "SELECT id FROM curriculum_terms WHERE metadata_json IS NOT NULL"
-        " AND json_extract(metadata_json,'$.source')=? ORDER BY term_index LIMIT 1",
-        (_AUTO_MARKER,)).fetchone()
+        " AND json_extract(metadata_json,'$.source')=? AND document_id IS ?"
+        " ORDER BY term_index LIMIT 1", (_AUTO_MARKER, document_id)).fetchone()
     if row:
         return row[0]
     term_id = _uid()
     conn.execute(
-        "INSERT INTO curriculum_terms (id, term_index, label, metadata_json) VALUES (?,?,?,?)",
-        (term_id, _DEFAULT_TERM_INDEX, _DEFAULT_TERM_LABEL, _auto_json()))
+        "INSERT INTO curriculum_terms (id, document_id, term_index, label, metadata_json)"
+        " VALUES (?,?,?,?,?)",
+        (term_id, document_id, _DEFAULT_TERM_INDEX, _DEFAULT_TERM_LABEL, _auto_json()))
     return term_id
 
 
@@ -195,7 +201,7 @@ def _lesson_of_page(lessons, page_number):
     return None
 
 
-def _build_programs(conn, term_id, lessons):
+def _build_programs(conn, term_id, lessons, document_id):
     """Crée 1 curriculum_programs par leçon (ordre déterministe) + le lien
     program_term. Renvoie {toc_id: program_id} pour le rattachement aval."""
     toc_to_program = {}
@@ -207,19 +213,19 @@ def _build_programs(conn, term_id, lessons):
             "page_end": page_end,
         })
         conn.execute(
-            "INSERT INTO curriculum_programs (id, term_id, seq_index, title, source,"
-            " competencies_json) VALUES (?,?,?,?,?,?)",
-            (program_id, term_id, seq_index, title or "", _AUTO_MARKER, competencies))
+            "INSERT INTO curriculum_programs (id, document_id, term_id, seq_index, title, source,"
+            " competencies_json) VALUES (?,?,?,?,?,?,?)",
+            (program_id, document_id, term_id, seq_index, title or "", _AUTO_MARKER, competencies))
         # Lien program→term (provenance auto).
         conn.execute(
-            "INSERT INTO content_links (id, link_type, from_id, to_id, page_number,"
-            " metadata_json) VALUES (?,?,?,?,?,?)",
-            (_uid(), _LINK_PROGRAM_TERM, program_id, term_id, page_start, _auto_json()))
+            "INSERT INTO content_links (id, document_id, link_type, from_id, to_id, page_number,"
+            " metadata_json) VALUES (?,?,?,?,?,?,?)",
+            (_uid(), document_id, _LINK_PROGRAM_TERM, program_id, term_id, page_start, _auto_json()))
         toc_to_program[toc_id] = program_id
     return toc_to_program
 
 
-def _link_courses(conn, lessons, toc_to_program, course_chunks):
+def _link_courses(conn, lessons, toc_to_program, course_chunks, document_id):
     """Rattache chaque chunk de cours à sa leçon (par plage de pages) via un lien
     course_program (from_id=chunk cours, to_id=program). Renvoie
     {toc_id: [chunk_id, ...]} des cours de chaque leçon (représentants pour les
@@ -233,14 +239,14 @@ def _link_courses(conn, lessons, toc_to_program, course_chunks):
         if program_id is None:
             continue
         conn.execute(
-            "INSERT INTO content_links (id, link_type, from_id, to_id, page_number,"
-            " metadata_json) VALUES (?,?,?,?,?,?)",
-            (_uid(), _LINK_COURSE_PROGRAM, chunk_id, program_id, page_number, _auto_json()))
+            "INSERT INTO content_links (id, document_id, link_type, from_id, to_id, page_number,"
+            " metadata_json) VALUES (?,?,?,?,?,?,?)",
+            (_uid(), document_id, _LINK_COURSE_PROGRAM, chunk_id, program_id, page_number, _auto_json()))
         courses_by_toc.setdefault(lesson[0], []).append(chunk_id)
     return courses_by_toc
 
 
-def _link_exercises(conn, lessons, courses_by_toc, exercise_chunks):
+def _link_exercises(conn, lessons, courses_by_toc, exercise_chunks, document_id):
     """Rattache chaque exercice à sa leçon via un lien course_exercise
     (from_id=chunk cours REPRÉSENTATIF de la leçon, to_id=chunk exercice).
 
@@ -260,9 +266,9 @@ def _link_exercises(conn, lessons, courses_by_toc, exercise_chunks):
             continue  # leçon sans cours → pas de from_id valide (compté au global)
         from_course = course_reps[0]  # représentant déterministe (1er cours de la leçon)
         conn.execute(
-            "INSERT INTO content_links (id, link_type, from_id, to_id, page_number,"
-            " metadata_json) VALUES (?,?,?,?,?,?)",
-            (_uid(), _LINK_COURSE_EXERCISE, from_course, chunk_id, page_number, _auto_json()))
+            "INSERT INTO content_links (id, document_id, link_type, from_id, to_id, page_number,"
+            " metadata_json) VALUES (?,?,?,?,?,?,?)",
+            (_uid(), document_id, _LINK_COURSE_EXERCISE, from_course, chunk_id, page_number, _auto_json()))
         linked += 1
     return linked
 
@@ -344,6 +350,13 @@ def build_curriculum(conn, document_id=None) -> dict:
 
     Idempotent (purge des seules lignes auto puis reconstruction) et
     non-destructif (lignes humaines préservées). Transaction unique."""
+    if document_id is None:
+        totals = {"lessons": 0, "exercises": 0, "solutions": 0, "assessments": 0}
+        for (doc_id,) in conn.execute("SELECT id FROM documents ORDER BY id").fetchall():
+            result = build_curriculum(conn, doc_id)
+            for key in totals:
+                totals[key] += result[key]
+        return totals
     conn.execute("BEGIN")
     try:
         # 1) Idempotence non-destructive : on efface nos anciennes lignes auto.
@@ -368,18 +381,18 @@ def build_curriculum(conn, document_id=None) -> dict:
             return counts
 
         # 5) Terme d'ancrage (réutilisé s'il existe déjà en auto).
-        term_id = _ensure_default_term(conn)
+        term_id = _ensure_default_term(conn, document_id)
 
         # 6) Leçons → curriculum_programs (+ program_term).
-        toc_to_program = _build_programs(conn, term_id, lessons)
+        toc_to_program = _build_programs(conn, term_id, lessons, document_id)
 
         # 7) Cours ← chunks course_theory/proof → course_program.
         course_chunks = _fetch_chunks_by_types(conn, document_id, _COURSE_TYPES)
-        courses_by_toc = _link_courses(conn, lessons, toc_to_program, course_chunks)
+        courses_by_toc = _link_courses(conn, lessons, toc_to_program, course_chunks, document_id)
 
         # 8) Exercices ← chunks exercise_* → course_exercise (rattachés par page).
         exercise_chunks = _fetch_chunks_by_types(conn, document_id, _EXERCISE_TYPES)
-        exercises_linked = _link_exercises(conn, lessons, courses_by_toc, exercise_chunks)
+        exercises_linked = _link_exercises(conn, lessons, courses_by_toc, exercise_chunks, document_id)
 
         # 9) Évaluations ← chunks evaluation_exam ET documents entiers typés sujet.
         assessments = _build_assessments_from_chunks(conn, document_id, exam_chunks)
