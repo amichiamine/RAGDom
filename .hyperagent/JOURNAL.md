@@ -1,5 +1,38 @@
 # JOURNAL des passes (le plus récent en premier)
 
+## 2026-08-22 17:45 — V4.3 EN PRODUCTION : vérifié live + données corrigées + enrichissement
+- **Déploiements** : dep-da4rlbgjo6nc73dtggkg (code V4.3, build Docker Render vert =
+  npm install + tsc + vite build validés avec mermaid/plotly) puis
+  dep-da4s3r67bikc73ahv3ag (données corrigées, **clearCache obligatoire** — piège :
+  le cache de build Docker fige la couche qui télécharge les assets de release ;
+  sans {"clearCache":"clear"} un redéploiement SERT LES ANCIENNES BASES).
+- **Enrichissement des données (exécuté sur le live)** : les 98 illustrations ≤70 %
+  jamais soumises ont TOUTES été requalifiées (candidats restants = 0) →
+  geometry_vector 21→50, data_table +3, matrix +1, sémantique posée (~50 nouveaux
+  badges). Bases exportées, CORRIGÉES HORS-LIGNE (nouveau calcul TOC + nouvelle
+  classification + linker), republiées en assets corpus-1am-v1, redéployées.
+- **Vérifié AU NAVIGATEUR sur le live (0 erreur console)** :
+  capsules de pages : 0 plage « X-210 » (échantillons : ص 10, ص 11-25, ص 26) ;
+  badges d'état de rendu VISIBLES (1431 « مُهيكل » / 42 « أصل ») ;
+  ponts « مسح ص N » présents (259) ; onglet Exercices : **8 exercices** (était 0) ;
+  sidebar : Cours 40, Exercices 8, Évaluations 0 (les 2 anciens étaient des faux
+  positifs « BAC »=angle — purgés ; les vrais sujets vivent dans 1AM_math_sources).
+- **État final de la base official-books** : 993 artefacts, **701 structurés (70 %)**
+  — latex 605/613, geometry_vector 50/50, data_table 35/40, matrix 8/8, plot 2/2,
+  flowchart 1/1, dense_illustration 279 (267 cadres pleine page + photos + échecs).
+- **RESTE (quotas Gemini)** : explosion des cadres pleine page IMPOSSIBLE aujourd'hui :
+  la clé1 (gemini-3.6-flash) part en 429 sur CHAQUE appel image pleine page (blocage
+  ~20 min à chaque tentative), et flash-lite (clé3) échoue sur le JSON complexe
+  d'explosion (42 cadres marqués vlm_failed_at aujourd'hui, retryables). La réussite
+  du matin (124 sous-artefacts) passait vraisemblablement par la clé …7890 ajoutée
+  EN UI et PERDUE au reboot (absente de RAGDOM_SEED_LLM_KEYS). REPRISE :
+  (1) idéalement ré-ajouter une clé à quota frais (UI Fournisseurs IA ou seed env) ;
+  (2) python3 skills/ragdom-live-admin/enrich_loop.py explode 240 8 en rafales
+  jusqu'à frames=0, PUIS {"retry_failed":true} pour les 42+4 marqués ;
+  (3) export des 2 bases → republication assets → redeploy AVEC clearCache.
+- Pièges neufs consignés : RunWithCredentials coupe à 300 s (borner les rafales à
+  ~240 s) ; un lot requalify serveur CONTINUE même si le client HTTP est coupé
+  (verrou d'écriture → 500 sur les appels suivants tant que le lot tourne).
 ## 2026-08-22 16:05 — V4.3 : GO Complet — conformité multimodale et structurelle totale
 - Mandat utilisateur : « combler tous les trous, Production Ready », GO permanent.
   4 agents parallèles (backend pipeline, backend structure, frontend rendu,
