@@ -11,10 +11,10 @@ import type {
   ValidationSnapshotCreateResponse, ValidationWorkingPageResponse,
   ValidationEmbeddingAssignRequest, ValidationEmbeddingDiagnostic,
   ValidationEmbeddingProfile, ValidationEmbeddingProfileRequest,
-  ValidationPageDiffResponse, ValidationReport, ValidationRunDiffResponse,
+  ValidationPageDiffResponse, ValidationReport, ValidationRunDiffResponse, ValidationRunStatus,
 } from '@/types'
 import {
-  validationPageStatusCounts, validationRunProgress,
+  validationPageStatusCounts,
   validationScopeFromDto, validationScopeToDto, validationTargetsFromPages,
 } from '@/lib/validation'
 
@@ -333,6 +333,11 @@ export const api = {
         }),
       }),
 
+    executeRun: (runId: string, db: string) =>
+      request<{ id: string; status: ValidationRunStatus; working_db_filename?: string; batch_id?: string | null; batch_ids?: string[]; operation?: string; error?: string; official_mutated: false }>(
+        withDb(`/validation/runs/${encodeURIComponent(runId)}/execute`, db), { method: 'POST' },
+      ),
+
     listRuns: (db: string, page = 1, limit = 25) =>
       request<{ runs: ValidationRunListItemResponse[] }>(withDb('/validation/runs', db)).then(response => {
         const total = response.runs.length
@@ -353,8 +358,14 @@ export const api = {
           created_at: item.created_at,
           updated_at: item.updated_at,
           pages_total: item.page_count,
-          pages_ready: item.status === 'READY' ? item.page_count : 0,
-          progress: item.page_count > 0 && ['READY', 'ACCEPTED', 'REJECTED', 'CANCELLED', 'FAILED'].includes(item.status) ? 100 : 0,
+          pages_ready: ['COMPLETED', 'ACCEPTED'].includes(item.status) ? item.progress_current : 0,
+          progress: item.progress_percent,
+          working_db_filename: item.working_db_filename,
+          working_db_exists: item.working_db_exists,
+          operation: item.operation,
+          batch_id: item.batch_id,
+          batch_ids: item.batch_ids,
+          error_log: item.error_log,
         }))
         return {
           data,
@@ -379,7 +390,13 @@ export const api = {
           updated_at: response.updated_at,
           pages_total: response.pages.length,
           pages_ready: counts.READY ?? 0,
-          progress: validationRunProgress(response),
+          progress: response.progress.percent,
+          working_db_filename: response.working_db_filename,
+          working_db_exists: response.working_db.exists,
+          operation: response.operation,
+          batch_id: response.batch_id,
+          batch_ids: response.batch_ids,
+          error_log: response.error_log,
           accepted_at: response.accepted_at,
           rejected_at: response.rejected_at,
           embedding_profile_id: response.embedding_profile_id,

@@ -142,8 +142,8 @@ describe('validation deep links', () => {
 
 describe('validation terminal states and progress', () => {
   it('recognizes only final run states as terminal', () => {
-    const statuses: ValidationRunStatus[] = ['DRAFT', 'RUNNING', 'READY', 'ACCEPTED', 'REJECTED', 'CANCELLED', 'FAILED']
-    expect(statuses.filter(isValidationRunTerminal)).toEqual(['ACCEPTED', 'REJECTED', 'CANCELLED', 'FAILED'])
+    const statuses: ValidationRunStatus[] = ['DRAFT', 'CREATED', 'QUEUED', 'RUNNING', 'COMPLETED', 'BLOCKED', 'ACCEPTED', 'REJECTED', 'CANCELLED', 'FAILED']
+    expect(statuses.filter(isValidationRunTerminal)).toEqual(['BLOCKED', 'ACCEPTED', 'REJECTED', 'CANCELLED', 'FAILED'])
   })
 
   it('computes progress from terminal page states', () => {

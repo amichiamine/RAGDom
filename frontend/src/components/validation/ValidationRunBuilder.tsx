@@ -52,8 +52,13 @@ export default function ValidationRunBuilder({ databases, activeDb, readonly, on
     setError(null)
     try {
       const created = await api.validation.createRun({ scope })
+      const execution = await api.validation.executeRun(created.id, scope.db)
       const run = await api.validation.getRun(created.id, scope.db)
-      toast.success(t('validation.builder.started'))
+      if (execution.status === 'BLOCKED' || execution.status === 'FAILED') {
+        toast.error(run.error_log ?? execution.error ?? t('validation.runs.source_missing'))
+      } else {
+        toast.success(t('validation.builder.started'))
+      }
       onRunCreated(run)
       setPreview(null)
     } catch (cause) {

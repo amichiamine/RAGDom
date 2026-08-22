@@ -80,15 +80,13 @@ Depuis la racine : `npm install` puis `npm run dev` (lance simultanément le bac
 
 ### **0ter. STUDIO DE VALIDATION FINAL (MAJ 2026-08-22)**
 
-Le Studio est disponible dans **Automation** et s'appuie sur le routeur admin `/api/validation`. Il permet de prévisualiser puis valider une base entière multi-documents, un document, une entrée TOC (`toc/chapter/course/title`), une page, une plage ou une sélection. Chaque run conserve une baseline et une copie de travail isolée par document/page, avec snapshots logiques restaurables, diffs, rapport et benchmarks rattachés. Tant que le run n'est pas accepté, les tables officielles ne changent pas.
+Le Studio est disponible dans **Automation** et s'appuie sur le routeur admin `/api/validation`. Il permet de prévisualiser puis valider une base entière multi-documents, un document, une entrée TOC (`toc/chapter/course/title`), une page, une plage ou une sélection. `POST /runs` crée par `sqlite3.Connection.backup` une copie physique `validation_test_<run>.sqlite` confinée à `DATABASES_DIR`, puis `POST /runs/{id}/execute` purge et ré-exécute réellement toutes les couches du pipeline uniquement dans cette copie. La base officielle reste inchangée jusqu'à l'acceptation.
 
-L'acceptation et le rejet portent sur **le run entier**. L'acceptation est atomique et refuse toute baseline devenue obsolète, écrasement d'édition humaine ou référence cross-document. Le suivi UI est un polling ciblé du run ouvert toutes les 5 s ; il n'existe pas de SSE Validation dédié. En `RAGDOM_READONLY=true`, le Studio est désactivé et les routes Validation sont masquées en 404.
+Les états d'exécution sont `CREATED → QUEUED/RUNNING → COMPLETED`, ou `BLOCKED` si un PDF source officiel manque, `FAILED` en cas d'échec et `CANCELLED` après annulation ciblée. Le détail et le rapport exposent copie, opération, batch(s), progression et erreur ; le frontend poll uniquement le run ouvert. Le rejet supprime la copie, son WAL et son SHM. L'acceptation contrôle le hash optimiste et les éditions humaines, puis promeut transactionnellement les seules pages du scope depuis la copie avant de la supprimer.
 
-Les migrations SQLite 005/006 rendent le dispositif compatible avec les bases multi-livres (ownership curriculum explicite) et ajoutent runs/copies/events/snapshots, `baseline_hash`, provenance et profils embeddings. Le profil compatible courant utilise FastEmbed MiniLM-L12-v2, pooling **mean**, 384 dimensions normalisées ; aucun mélange de profils actifs ni réindexation silencieuse.
+La migration additive/idempotente **007** complète 005/006 avec `working_db_filename`, opération, batchs, état/progression et erreur. Les copies `validation_test_` sont masquées de la découverte et ne peuvent être exportées/dupliquées via les routes de cycle de vie. La requalification avec `run_id` est autorisée seulement après `COMPLETED` et est automatiquement redirigée vers la copie physique ; aucune mutation officielle n'est possible par ce chemin.
 
-**Limite connue :** une requalification mutante `/api/pipeline/requalify-artifacts` avec `run_id` renvoie 409 faute de staging des artefacts dans la copie de travail ; le `dry_run` scopé reste possible. Les décisions Validation ne doivent jamais contourner ce garde-fou.
-
-**Versions et qualité vérifiées :** Vite **8.2.2**, React Router DOM **7.18.2**, Vitest **13/13**, `npm audit` **0 vulnérabilité**, pytest **149/149** en mode normal et **149/149** avec `RAGDOM_LOW_MEMORY=true`.
+Les tests end-to-end utilisent des PDF et bases temporaires, désactivent les appels VLM/LLM externes et vérifient isolation, diff réel, publication scopée, source absente, polling après reprise, annulation et suppression des copies.
 
 **Instructions pour ArchiSys3.0 :**
 

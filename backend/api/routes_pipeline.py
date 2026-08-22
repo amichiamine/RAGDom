@@ -73,6 +73,8 @@ class StartBody(StrictBody):
 
 def _register_document(db_name: str, source_path: str) -> dict:
     """Crée la base si besoin + enregistre le document (métadonnées §13). Idempotent."""
+    if db.is_validation_working_db(db_name):
+        raise HTTPException(400, "Namespace validation_test_ réservé aux runs isolés")
     real = _resolve_source(source_path)
     if not real.startswith(os.path.realpath(config.SOURCES_DIR) + os.sep):
         raise HTTPException(400, "source_path hors de /sources/")
@@ -911,26 +913,31 @@ def _explode_fullpage_frames(conn, body, rows):
 def requalify_artifacts(body: RequalifyBody):
     """Requalification VLM du corpus existant (§12). dry_run = comptes ; réel =
     UPDATE type/raw_data/render_config_json/caption/searchable_text (+ ancre)."""
+    official_db = body.db
+    allowed_run_pages = None
     conn = db.get_connection_or_http(body.db)
     try:
         if body.run_id:
-            run = conn.execute("SELECT status FROM validation_runs WHERE id=?", (body.run_id,)).fetchone()
+            run = conn.execute("SELECT status, execution_status, working_db_filename FROM validation_runs"
+                               " WHERE id=?", (body.run_id,)).fetchone()
             if run is None:
                 raise HTTPException(404, "Run de validation introuvable")
-            if run[0] not in ("DRAFT", "RUNNING", "READY"):
+            if run[0] in ("ACCEPTED", "REJECTED", "CANCELLED"):
                 raise HTTPException(409, "Run de validation terminal")
-            if not body.dry_run:
-                # The historical implementation tagged then mutated official artifacts.
-                # Until the qualifier can operate purely on working_json, fail closed.
-                raise HTTPException(409, "Requalification avec run_id non stagée : utilisez la copie de travail")
+            if not body.dry_run and run[1] != "COMPLETED":
+                raise HTTPException(409, "Requalification mutante réservée à un run COMPLETED")
+            if not run[2] or not db.is_validation_working_db(run[2]):
+                raise HTTPException(409, "Copie SQLite de validation absente ou non isolée")
+            allowed_run_pages = {(row[0], int(row[1])) for row in conn.execute(
+                "SELECT document_id,page_number FROM validation_run_pages WHERE run_id=?",
+                (body.run_id,)).fetchall()}
+            conn.close()
+            body = body.model_copy(update={"db": run[2]})
+            conn = db.get_connection_or_http(body.db)
         where, args = ["a.artifact_type='dense_illustration'", "a.raw_binary IS NOT NULL",
                        "length(a.raw_binary)<=?"], [body.max_payload_bytes]
         if body.document_id:
             where.append("a.document_id=?"); args.append(body.document_id)
-        if body.run_id:
-            where.append("EXISTS (SELECT 1 FROM validation_run_pages vrp WHERE vrp.run_id=?"
-                         " AND vrp.document_id=a.document_id AND vrp.page_number=a.page_number)")
-            args.append(body.run_id)
         # `vlm_exploded_at` = marqueur de SUCCÈS de l'explosion : TOUJOURS exclu, même
         # sous retry_failed (qui vise les ÉCHECS à retenter, pas les succès à refaire).
         # Sans cette exclusion, les cadres déjà explosés restent éligibles à chaque
@@ -949,6 +956,8 @@ def requalify_artifacts(body: RequalifyBody):
             " LEFT JOIN page_scans ps ON ps.document_id=a.document_id AND ps.page_number=a.page_number"
             " WHERE %s ORDER BY a.page_number" % " AND ".join(where),
             args).fetchall()
+        if allowed_run_pages is not None:
+            rows = [row for row in rows if (row[1], int(row[2])) in allowed_run_pages]
 
         # Candidats = dense_illustration, raw_binary NON NULL, ≤70 % (bbox DICT).
         # `limit` borne le NOMBRE DE CANDIDATS traités (pas la fenêtre SQL) : un
@@ -969,7 +978,11 @@ def requalify_artifacts(body: RequalifyBody):
         if body.explode:
             if (body.strategy or "cv").lower() == "vlm" and not body.allow_full_page:
                 raise HTTPException(400, "allow_full_page=true requis pour envoyer une page entière au VLM")
-            return _explode_fullpage_frames(conn, body, rows)
+            result = _explode_fullpage_frames(conn, body, rows)
+            if body.run_id and not body.dry_run:
+                from api.routes_validation import refresh_run_working_json
+                refresh_run_working_json(official_db, body.run_id, "run.requalified")
+            return result
 
         if body.dry_run:
             return {"dry_run": True, "candidates": len(candidates), "requalified": 0,
@@ -987,12 +1000,7 @@ def requalify_artifacts(body: RequalifyBody):
         conn.execute("BEGIN")
         for art_id, doc_id, page_number, bbox_json, _caption, _w, page_h in candidates:
             if body.run_id:
-                allowed = conn.execute("SELECT 1 FROM validation_run_pages WHERE run_id=?"
-                                       " AND document_id=? AND page_number=?",
-                                       (body.run_id, doc_id, page_number)).fetchone()
-                if not allowed:
-                    skipped_failures += 1
-                    continue
+                # The connection now points exclusively at the run's physical copy.
                 conn.execute("UPDATE scientific_artifacts SET validation_run_id=? WHERE id=?",
                              (body.run_id, art_id))
             blob = conn.execute("SELECT raw_binary FROM scientific_artifacts WHERE id=?",
@@ -1056,9 +1064,13 @@ def requalify_artifacts(body: RequalifyBody):
                                     page_number, y0, page_h):
                     anchored += 1
         conn.commit()
-        return {"dry_run": False, "candidates": len(candidates), "requalified": requalified,
-                "anchored": anchored, "by_type": by_type, "by_semantic": by_semantic,
-                "skipped_failures": skipped_failures}
+        result = {"dry_run": False, "candidates": len(candidates), "requalified": requalified,
+                  "anchored": anchored, "by_type": by_type, "by_semantic": by_semantic,
+                  "skipped_failures": skipped_failures}
+        if body.run_id:
+            from api.routes_validation import refresh_run_working_json
+            refresh_run_working_json(official_db, body.run_id, "run.requalified")
+        return result
     except HTTPException:
         conn.rollback()
         raise

@@ -1549,7 +1549,7 @@ Le client `api.validation` adapte strictement le contrat backend : `database`→
 
 1. Choisir une base puis un scope universel ; charger documents et TOC réels.
 2. Exécuter la prévisualisation non mutante et afficher nombre de pages/cibles.
-3. Lancer un run isolé, ouvrir automatiquement sa première `(document,page)` et conserver `db`, `run`, `document`, `page` dans l'URL.
+3. Lancer un run isolé : le builder enchaîne `POST /runs` puis `POST /runs/{id}/execute`, ouvre sa première `(document,page)` et conserve `db`, `run`, `document`, `page` dans l'URL. Le pipeline réel tourne uniquement sur la copie SQLite physique du run.
 4. Inspecter baseline/copie, diff chunks/artefacts, TOC/curriculum/benchmarks ; restaurer une page ou tout le run depuis la baseline/snapshot logique.
 5. Accepter ou rejeter **le run entier**. Il n'existe pas de décision accept/reject au niveau page. L'acceptation exige une modale récapitulant base, scope, pages et cibles.
 
@@ -1559,8 +1559,8 @@ Le client `api.validation` adapte strictement le contrat backend : `database`→
 
 En `readonly`, aucun appel Validation n'est lancé : liste et détail sont vidés, preview/lancement/restauration/annulation/acceptation/rejet sont désactivés, et un état explicite est affiché. Cette UI reflète la politique serveur : toutes les routes Validation sont administratives et masquées en 404 par le middleware readonly.
 
-Les erreurs 400/404/409 sont montrées inline et en toast. Sont notamment attendus : scope invalide, page multi-document ambiguë sans `document_id`, run terminal, baseline officielle modifiée, édition humaine protégée, référence cross-document et profil embedding incompatible. La requalification mutante Pipeline avec `run_id` reste hors parcours : elle renvoie 409 faute de staging des artefacts de copie de travail.
+Les erreurs 400/404/409 sont montrées inline et en toast. Le panneau affiche les états réels `CREATED/QUEUED/RUNNING/COMPLETED/BLOCKED/FAILED`, la progression serveur, le batch, la disponibilité de la copie et `error_log`. `BLOCKED` explique explicitement qu'un PDF source officiel est absent et qu'aucune donnée officielle n'a changé. Accept/reject ne sont proposés qu'après `COMPLETED`; un run bloqué/échoué peut être rejeté pour supprimer proprement sa copie.
 
 ### **9.4 Dépendances et preuves**
 
-Stack réellement verrouillée : React 19, TypeScript strict, **Vite 8.2.2**, `react-router-dom` **7.18.2**, Vitest 4.1.11. Preuves rejouées : **13/13 tests Vitest**, build Vite vert (3709 modules), `npm audit` **0 vulnérabilité** ; backend associé **149/149 pytest** en modes normal et faible mémoire.
+Stack réellement verrouillée : React 19, TypeScript strict, **Vite 8.2.2**, `react-router-dom` **7.18.2**, Vitest 4.1.11. Preuves rejouées : **13/13 tests Vitest**, build Vite vert (3709 modules), `npm audit` **0 vulnérabilité** ; backend associé **154/154 pytest** en modes normal et faible mémoire.

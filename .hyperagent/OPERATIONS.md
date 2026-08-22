@@ -4,16 +4,17 @@
 - `npm run dev` À LA RACINE : lance backend (venv auto-détecté, port libre auto)
   + frontend Vite (concurrently, scripts/dev-backend.mjs). Modes : --setup, --pytest.
 - Backend seul : cd backend && python main.py (chemins auto-déduits, .env pré-rempli).
-- Tests backend : `cd backend && python -m pytest tests/ -q --ignore=tests/bench_ram_100p.py` → **149/149** attendus; rejouer aussi avec `RAGDOM_LOW_MEMORY=true` → **149/149**.
+- Tests backend : `cd backend && python -m pytest tests/ -q --ignore=tests/bench_ram_100p.py` → **154/154** attendus; rejouer aussi avec `RAGDOM_LOW_MEMORY=true` → **154/154**.
 - Frontend : `cd frontend && npm test` → **13/13**; `npm run build` (TypeScript strict + Vite **8.2.2**) ; `npm audit` → **0 vulnérabilité**. React Router DOM est verrouillé en **7.18.2**.
 
 ## Exploitation du Studio de validation
 - Le Studio est dans Automation. Toujours faire `POST /api/validation/resolve-scope` avant `POST /api/validation/runs`; les scopes API sont `base`, `document`, `toc|chapter|course|title`, `page`, `page_range`, `page_selection` (l'UI traduit `database`→`base` et `selection`→`page_selection`).
-- Une copie de travail est isolée par run et par `(document_id,page_number)`. Les snapshots exposés sont **logiques uniquement**; la restauration ne modifie pas les tables officielles. Consulter les diffs page/run et le rapport avant décision.
-- `accept` et `reject` s'appliquent au **run entier**. `accept` est la seule opération qui publie la copie de travail; elle peut renvoyer 409 si la baseline officielle a changé, si une édition humaine serait écrasée ou si une référence sort du document.
-- Le frontend suit seulement le run ouvert par polling toutes les 5 s; ne pas chercher de flux SSE `/api/validation/*`. Le SSE existant `/api/pipeline/stream` ne remplace pas ce suivi.
-- En `RAGDOM_READONLY=true`, les routes Validation sont administratives et renvoient 404; l'UI désactive lancement, restauration, annulation, acceptation et rejet.
-- Limite connue : une requête mutante `POST /api/pipeline/requalify-artifacts` avec `run_id` est refusée en 409 faute de staging des artefacts dans `working_json`; ne pas la présenter comme exécutable tant que ce staging n'existe pas.
+- `POST /runs` crée une copie physique `validation_test_<run>.sqlite` par `Connection.backup`; appeler ensuite `POST /runs/{id}/execute`. Le pipeline complet et ses batches/jobs tournent uniquement sur cette copie, jamais sur l'officielle.
+- Le détail expose `CREATED/QUEUED/RUNNING/COMPLETED/BLOCKED/FAILED`, progression, opération, batch(s), copie et erreur. `BLOCKED` signifie notamment PDF source officiel absent; aucun contenu officiel n'a alors changé.
+- `accept` et `reject` s'appliquent au **run entier**. Reject supprime copie/WAL/SHM; accept vérifie hash et éditions humaines, promeut transactionnellement le scope depuis la copie, puis la supprime.
+- Le frontend suit seulement le run ouvert par polling toutes les 5 s; GET détail réconcilie aussi un batch après restart. Aucun SSE Validation dédié.
+- En `RAGDOM_READONLY=true`, les routes Validation sont administratives et renvoient 404.
+- Une requalification avec `run_id` n'est mutante que pour un run `COMPLETED`; elle est redirigée vers sa copie physique puis resynchronisée. Toute autre situation retourne 409.
 
 ## Skills Hyperagent (credentials chiffrés côté plateforme)
 - **render-ragdom** (RENDER_API_KEY) : FetchSkillScripts puis RunWithCredentials.

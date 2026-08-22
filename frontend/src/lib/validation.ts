@@ -94,12 +94,13 @@ export function updateValidationDeepLink(
 }
 
 export function isValidationRunTerminal(status: ValidationRunStatus): boolean {
-  return status === 'ACCEPTED' || status === 'REJECTED' || status === 'CANCELLED' || status === 'FAILED'
+  return status === 'ACCEPTED' || status === 'REJECTED' || status === 'CANCELLED'
+    || status === 'FAILED' || status === 'BLOCKED'
 }
 
 export function validationRunProgress(run: Pick<ValidationRunDetailResponse, 'status' | 'pages'>): number {
   if (run.pages.length === 0) return 0
-  if (run.status === 'READY' || isValidationRunTerminal(run.status) || run.status === 'FAILED') return 100
+  if (run.status === 'READY' || run.status === 'COMPLETED' || isValidationRunTerminal(run.status)) return 100
   const completed = run.pages.filter(page =>
     page.status === 'READY' || page.status === 'ACCEPTED' || page.status === 'REJECTED'
     || page.status === 'CANCELLED' || page.status === 'FAILED',

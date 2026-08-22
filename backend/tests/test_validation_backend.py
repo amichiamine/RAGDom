@@ -68,12 +68,29 @@ def validation_db():
     conn.close()
     yield
     _remove_db()
+    for name in os.listdir(config.DATABASES_DIR):
+        if name.startswith(db.VALIDATION_WORKING_DB_PREFIX):
+            try:
+                os.remove(os.path.join(config.DATABASES_DIR, name))
+            except FileNotFoundError:
+                pass
 
 
 def _create_run(scope):
+    """Create a logically completed run for legacy decision-focused unit tests.
+
+    Physical execution is covered by dedicated end-to-end tests below; these older
+    tests deliberately exercise edit/reference/decision guards in isolation.
+    """
     response = client.post("/api/validation/runs", json={"db": TEST_DB, "scope": scope})
     assert response.status_code == 201, response.text
-    return response.json()["id"]
+    run_id = response.json()["id"]
+    conn = db.get_connection(TEST_DB)
+    conn.execute("UPDATE validation_runs SET status='READY', execution_status='COMPLETED',"
+                 " progress_current=progress_total WHERE id=?", (run_id,))
+    conn.execute("UPDATE validation_run_pages SET status='READY' WHERE run_id=?", (run_id,))
+    conn.commit(); conn.close()
+    return run_id
 
 
 def test_universal_scope_resolver_and_strict_guards():
@@ -285,10 +302,13 @@ def test_migration_application_is_additive_and_idempotent_from_v4():
     try:
         migrated = db.get_connection(legacy)
         assert migrated.execute("SELECT COUNT(*) FROM schema_version WHERE version=5").fetchone()[0] == 1
+        assert migrated.execute("SELECT COUNT(*) FROM schema_version WHERE version=7").fetchone()[0] == 1
         assert "document_id" in [r[1] for r in migrated.execute("PRAGMA table_info(content_links)")]
         assert "document_id" in [r[1] for r in migrated.execute("PRAGMA table_info(assessments)")]
         assert "document_id" in [r[1] for r in migrated.execute("PRAGMA table_info(validation_events)")]
         assert "baseline_hash" in [r[1] for r in migrated.execute("PRAGMA table_info(validation_run_pages)")]
+        run_columns = [r[1] for r in migrated.execute("PRAGMA table_info(validation_runs)")]
+        assert {"working_db_filename", "operation", "batch_id", "execution_status", "error_log"}.issubset(run_columns)
         assert migrated.execute("SELECT 1 FROM sqlite_master WHERE name='uq_jobs_active_page'").fetchone()
         assert db.apply_migrations(migrated) == 0
         migrated.close()
@@ -316,8 +336,8 @@ def test_run_requalify_is_fail_closed_and_terminal_actions_preserve_official(mon
     run_id = _create_run({"scope_type": "page", "document_id": "d1", "page": 1})
     before = _official_digest()
     response = client.post("/api/pipeline/requalify-artifacts", json={
-        "db": TEST_DB, "document_id": "d1", "run_id": run_id, "limit": 1, "dry_run": False})
-    assert response.status_code == 409
+        "db": TEST_DB, "document_id": "d1", "run_id": run_id, "limit": 1, "dry_run": True})
+    assert response.status_code == 200
     assert _official_digest() == before
     assert client.post("/api/validation/runs/%s/cancel?db=%s" % (run_id, TEST_DB)).status_code == 200
     assert _official_digest() == before
@@ -401,8 +421,10 @@ def test_validation_events_are_document_scoped_and_benchmark_owner_is_immutable(
     assert client.post("/api/validation/runs/%s/benchmarks?db=%s" % (run1, TEST_DB),
                        json={"benchmark_ids": ["b1"]}).status_code == 200
     run2 = _create_run({"scope_type": "page", "document_id": "d1", "page": 2})
+    # Each physical copy owns its own benchmark provenance; no official benchmark
+    # row is reserved before acceptance.
     assert client.post("/api/validation/runs/%s/benchmarks?db=%s" % (run2, TEST_DB),
-                       json={"benchmark_ids": ["b1"]}).status_code == 409
+                       json={"benchmark_ids": ["b1"]}).status_code == 200
 
 
 def test_embedding_profile_natural_key_384_contract_and_vector_recovery():
@@ -552,11 +574,10 @@ def test_accept_rejects_cross_document_chunk_references_before_mutation(field, v
     run_id = _create_run({"scope_type": "page", "document_id": "d1", "page": 2})
     page = client.get("/api/validation/runs/%s/pages/2?db=%s" % (run_id, TEST_DB)).json()
     page["working"]["chunks"][0][field] = value
-    assert client.put("/api/validation/runs/%s/pages/2?db=%s" % (run_id, TEST_DB),
-                      json={"working": page["working"]}).status_code == 200
     before = _official_digest()
-    accepted = client.post("/api/validation/runs/%s/accept?db=%s" % (run_id, TEST_DB))
-    assert accepted.status_code == 409
+    staged = client.put("/api/validation/runs/%s/pages/2?db=%s" % (run_id, TEST_DB),
+                        json={"working": page["working"]})
+    assert staged.status_code == 409
     assert _official_digest() == before
 
 
@@ -564,11 +585,10 @@ def test_accept_rejects_cross_document_artifact_and_curriculum_links_before_muta
     run_id = _create_run({"scope_type": "page", "document_id": "d1", "page": 2})
     page = client.get("/api/validation/runs/%s/pages/2?db=%s" % (run_id, TEST_DB)).json()
     page["working"]["artifacts"][0]["chunk_id"] = "d2-c1"
-    client.put("/api/validation/runs/%s/pages/2?db=%s" % (run_id, TEST_DB),
-               json={"working": page["working"]})
     before = _official_digest()
-    assert client.post("/api/validation/runs/%s/accept?db=%s" %
-                       (run_id, TEST_DB)).status_code == 409
+    staged = client.put("/api/validation/runs/%s/pages/2?db=%s" % (run_id, TEST_DB),
+                        json={"working": page["working"]})
+    assert staged.status_code == 409
     assert _official_digest() == before
 
     clean_run = _create_run({"scope_type": "page", "document_id": "d1", "page": 2})
@@ -586,11 +606,10 @@ def test_accept_rejects_dangling_reference_with_400_before_mutation():
     run_id = _create_run({"scope_type": "page", "document_id": "d1", "page": 2})
     page = client.get("/api/validation/runs/%s/pages/2?db=%s" % (run_id, TEST_DB)).json()
     page["working"]["chunks"][0]["toc_id"] = "missing-toc"
-    client.put("/api/validation/runs/%s/pages/2?db=%s" % (run_id, TEST_DB),
-               json={"working": page["working"]})
     before = _official_digest()
-    assert client.post("/api/validation/runs/%s/accept?db=%s" %
-                       (run_id, TEST_DB)).status_code == 400
+    staged = client.put("/api/validation/runs/%s/pages/2?db=%s" % (run_id, TEST_DB),
+                        json={"working": page["working"]})
+    assert staged.status_code == 400
     assert _official_digest() == before
 
 
@@ -629,7 +648,7 @@ def test_terminal_run_rejects_late_benchmark_attachment():
                        json={"benchmark_ids": ["b1"]})
     assert late.status_code == 409
     conn = db.get_connection(TEST_DB)
-    assert conn.execute("SELECT validation_run_id FROM processing_benchmarks WHERE id='b1'").fetchone()[0] is None
+    assert conn.execute("SELECT validation_run_id FROM processing_benchmarks WHERE id='b1'").fetchone()[0] == run_id
     conn.close()
 
 

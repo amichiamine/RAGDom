@@ -366,11 +366,23 @@ CREATE TABLE IF NOT EXISTS validation_runs (
     status TEXT NOT NULL DEFAULT 'DRAFT' CHECK(status IN ('DRAFT','RUNNING','READY','ACCEPTED','REJECTED','CANCELLED','FAILED')),
     label TEXT,
     embedding_profile_id TEXT,
+    working_db_filename TEXT,
+    operation TEXT NOT NULL DEFAULT 'REPROCESS',
+    batch_id TEXT,
+    batch_ids_json TEXT NOT NULL DEFAULT '[]',
+    execution_status TEXT NOT NULL DEFAULT 'CREATED' CHECK(execution_status IN ('CREATED','QUEUED','RUNNING','COMPLETED','BLOCKED','FAILED','CANCELLED')),
+    progress_current INTEGER NOT NULL DEFAULT 0,
+    progress_total INTEGER NOT NULL DEFAULT 0,
+    error_log TEXT,
+    started_at DATETIME,
+    completed_at DATETIME,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     accepted_at DATETIME,
     rejected_at DATETIME
 );
+CREATE INDEX IF NOT EXISTS idx_validation_runs_execution_status ON validation_runs(execution_status, updated_at);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_validation_runs_working_db ON validation_runs(working_db_filename) WHERE working_db_filename IS NOT NULL;
 CREATE TABLE IF NOT EXISTS validation_run_pages (
     id TEXT PRIMARY KEY,
     run_id TEXT NOT NULL REFERENCES validation_runs(id) ON DELETE CASCADE,

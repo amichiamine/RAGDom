@@ -473,7 +473,11 @@
     "readonly": "Lecture seule — mutations désactivées",
     "status": {
       "DRAFT": "Brouillon",
+      "CREATED": "Copie créée",
+      "QUEUED": "En file",
       "RUNNING": "En cours",
+      "COMPLETED": "Terminé",
+      "BLOCKED": "Bloqué",
       "PENDING": "En attente",
       "PROCESSING": "Traitement",
       "READY": "Prêt",
@@ -535,7 +539,11 @@
       "progress": "Progression de la validation",
       "cancelled": "Annulation demandée.",
       "direct": "Écriture directe",
-      "pages": "Pages du run"
+      "pages": "Pages du run",
+      "copy_available": "copie isolée disponible",
+      "copy_removed": "copie isolée supprimée",
+      "source_missing": "Le PDF source officiel est absent. La base officielle n’a pas été modifiée.",
+      "execution_failed": "L’exécution réelle du pipeline a échoué"
     },
     "inspection": {
       "title": "Inspection unifiée",
