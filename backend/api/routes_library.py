@@ -295,18 +295,21 @@ def _curriculum_aggregates(conn) -> dict:
 def curriculum(db_name: str = Query(alias="db")):
     conn = _conn(db_name)
     try:
-        terms = [{"id": r[0], "term_index": r[1], "label": r[2]} for r in
-                 conn.execute("SELECT id, term_index, label FROM curriculum_terms ORDER BY term_index")]
-        programs = [{"id": r[0], "term_id": r[1], "seq_index": r[2], "title": r[3], "source": r[4],
-                     "competencies_json": r[5]} for r in conn.execute(
-                    "SELECT id, term_id, seq_index, title, source, competencies_json"
-                    " FROM curriculum_programs ORDER BY seq_index")]
+        terms = [{"id": r[0], "document_id": r[1], "term_index": r[2], "label": r[3]} for r in
+                 conn.execute("SELECT id, document_id, term_index, label FROM curriculum_terms"
+                              " ORDER BY document_id, term_index")]
+        programs = [{"id": r[0], "document_id": r[1], "term_id": r[2], "seq_index": r[3],
+                     "title": r[4], "source": r[5], "competencies_json": r[6]} for r in conn.execute(
+                    "SELECT id, document_id, term_id, seq_index, title, source, competencies_json"
+                    " FROM curriculum_programs ORDER BY document_id, seq_index")]
         assessments = [{"id": r[0], "document_id": r[1], "term_id": r[2], "kind": r[3], "title": r[4],
                         "subject_chunk_id": r[5], "correction_chunk_id": r[6], "scale_json": r[7]}
                        for r in conn.execute("SELECT id, document_id, term_id, kind, title,"
                                              " subject_chunk_id, correction_chunk_id, scale_json FROM assessments")]
-        links = [{"id": r[0], "link_type": r[1], "from_id": r[2], "to_id": r[3], "page_number": r[4]}
-                 for r in conn.execute("SELECT id, link_type, from_id, to_id, page_number FROM content_links")]
+        links = [{"id": r[0], "document_id": r[1], "link_type": r[2], "from_id": r[3],
+                  "to_id": r[4], "page_number": r[5]}
+                 for r in conn.execute("SELECT id, document_id, link_type, from_id, to_id, page_number"
+                                       " FROM content_links")]
         return {"curriculum_available": bool(terms or programs or assessments),
                 "terms": terms, "programs": programs, "assessments": assessments, "links": links,
                 "aggregates": _curriculum_aggregates(conn)}
@@ -353,10 +356,14 @@ def update_chunk(chunk_id: str, patch: ChunkPatch, db_name: str = Query(alias="d
     """Correction humaine (tech_specs §4.5) : re-lint → re-embed → update → FTS/vec par triggers."""
     conn = _conn(db_name)
     try:
-        row = conn.execute("SELECT content_markdown FROM document_chunks WHERE id=?", (chunk_id,)).fetchone()
+        row = conn.execute("SELECT content_markdown, document_id FROM document_chunks WHERE id=?",
+                           (chunk_id,)).fetchone()
         if row is None:
             raise HTTPException(404, "Chunk introuvable")
         new_md = patch.content_markdown if patch.content_markdown is not None else row[0]
+        profile = conn.execute("SELECT p.model_name, p.dimensions FROM document_embedding_profiles d"
+                               " JOIN embedding_profiles p ON p.id=d.profile_id WHERE d.document_id=?",
+                               (row[1],)).fetchone()
         lint = {"is_valid": True, "errors": []}
         embedding = None
         try:  # linter + embedder du moteur actif (jamais bloquants : l'humain a le dernier mot)
@@ -367,7 +374,8 @@ def update_chunk(chunk_id: str, patch: ChunkPatch, db_name: str = Query(alias="d
             lint = {"is_valid": ctx["lint"]["is_valid"], "errors": ctx["lint"]["errors"]}
             layer3 = engine_registry.load_layer(active["id"], "layer_3_qualify")
             embedder = layer3._get_embedder()  # noqa: SLF001 — singleton du moteur réutilisé sciemment
-            if embedder is not None:
+            active_model = getattr(layer3, "_embedder", {}).get("name")
+            if embedder is not None and profile and profile[0] == active_model and profile[1] == 384:
                 vector = next(iter(embedder.embed(["passage: " + new_md[:2000]])))
                 embedding = struct.pack("<384f", *vector[:384])
         except Exception:  # noqa: BLE001
@@ -384,7 +392,9 @@ def update_chunk(chunk_id: str, patch: ChunkPatch, db_name: str = Query(alias="d
             conn.execute("DELETE FROM vec_chunks WHERE chunk_id=?", (chunk_id,))
             conn.execute("INSERT INTO vec_chunks (chunk_id, embedding) VALUES (?,?)", (chunk_id, embedding))
         conn.commit()
-        return {"updated": True, "lint": lint, "is_human_edited": 1}
+        return {"updated": True, "lint": lint, "is_human_edited": 1,
+                "embedding_updated": embedding is not None,
+                "embedding_warning": None if embedding is not None else "profil absent ou incompatible ; vecteur conservé"}
     finally:
         conn.close()
 

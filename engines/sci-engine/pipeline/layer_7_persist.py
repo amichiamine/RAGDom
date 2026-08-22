@@ -8,6 +8,7 @@ artefacts, TOC (page 1), benchmark. Purge mémoire agressive (Skills §2.1) et
 checkpoint /pipeline-set/ supprimé. Python 3.9+.
 """
 import glob
+import json
 import os
 import sys
 import time
@@ -84,6 +85,23 @@ def run(ctx: dict) -> dict:
                  chunk["content_markdown"], chunk["pedagogical_type"], chunk["pedagogical_index"],
                  chunk["embedding_vector"], chunk["token_count"]),
             )
+
+        # ── Métadonnées d'embedding : profil explicite, jamais de bascule silencieuse ──
+        profile = ctx.get("embedding_profile")
+        if profile:
+            profile_id = str(uuid.uuid5(uuid.NAMESPACE_URL, "ragdom-embedding:" +
+                                   json.dumps(profile, sort_keys=True)))
+            conn.execute("INSERT OR IGNORE INTO embedding_profiles"
+                         " (id, model_name, model_version, pooling, dimensions, normalized, metadata_json)"
+                         " VALUES (?,?,?,?,?,?, '{}')",
+                         (profile_id, profile["model_name"], profile["model_version"], profile["pooling"],
+                          profile["dimensions"], int(profile["normalized"])))
+            current = conn.execute("SELECT profile_id FROM document_embedding_profiles"
+                                   " WHERE document_id=?", (doc_id,)).fetchone()
+            if current and current[0] != profile_id:
+                raise RuntimeError("Profil d'embedding modifié : réindexation explicite requise")
+            conn.execute("INSERT OR IGNORE INTO document_embedding_profiles"
+                         " (document_id, profile_id) VALUES (?,?)", (doc_id, profile_id))
 
         # ── Artefacts (rattachés au premier chunk de la page si présent) ──
         anchor_chunk = chunk_ids.get(0)

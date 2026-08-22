@@ -135,6 +135,7 @@ CREATE TABLE IF NOT EXISTS scientific_artifacts (
     searchable_text    TEXT NOT NULL,         -- Texte indexable FTS5 (caption + raw_data simplifié)
     bounding_box_json  TEXT,                  -- {"x0":120,"y0":340,"x1":280,"y1":370} coordonnées 300 DPI
     is_human_edited    INTEGER DEFAULT 0,     -- V3.2 : corrigé/importé manuellement — protégé des purges et ré-ingestions
+    validation_run_id  TEXT REFERENCES validation_runs(id) ON DELETE SET NULL,
     updated_at         DATETIME,              -- V3.5 : dernière correction/import manuel
     created_at         DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (document_id) REFERENCES documents(id)        ON DELETE CASCADE,
@@ -184,6 +185,7 @@ CREATE TABLE IF NOT EXISTS processing_benchmarks (
     confidence_score    REAL,                   -- Score de confiance global (0.0 à 1.0)
     blur_score          REAL,                   -- Variance du Laplacien (qualité image)
     deskew_angle        REAL,                   -- Angle de correction appliqué en degrés
+    validation_run_id   TEXT REFERENCES validation_runs(id) ON DELETE SET NULL,
     created_at          DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE CASCADE
 );
@@ -306,6 +308,7 @@ END;
 -- ============================================================
 CREATE TABLE IF NOT EXISTS curriculum_terms (
     id            TEXT PRIMARY KEY,
+    document_id   TEXT REFERENCES documents(id) ON DELETE CASCADE,
     term_index    INTEGER NOT NULL,        -- 1, 2, 3
     label         TEXT NOT NULL,           -- ex: 'الفصل الأول'
     metadata_json TEXT
@@ -313,6 +316,7 @@ CREATE TABLE IF NOT EXISTS curriculum_terms (
 
 CREATE TABLE IF NOT EXISTS curriculum_programs (
     id                TEXT PRIMARY KEY,
+    document_id       TEXT REFERENCES documents(id) ON DELETE CASCADE,
     term_id           TEXT REFERENCES curriculum_terms(id) ON DELETE SET NULL,
     seq_index         INTEGER,             -- numéro de مقطع / séquence
     title             TEXT NOT NULL,
@@ -333,6 +337,7 @@ CREATE TABLE IF NOT EXISTS assessments (
 
 CREATE TABLE IF NOT EXISTS content_links (
     id            TEXT PRIMARY KEY,
+    document_id   TEXT REFERENCES documents(id) ON DELETE CASCADE,
     link_type     TEXT CHECK(link_type IN ('course_exercise','course_program','course_scan','exercise_scan','assessment_scan','program_term')) NOT NULL,
     from_id       TEXT NOT NULL,           -- id source (chunk/toc/program/assessment)
     to_id         TEXT NOT NULL,           -- id cible
@@ -342,6 +347,76 @@ CREATE TABLE IF NOT EXISTS content_links (
 CREATE INDEX IF NOT EXISTS idx_links_type ON content_links(link_type);
 CREATE INDEX IF NOT EXISTS idx_links_from ON content_links(from_id);
 CREATE INDEX IF NOT EXISTS idx_links_to   ON content_links(to_id);
+CREATE INDEX IF NOT EXISTS idx_curriculum_terms_document ON curriculum_terms(document_id);
+CREATE INDEX IF NOT EXISTS idx_curriculum_programs_document ON curriculum_programs(document_id);
+CREATE INDEX IF NOT EXISTS idx_content_links_document ON content_links(document_id);
+
+-- ============================================================
+-- STUDIO DE VALIDATION LIVE (V5 — copies de travail isolées)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS validation_runs (
+    id TEXT PRIMARY KEY,
+    document_id TEXT REFERENCES documents(id) ON DELETE CASCADE,
+    scope_type TEXT NOT NULL CHECK(scope_type IN ('base','document','toc','chapter','course','title','page','page_range','page_selection')),
+    scope_json TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'DRAFT' CHECK(status IN ('DRAFT','RUNNING','READY','ACCEPTED','REJECTED','CANCELLED','FAILED')),
+    label TEXT,
+    embedding_profile_id TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    accepted_at DATETIME,
+    rejected_at DATETIME
+);
+CREATE TABLE IF NOT EXISTS validation_run_pages (
+    id TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL REFERENCES validation_runs(id) ON DELETE CASCADE,
+    document_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+    page_number INTEGER NOT NULL,
+    status TEXT NOT NULL DEFAULT 'PENDING' CHECK(status IN ('PENDING','PROCESSING','READY','ACCEPTED','REJECTED','CANCELLED','FAILED')),
+    baseline_json TEXT NOT NULL,
+    working_json TEXT NOT NULL,
+    error_log TEXT,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(run_id, document_id, page_number)
+);
+CREATE TABLE IF NOT EXISTS validation_events (
+    id TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL REFERENCES validation_runs(id) ON DELETE CASCADE,
+    page_number INTEGER,
+    event_type TEXT NOT NULL,
+    payload_json TEXT NOT NULL DEFAULT '{}',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS validation_snapshots (
+    id TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL REFERENCES validation_runs(id) ON DELETE CASCADE,
+    snapshot_type TEXT NOT NULL CHECK(snapshot_type IN ('logical','physical')),
+    payload_json TEXT NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS embedding_profiles (
+    id TEXT PRIMARY KEY,
+    model_name TEXT NOT NULL,
+    model_version TEXT NOT NULL,
+    pooling TEXT NOT NULL,
+    dimensions INTEGER NOT NULL CHECK(dimensions > 0),
+    normalized INTEGER NOT NULL CHECK(normalized IN (0,1)),
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(model_name, model_version, pooling, dimensions, normalized)
+);
+CREATE TABLE IF NOT EXISTS document_embedding_profiles (
+    document_id TEXT PRIMARY KEY REFERENCES documents(id) ON DELETE CASCADE,
+    profile_id TEXT NOT NULL REFERENCES embedding_profiles(id) ON DELETE RESTRICT,
+    indexed_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_validation_runs_document ON validation_runs(document_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_validation_runs_status ON validation_runs(status);
+CREATE INDEX IF NOT EXISTS idx_validation_pages_run ON validation_run_pages(run_id, page_number);
+CREATE INDEX IF NOT EXISTS idx_validation_events_run ON validation_events(run_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_validation_snapshots_run ON validation_snapshots(run_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_bench_validation_run ON processing_benchmarks(validation_run_id);
+CREATE INDEX IF NOT EXISTS idx_artifacts_validation_run ON scientific_artifacts(validation_run_id);
 
 -- ============================================================
 -- TABLE 9 : Versioning du Schéma (Migration)
@@ -353,7 +428,7 @@ CREATE TABLE IF NOT EXISTS schema_version (
 );
 -- Insertion de la version initiale (à exécuter une seule fois à la création)
 INSERT OR IGNORE INTO schema_version (version, description)
-VALUES (4, 'Schema RAGDom V3.5 — page_scans (Base Autonome) + pedagogical_index + updated_at');
+VALUES (5, 'Schema RAGDom V5 — Studio de validation live, embeddings et curriculum multi-document');
 -- Historique migrations : migration_003_v32.sql (is_human_edited ×2),
 -- migration_004_v35.sql (CREATE page_scans ; ALTER document_chunks ADD pedagogical_index, updated_at ;
 --                        ALTER scientific_artifacts ADD updated_at ; backfill des scans par ré-ingestion Couche 0+7 seule).

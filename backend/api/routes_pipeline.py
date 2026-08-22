@@ -10,14 +10,15 @@ import re
 import threading
 import time
 import uuid
-from typing import List, Optional
+from typing import List, Literal, Optional
 
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 
 import config
 from core.orchestrator import orchestrator
+from core.validation_scope import ScopeResolutionError, resolve_scope
 from db import connection as db
 
 router = APIRouter()
@@ -57,7 +58,11 @@ def extract_document_metadata(source_path: str, sources_dir: str) -> dict:
     }
 
 
-class StartBody(BaseModel):
+class StrictBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class StartBody(StrictBody):
     source_path: str
     target_db: Optional[str] = None
     mode: str = "document"  # document | chapter | page_range | folder
@@ -143,7 +148,8 @@ def resume_pending_queues() -> list:
             conn = db.get_connection(filename)
             try:
                 row = conn.execute("SELECT COUNT(*) FROM pipeline_jobs"
-                                   " WHERE status IN ('QUEUED','RUNNING')").fetchone()
+                                   " WHERE status IN ('QUEUED','PROCESSING_CV','SEGMENTING','EXTRACTING',"
+                                   " 'LINTING','VLM_RECOVERY','INDEXED')").fetchone()
             finally:
                 conn.close()
             if row and row[0] > 0:
@@ -252,16 +258,20 @@ def stop():
 def cancel_batch(batch_id: str, db_name: str = Query(alias="db")):
     conn = db.get_connection_or_http(db_name)
     try:
+        batch = conn.execute("SELECT status FROM ingestion_batches WHERE id=?", (batch_id,)).fetchone()
+        if batch is None:
+            raise HTTPException(404, "Batch introuvable")
         cur = conn.execute("DELETE FROM pipeline_jobs WHERE batch_id=? AND status='QUEUED'", (batch_id,))
-        conn.execute("UPDATE ingestion_batches SET status='STOPPED', updated_at=CURRENT_TIMESTAMP"
-                     " WHERE id=? AND status IN ('QUEUED','RUNNING')", (batch_id,))
+        changed = conn.execute("UPDATE ingestion_batches SET status='STOPPED', updated_at=CURRENT_TIMESTAMP"
+                               " WHERE id=? AND status IN ('QUEUED','RUNNING')", (batch_id,)).rowcount
         conn.commit()
-        return {"cancelled": True, "removed_jobs": cur.rowcount}
+        return {"cancelled": bool(changed or cur.rowcount), "batch_id": batch_id,
+                "removed_jobs": cur.rowcount, "current_page_finishes_safely": True}
     finally:
         conn.close()
 
 
-class ReprocessBody(BaseModel):
+class ReprocessBody(StrictBody):
     """Ré-exécution SCOPÉE : purge du périmètre puis ré-ingestion du même périmètre.
 
     Scopes : document | page_range | chapter. La purge préserve les éditions
@@ -269,162 +279,194 @@ class ReprocessBody(BaseModel):
     sur le périmètre (l'unité d'exécution du pipeline est la page — D4-A).
     """
     db: str
-    scope: str  # document | page_range | chapter
-    document_id: str
+    scope: Literal["base", "document", "toc", "chapter", "course", "title", "page",
+                   "page_range", "page_selection"]
+    document_id: Optional[str] = None
+    page: Optional[int] = None
     page_start: Optional[int] = None
     page_end: Optional[int] = None
+    pages: Optional[List[int]] = Field(default=None, max_length=1000)
     toc_id: Optional[str] = None
     preserve_human_edits: bool = True
 
 
 @router.post("/reprocess", status_code=202)
 def reprocess(body: ReprocessBody):
-    if body.scope not in ("document", "page_range", "chapter"):
-        raise HTTPException(400, "scope invalide (document | page_range | chapter)")
+    """Valide tout le périmètre, puis purge et enfile chaque document isolément."""
     conn = db.get_connection_or_http(body.db)
     try:
-        row = conn.execute("SELECT source_path, total_pages FROM documents WHERE id=?",
-                           (body.document_id,)).fetchone()
-        if row is None:
-            raise HTTPException(404, "Document introuvable")
-        source_path, total_pages = row
-        toc_row = None
-        if body.scope == "chapter":
-            if not body.toc_id:
-                raise HTTPException(400, "toc_id requis pour le scope chapter")
-            toc_row = conn.execute("SELECT page_start, page_end FROM document_toc WHERE id=?",
-                                   (body.toc_id,)).fetchone()
-            if toc_row is None:
-                raise HTTPException(404, "Chapitre introuvable")
+        try:
+            targets = resolve_scope(conn, body.scope, body.document_id, body.toc_id,
+                                    body.page, body.page_start, body.page_end, body.pages)
+        except ScopeResolutionError as exc:
+            raise HTTPException(exc.status_code, str(exc))
+        sources = {}
+        for target in targets:
+            row = conn.execute("SELECT source_path FROM documents WHERE id=?",
+                               (target.document_id,)).fetchone()
+            if row is None:
+                raise HTTPException(404, "Document introuvable")
+            if not os.path.exists(row[0]):
+                raise HTTPException(409, "PDF source absent de /sources/ — ré-exécution impossible")
+            sources[target.document_id] = row[0]
     finally:
         conn.close()
-    if not os.path.exists(source_path):
-        raise HTTPException(409, "PDF source absent de /sources/ — ré-exécution impossible")
 
-    # 1) Purge du périmètre (réutilise la purge scopée réelle — jamais de duplication)
-    purge_scope = {"document": "document", "page_range": "page_range", "chapter": "chapter"}[body.scope]
-    purge_result = purge(PurgeBody(db=body.db, scope=purge_scope, document_id=body.document_id,
-                                   page_start=body.page_start, page_end=body.page_end,
-                                   toc_id=body.toc_id, dry_run=False,
+    # Aucune mutation avant que TOUS les documents, TOC et bornes soient validés.
+    purge_result = purge(PurgeBody(db=body.db, scope=body.scope,
+                                   document_id=body.document_id, toc_id=body.toc_id,
+                                   page=body.page, page_start=body.page_start,
+                                   page_end=body.page_end, pages=body.pages, dry_run=False,
                                    preserve_human_edits=body.preserve_human_edits,
-                                   confirm=None))
-    # 2) Ré-ingestion du même périmètre
-    if body.scope == "document":
-        page_start, page_end = 1, total_pages
-    elif body.scope == "chapter":
-        page_start, page_end = toc_row[0], toc_row[1] or total_pages
-    else:
-        if not body.page_start:
-            raise HTTPException(400, "page_start requis pour le scope page_range")
-        page_start = body.page_start
-        page_end = min(body.page_end or body.page_start, total_pages)
-    batch = orchestrator.enqueue_batch(body.db, body.document_id, source_path,
-                                       body.scope, page_start, page_end)
+                                   confirm=body.db if body.scope == "base" else None))
+    batches = []
+    for target in targets:
+        # Le pipeline historique accepte une plage continue. Une sélection discontinue
+        # est découpée en lots contigus, sans englober les pages intermédiaires.
+        groups = []
+        for selected in target.pages:
+            if not groups or selected != groups[-1][-1] + 1:
+                groups.append([selected])
+            else:
+                groups[-1].append(selected)
+        for group in groups:
+            batch = orchestrator.enqueue_batch(body.db, target.document_id,
+                                               sources[target.document_id], body.scope,
+                                               group[0], group[-1])
+            batches.append(batch)
     _launch(body.db)
     return {"reprocessed_scope": body.scope, "purged": purge_result.get("deleted"),
-            "batch_id": batch["batch_id"], "pages_total": batch["pages_total"],
-            "page_start": page_start, "page_end": page_end, "status": "QUEUED"}
+            "batch_id": batches[0]["batch_id"] if batches else None,
+            "batch_ids": [b["batch_id"] for b in batches],
+            "pages_total": sum(b["pages_total"] for b in batches),
+            "page_start": targets[0].page_start if len(targets) == 1 else None,
+            "page_end": targets[0].page_end if len(targets) == 1 else None,
+            "targets": [{"document_id": t.document_id, "pages": list(t.pages)} for t in targets],
+            "status": "QUEUED"}
 
 
-class PurgeBody(BaseModel):
+class PurgeBody(StrictBody):
     db: str
-    scope: str  # page | page_range | chapter | document | database | artifacts_only | curriculum_only
+    scope: str
     document_id: Optional[str] = None
+    toc_id: Optional[str] = None
+    page: Optional[int] = None
     page_start: Optional[int] = None
     page_end: Optional[int] = None
-    toc_id: Optional[str] = None
+    pages: Optional[List[int]] = Field(default=None, max_length=1000)
     dry_run: bool = True
     preserve_human_edits: bool = True
     confirm: Optional[str] = None
 
 
+def _target_where(target):
+    pages = list(target.pages)
+    if pages == list(range(pages[0], pages[-1] + 1)):
+        return "document_id=? AND page_number BETWEEN ? AND ?", [target.document_id, pages[0], pages[-1]]
+    return "document_id=? AND page_number IN (%s)" % ",".join("?" for _ in pages), [target.document_id] + pages
+
+
 @router.post("/purge")
 def purge(body: PurgeBody):
-    """Purge Scopée 7 niveaux (§7.6/tech_specs §4.5) — dry_run = prévisualisation exacte."""
-    if body.scope == "database" and body.confirm != body.db:
-        raise HTTPException(400, "scope=database exige confirm = nom exact de la base (garde-fou)")
-    if body.scope in ("page", "page_range", "chapter", "document", "artifacts_only") and not body.document_id \
-            and body.scope != "artifacts_only":
-        raise HTTPException(400, "document_id requis pour ce scope")
+    """Purge atomique : tous les scopes sont résolus avant la première écriture."""
+    whole_base = body.scope in ("database", "base")
+    if whole_base and body.confirm != body.db:
+        raise HTTPException(400, "La purge complète exige confirm = nom exact de la base")
     conn = db.get_connection_or_http(body.db)
     try:
-        # Périmètre de pages
-        page_clause, args = "", []
-        if body.scope == "page":
-            page_clause, args = " AND page_number=?", [body.page_start or 0]
-        elif body.scope == "page_range":
-            page_clause, args = " AND page_number BETWEEN ? AND ?", [body.page_start, body.page_end]
-        elif body.scope == "chapter":
-            row = conn.execute("SELECT page_start, page_end FROM document_toc WHERE id=?",
-                               (body.toc_id,)).fetchone()
-            if row is None:
-                raise HTTPException(404, "Entrée TOC introuvable")
-            page_clause, args = " AND page_number BETWEEN ? AND ?", [row[0], row[1] or 10 ** 6]
-        doc_clause = "" if body.scope in ("database", "curriculum_only") else " AND document_id=?"
-        doc_args = [] if not doc_clause else [body.document_id]
-        human = " AND is_human_edited=0" if (body.preserve_human_edits and body.scope != "database") else ""
+        special = body.scope in ("database", "curriculum_only", "artifacts_only")
+        targets = []
+        if not special or (body.scope == "artifacts_only" and body.document_id):
+            scope = "document" if body.scope == "artifacts_only" else body.scope
+            try:
+                targets = resolve_scope(conn, scope, body.document_id, body.toc_id, body.page,
+                                        body.page_start, body.page_end, body.pages)
+            except ScopeResolutionError as exc:
+                raise HTTPException(exc.status_code, str(exc))
+        elif body.scope == "database":
+            rows = conn.execute("SELECT id, total_pages FROM documents ORDER BY id").fetchall()
+            targets = [type("Target", (), {"document_id": r[0], "pages": tuple(range(1, r[1] + 1))})
+                       for r in rows if r[1]]
 
-        def count(table, extra=""):
+        human = " AND is_human_edited=0" if body.preserve_human_edits and not whole_base else ""
+
+        def scoped_count(table, human_clause=""):
             if body.scope == "curriculum_only":
                 return 0
-            if body.scope == "database":
-                return conn.execute("SELECT COUNT(*) FROM %s" % table).fetchone()[0]
-            return conn.execute("SELECT COUNT(*) FROM %s WHERE 1=1%s%s%s" % (table, doc_clause, page_clause, extra),
-                                doc_args + args).fetchone()[0]
+            if body.scope == "artifacts_only" and not body.document_id:
+                return conn.execute("SELECT COUNT(*) FROM scientific_artifacts" + human_clause).fetchone()[0]
+            total = 0
+            for target in targets:
+                where, args = _target_where(target)
+                total += conn.execute("SELECT COUNT(*) FROM %s WHERE %s%s" %
+                                      (table, where, human_clause), args).fetchone()[0]
+            return total
 
+        toc_entries = 0
+        if whole_base:
+            toc_entries = conn.execute("SELECT COUNT(*) FROM document_toc").fetchone()[0]
+        elif body.scope == "document" and targets:
+            toc_entries = conn.execute("SELECT COUNT(*) FROM document_toc WHERE document_id=?",
+                                       (targets[0].document_id,)).fetchone()[0]
         deleted = {
-            "chunks": count("document_chunks", human),
-            "artifacts": count("scientific_artifacts", human),
-            "toc_entries": (conn.execute("SELECT COUNT(*) FROM document_toc WHERE document_id=?",
-                                         [body.document_id]).fetchone()[0]
-                            if body.scope == "document" else
-                            conn.execute("SELECT COUNT(*) FROM document_toc").fetchone()[0]
-                            if body.scope == "database" else 0),
-            "jobs": count("pipeline_jobs") if body.scope != "artifacts_only" else 0,
+            "chunks": 0 if body.scope in ("curriculum_only", "artifacts_only") else scoped_count("document_chunks", human),
+            "artifacts": 0 if body.scope == "curriculum_only" else scoped_count("scientific_artifacts", human),
+            "toc_entries": toc_entries,
+            "jobs": 0 if body.scope in ("curriculum_only", "artifacts_only") else scoped_count("pipeline_jobs"),
             "curriculum_links": (conn.execute("SELECT COUNT(*) FROM content_links").fetchone()[0]
-                                 if body.scope in ("database", "curriculum_only") else 0),
-            "page_scans": count("page_scans") if body.scope not in ("artifacts_only", "curriculum_only") else 0,
+                                 if body.scope in ("database", "base", "curriculum_only") else 0),
+            "page_scans": 0 if body.scope in ("curriculum_only", "artifacts_only") else scoped_count("page_scans"),
         }
         preserved = 0
         if human:
-            preserved = (conn.execute(
-                "SELECT (SELECT COUNT(*) FROM document_chunks WHERE 1=1%s%s AND is_human_edited=1)"
-                " + (SELECT COUNT(*) FROM scientific_artifacts WHERE 1=1%s%s AND is_human_edited=1)"
-                % (doc_clause, page_clause, doc_clause, page_clause), (doc_args + args) * 2).fetchone()[0])
-        if body.scope == "artifacts_only":
-            deleted["chunks"] = deleted["jobs"] = deleted["page_scans"] = 0
-
+            preserved = scoped_count("document_chunks", " AND is_human_edited=1")
+            preserved += scoped_count("scientific_artifacts", " AND is_human_edited=1")
         if body.dry_run:
             return {"dry_run": True, "deleted": deleted, "preserved_human_edited": preserved,
                     "message": "Prévisualisation — aucune donnée modifiée."}
+
+        impacted_batches = set()
+        for target in targets:
+            where, args = _target_where(target)
+            impacted_batches.update(r[0] for r in conn.execute(
+                "SELECT DISTINCT batch_id FROM pipeline_jobs WHERE %s AND batch_id IS NOT NULL" % where,
+                args).fetchall())
 
         conn.execute("BEGIN")
         if body.scope == "curriculum_only":
             for table in ("content_links", "assessments", "curriculum_programs", "curriculum_terms"):
                 conn.execute("DELETE FROM %s" % table)
-        elif body.scope == "database":
+        elif whole_base:
             for table in ("content_links", "assessments", "curriculum_programs", "curriculum_terms",
                           "scientific_artifacts", "document_chunks", "page_scans", "document_toc",
                           "processing_benchmarks", "pipeline_jobs", "ingestion_batches", "documents"):
                 conn.execute("DELETE FROM %s" % table)
-        elif body.scope == "artifacts_only":
-            conn.execute("DELETE FROM scientific_artifacts WHERE 1=1%s%s%s" % (doc_clause, page_clause, human),
-                         doc_args + args)
+        elif body.scope == "artifacts_only" and not body.document_id:
+            conn.execute("DELETE FROM scientific_artifacts WHERE 1=1%s" % human)
         else:
-            conn.execute("DELETE FROM scientific_artifacts WHERE 1=1%s%s%s" % (doc_clause, page_clause, human),
-                         doc_args + args)
-            conn.execute("DELETE FROM document_chunks WHERE 1=1%s%s%s" % (doc_clause, page_clause, human),
-                         doc_args + args)
-            conn.execute("DELETE FROM page_scans WHERE 1=1%s%s" % (doc_clause, page_clause), doc_args + args)
-            conn.execute("DELETE FROM pipeline_jobs WHERE 1=1%s%s" % (doc_clause, page_clause), doc_args + args)
-            if body.scope == "document":
-                conn.execute("DELETE FROM document_toc WHERE document_id=?", (body.document_id,))
-                conn.execute("DELETE FROM processing_benchmarks WHERE document_id=?", (body.document_id,))
-        conn.execute("UPDATE ingestion_batches SET status='STOPPED', updated_at=CURRENT_TIMESTAMP"
-                     " WHERE status IN ('QUEUED','RUNNING')")
+            for target in targets:
+                where, args = _target_where(target)
+                conn.execute("DELETE FROM scientific_artifacts WHERE %s%s" % (where, human), args)
+                if body.scope != "artifacts_only":
+                    conn.execute("DELETE FROM document_chunks WHERE %s%s" % (where, human), args)
+                    conn.execute("DELETE FROM page_scans WHERE %s" % where, args)
+                    conn.execute("DELETE FROM processing_benchmarks WHERE %s" % where, args)
+                    conn.execute("DELETE FROM pipeline_jobs WHERE %s" % where, args)
+                    if body.scope == "document":
+                        conn.execute("DELETE FROM document_toc WHERE document_id=?", (target.document_id,))
+                        for table in ("content_links", "assessments", "curriculum_programs", "curriculum_terms"):
+                            conn.execute("DELETE FROM %s WHERE document_id=?" % table, (target.document_id,))
+        if impacted_batches:
+            conn.execute("UPDATE ingestion_batches SET status='STOPPED', updated_at=CURRENT_TIMESTAMP"
+                         " WHERE id IN (%s)" % ",".join("?" for _ in impacted_batches),
+                         list(impacted_batches))
         conn.commit()
         return {"dry_run": False, "deleted": deleted, "preserved_human_edited": preserved,
+                "stopped_batch_ids": sorted(impacted_batches),
                 "message": "Purge exécutée (scope=%s)." % body.scope}
+    except Exception:
+        conn.rollback()
+        raise
     finally:
         conn.close()
 
@@ -440,7 +482,7 @@ def reset(db_name: str = Query(alias="db"), document_id: Optional[str] = None):
             "deleted_artifacts": result["deleted"]["artifacts"], "message": "Base réinitialisée."}
 
 
-class RequalifyBody(BaseModel):
+class RequalifyBody(StrictBody):
     explode: bool = False  # True = exploser les cadres pleine page en sous-artefacts
     # Stratégie d'explosion : "cv" (défaut) = segmentation LOCALE CPU sans LLM
     # (frame_segmenter) puis qualification aval par PETITS crops (mécanisme
@@ -454,7 +496,11 @@ class RequalifyBody(BaseModel):
     position. raw_binary JAMAIS supprimé. Route admin."""
     db: str
     document_id: Optional[str] = None
-    limit: int = 200
+    run_id: Optional[str] = None
+    limit: int = Field(default=200, ge=1, le=500)
+    max_payload_bytes: int = Field(default=4 * 1024 * 1024, ge=1024, le=8 * 1024 * 1024)
+    max_crops: int = Field(default=200, ge=1, le=500)
+    allow_full_page: bool = False
     dry_run: bool = False
     anchor: bool = True
 
@@ -661,7 +707,7 @@ def _explode_frames_cv(conn, body, frames):
             failed += 1
             continue
         try:
-            regions = seg.segment_frame(row[0], max_regions=_CV_MAX_REGIONS)
+            regions = seg.segment_frame(row[0], max_regions=min(_CV_MAX_REGIONS, body.max_crops))
         except Exception:  # noqa: BLE001 — le segmenteur ne lève jamais, ceinture+bretelles
             regions = []
         # Décalage bbox : le cadre a son propre bbox (absolu) dans la page.
@@ -676,6 +722,8 @@ def _explode_frames_cv(conn, body, frames):
             "vlm_exploded_at": _dt.datetime.utcnow().isoformat(),
             "explode_strategy": "cv"})
         for reg in (regions or []):
+            if created >= body.max_crops:
+                break
             # Les régions jugées « texte pur » sont comptées mais PAS créées :
             # inutile de les faire passer par la qualification aval (bruit). On
             # préfère toutefois garder celles au doute (is_text=False).
@@ -692,11 +740,11 @@ def _explode_frames_cv(conn, body, frames):
             conn.execute(
                 "INSERT INTO scientific_artifacts (id, chunk_id, document_id, page_number,"
                 " domain, artifact_type, raw_data, raw_binary, render_config_json, caption,"
-                " searchable_text, bounding_box_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                " searchable_text, bounding_box_json, validation_run_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (new_id, row[1], doc_id, page_number, row[2] or "general",
                  "dense_illustration", None, reg["raw_binary"],
                  json.dumps(rc, ensure_ascii=False), None,
-                 "illustration page %d" % page_number, bbox_abs))
+                 "illustration page %d" % page_number, bbox_abs, body.run_id))
             created += 1
             by_type["dense_illustration"] = by_type.get("dense_illustration", 0) + 1
             # Ancrage in-situ (caption vide à ce stade — la qualification aval la
@@ -763,11 +811,11 @@ def _explode_frames_vlm(conn, body, frames):
             conn.execute(
                 "INSERT INTO scientific_artifacts (id, chunk_id, document_id, page_number,"
                 " domain, artifact_type, raw_data, raw_binary, render_config_json, caption,"
-                " searchable_text, bounding_box_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                " searchable_text, bounding_box_json, validation_run_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (new_id, row[1], doc_id, page_number, row[2] or "general",
                  el["artifact_type"], el.get("raw_data"), el.get("raw_binary"),
                  el["render_config_json"], el.get("caption"), el.get("searchable_text"),
-                 bbox_abs))
+                 bbox_abs, body.run_id))
             created += 1
             by_type[el["artifact_type"]] = by_type.get(el["artifact_type"], 0) + 1
             if body.anchor and _anchor_in_chunk(conn, new_id, el.get("caption"), doc_id,
@@ -800,9 +848,20 @@ def requalify_artifacts(body: RequalifyBody):
     UPDATE type/raw_data/render_config_json/caption/searchable_text (+ ancre)."""
     conn = db.get_connection_or_http(body.db)
     try:
-        where, args = ["a.artifact_type='dense_illustration'", "a.raw_binary IS NOT NULL"], []
+        if body.run_id:
+            run = conn.execute("SELECT status FROM validation_runs WHERE id=?", (body.run_id,)).fetchone()
+            if run is None:
+                raise HTTPException(404, "Run de validation introuvable")
+            if run[0] not in ("DRAFT", "RUNNING", "READY"):
+                raise HTTPException(409, "Run de validation terminal")
+        where, args = ["a.artifact_type='dense_illustration'", "a.raw_binary IS NOT NULL",
+                       "length(a.raw_binary)<=?"], [body.max_payload_bytes]
         if body.document_id:
             where.append("a.document_id=?"); args.append(body.document_id)
+        if body.run_id:
+            where.append("EXISTS (SELECT 1 FROM validation_run_pages vrp WHERE vrp.run_id=?"
+                         " AND vrp.document_id=a.document_id AND vrp.page_number=a.page_number)")
+            args.append(body.run_id)
         # `vlm_exploded_at` = marqueur de SUCCÈS de l'explosion : TOUJOURS exclu, même
         # sous retry_failed (qui vise les ÉCHECS à retenter, pas les succès à refaire).
         # Sans cette exclusion, les cadres déjà explosés restent éligibles à chaque
@@ -826,7 +885,7 @@ def requalify_artifacts(body: RequalifyBody):
         # `limit` borne le NOMBRE DE CANDIDATS traités (pas la fenêtre SQL) : un
         # petit limit qui ne tomberait que sur des cadres pleine-page traiterait
         # sinon 0 sous-figure.
-        cap = max(1, min(body.limit, 2000))
+        cap = max(1, min(body.limit, body.max_crops, 500))
         candidates = []
         for r in rows:
             ratio = _requalify_area_ratio(r[3], r[5], r[6])
@@ -839,6 +898,8 @@ def requalify_artifacts(body: RequalifyBody):
         # dry_run d'explosion renvoie le décompte de CADRES pleine page (et non le
         # décompte de candidats ≤70 %). _explode_fullpage_frames gère son dry_run.
         if body.explode:
+            if (body.strategy or "cv").lower() == "vlm" and not body.allow_full_page:
+                raise HTTPException(400, "allow_full_page=true requis pour envoyer une page entière au VLM")
             return _explode_fullpage_frames(conn, body, rows)
 
         if body.dry_run:
@@ -856,6 +917,15 @@ def requalify_artifacts(body: RequalifyBody):
         by_semantic: dict = {}
         conn.execute("BEGIN")
         for art_id, doc_id, page_number, bbox_json, _caption, _w, page_h in candidates:
+            if body.run_id:
+                allowed = conn.execute("SELECT 1 FROM validation_run_pages WHERE run_id=?"
+                                       " AND document_id=? AND page_number=?",
+                                       (body.run_id, doc_id, page_number)).fetchone()
+                if not allowed:
+                    skipped_failures += 1
+                    continue
+                conn.execute("UPDATE scientific_artifacts SET validation_run_id=? WHERE id=?",
+                             (body.run_id, art_id))
             blob = conn.execute("SELECT raw_binary FROM scientific_artifacts WHERE id=?",
                                 (art_id,)).fetchone()
             if blob is None or blob[0] is None:
@@ -944,7 +1014,7 @@ def quarantine(db_name: str = Query(alias="db")):
         conn.close()
 
 
-class RetryBody(BaseModel):
+class RetryBody(StrictBody):
     db: str
     job_ids: List[str]
 

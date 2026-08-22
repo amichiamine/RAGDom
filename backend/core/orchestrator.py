@@ -24,7 +24,7 @@ from db import connection as db
 
 logger = logging.getLogger("ragdom.orchestrator")
 
-TRANSIENT_STATES = ("PROCESSING_CV", "SEGMENTING", "EXTRACTING", "LINTING", "VLM_RECOVERY")
+TRANSIENT_STATES = ("PROCESSING_CV", "SEGMENTING", "EXTRACTING", "LINTING", "VLM_RECOVERY", "INDEXED")
 # Ordre d'invocation des couches d'un moteur (contrats DTO tech_specs §2).
 LAYER_SEQUENCE = (
     ("layer_0_cv", "PROCESSING_CV"),
@@ -71,9 +71,13 @@ class PipelineOrchestrator:
         try:
             placeholders = ",".join("?" for _ in TRANSIENT_STATES)
             cur = conn.execute(
-                "UPDATE pipeline_jobs SET status='QUEUED' WHERE status IN (%s)" % placeholders,
+                "UPDATE pipeline_jobs SET status='QUEUED', updated_at=CURRENT_TIMESTAMP"
+                " WHERE status IN (%s)" % placeholders,
                 TRANSIENT_STATES,
             )
+            conn.execute("UPDATE ingestion_batches SET status='QUEUED', updated_at=CURRENT_TIMESTAMP"
+                         " WHERE status='RUNNING' AND EXISTS (SELECT 1 FROM pipeline_jobs j"
+                         " WHERE j.batch_id=ingestion_batches.id AND j.status='QUEUED')")
             conn.commit()
             if cur.rowcount:
                 logger.info("Recovery %s : %d page(s) transitoire(s) remise(s) en QUEUED", db_name, cur.rowcount)
@@ -93,14 +97,19 @@ class PipelineOrchestrator:
                 " VALUES (?,?,?,?,?,?, 'QUEUED', ?)",
                 (batch_id, source_path, db_name, mode, page_start, page_end, len(pages)),
             )
-            skipped = 0
+            skipped_ready = 0
+            skipped_active = 0
             for page in pages:
                 already = conn.execute(
-                    "SELECT 1 FROM pipeline_jobs WHERE document_id=? AND page_number=? AND status='READY'",
+                    "SELECT status FROM pipeline_jobs WHERE document_id=? AND page_number=?"
+                    " AND status='READY' LIMIT 1",
                     (document_id, page),
                 ).fetchone()
                 if already:
-                    skipped += 1
+                    if already[0] == "READY":
+                        skipped_ready += 1
+                    else:
+                        skipped_active += 1
                     continue
                 conn.execute(
                     "INSERT INTO pipeline_jobs (id, document_id, page_number, status, batch_id)"
@@ -108,8 +117,10 @@ class PipelineOrchestrator:
                     (str(uuid.uuid4()), document_id, page, batch_id),
                 )
             conn.commit()
+            skipped = skipped_ready + skipped_active
             self._emit("queue_update", {"queue_length": len(pages) - skipped, "batch_id": batch_id})
-            return {"batch_id": batch_id, "status": "QUEUED", "pages_total": len(pages), "skipped_ready": skipped}
+            return {"batch_id": batch_id, "status": "QUEUED", "pages_total": len(pages),
+                    "skipped_ready": skipped_ready, "skipped_active": skipped_active}
         finally:
             conn.close()
 

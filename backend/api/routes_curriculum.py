@@ -4,21 +4,21 @@
 Alimente les tables curriculum OPTIONNELLES — la clé de sortie du Mode Repli
 Générique de la Vue 2. Python 3.9+."""
 import uuid
-from typing import Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from fastapi import APIRouter, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from db import connection as db
 
 router = APIRouter()
 
 _TABLES = {
-    "terms": ("curriculum_terms", ("term_index", "label", "metadata_json")),
-    "programs": ("curriculum_programs", ("term_id", "seq_index", "title", "source", "competencies_json")),
+    "terms": ("curriculum_terms", ("document_id", "term_index", "label", "metadata_json")),
+    "programs": ("curriculum_programs", ("document_id", "term_id", "seq_index", "title", "source", "competencies_json")),
     "assessments": ("assessments", ("document_id", "term_id", "kind", "title",
                                     "subject_chunk_id", "correction_chunk_id", "scale_json")),
-    "links": ("content_links", ("link_type", "from_id", "to_id", "page_number", "metadata_json")),
+    "links": ("content_links", ("document_id", "link_type", "from_id", "to_id", "page_number", "metadata_json")),
 }
 
 
@@ -28,7 +28,11 @@ def _table(kind: str):
     return _TABLES[kind]
 
 
-class BuildBody(BaseModel):
+class StrictBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class BuildBody(StrictBody):
     """Génération AUTOMATIQUE du curriculum sur un corpus EXISTANT (V5).
 
     document_id optionnel : None = toute la base. Idempotent et non-destructif
@@ -69,12 +73,76 @@ def build(body: BuildBody):
         conn.close()
 
 
+class ImportBody(StrictBody):
+    mode: Literal["merge", "replace"] = "merge"
+    document_id: Optional[str] = None
+    replace_all: bool = False
+    terms: Optional[List[Dict[str, Any]]] = None
+    programs: Optional[List[Dict[str, Any]]] = None
+    assessments: Optional[List[Dict[str, Any]]] = None
+    links: Optional[List[Dict[str, Any]]] = None
+
+
+@router.post("/import")
+def import_curriculum(body: ImportBody, db_name: str = Query(alias="db")):
+    """Import structuré, remplacé par document sauf opt-in explicite global."""
+    if body.mode == "replace" and not body.document_id and not body.replace_all:
+        raise HTTPException(400, "document_id ou replace_all=true requis pour replace")
+    conn = db.get_connection_or_http(db_name)
+    try:
+        if body.document_id and not conn.execute("SELECT 1 FROM documents WHERE id=?",
+                                                 (body.document_id,)).fetchone():
+            raise HTTPException(404, "Document introuvable")
+        conn.execute("BEGIN")
+        if body.mode == "replace":
+            for table in ("content_links", "assessments", "curriculum_programs", "curriculum_terms"):
+                if body.replace_all:
+                    conn.execute("DELETE FROM %s" % table)
+                else:
+                    conn.execute("DELETE FROM %s WHERE document_id=?" % table, (body.document_id,))
+        counts = {}
+        for kind in ("terms", "programs", "assessments", "links"):
+            items = getattr(body, kind) or []
+            table, columns = _TABLES[kind]
+            allowed = set(columns) | {"id"}
+            for item in items:
+                unknown = set(item) - allowed
+                if unknown:
+                    raise HTTPException(422, "Champs inconnus pour %s : %s" %
+                                        (kind, ", ".join(sorted(unknown))))
+                item = dict(item)
+                if body.document_id:
+                    if item.get("document_id") not in (None, body.document_id):
+                        raise HTTPException(409, "Élément curriculum hors document")
+                    item["document_id"] = body.document_id
+                conn.execute("INSERT OR REPLACE INTO %s (id, %s) VALUES (%s)"
+                             % (table, ", ".join(columns), ", ".join("?" * (len(columns) + 1))),
+                             [item.get("id") or str(uuid.uuid4())] + [item.get(c) for c in columns])
+            counts[kind] = len(items)
+        conn.commit()
+        return {"imported": counts, "mode": body.mode, "document_id": body.document_id,
+                "replace_all": body.replace_all}
+    except HTTPException:
+        conn.rollback()
+        raise
+    except Exception as exc:  # noqa: BLE001
+        conn.rollback()
+        raise HTTPException(400, "Import invalide : %s" % exc)
+    finally:
+        conn.close()
+
+
 @router.get("/{kind}")
-def list_items(kind: str, db_name: str = Query(alias="db")):
+def list_items(kind: str, db_name: str = Query(alias="db"), document_id: Optional[str] = None):
     table, columns = _table(kind)
     conn = db.get_connection_or_http(db_name)
     try:
-        rows = conn.execute("SELECT id, %s FROM %s" % (", ".join(columns), table)).fetchall()
+        sql = "SELECT id, %s FROM %s" % (", ".join(columns), table)
+        args = []
+        if document_id:
+            sql += " WHERE document_id=?"
+            args.append(document_id)
+        rows = conn.execute(sql, args).fetchall()
         return {"items": [dict(zip(("id",) + columns, row)) for row in rows]}
     finally:
         conn.close()
@@ -83,6 +151,9 @@ def list_items(kind: str, db_name: str = Query(alias="db")):
 @router.post("/{kind}", status_code=201)
 def create_item(kind: str, payload: dict, db_name: str = Query(alias="db")):
     table, columns = _table(kind)
+    unknown = set(payload) - (set(columns) | {"id"})
+    if unknown:
+        raise HTTPException(422, "Champs inconnus : %s" % ", ".join(sorted(unknown)))
     values = [payload.get(col) for col in columns]
     item_id = payload.get("id") or str(uuid.uuid4())
     conn = db.get_connection_or_http(db_name)
@@ -98,6 +169,9 @@ def create_item(kind: str, payload: dict, db_name: str = Query(alias="db")):
 @router.put("/{kind}/{item_id}")
 def update_item(kind: str, item_id: str, payload: dict, db_name: str = Query(alias="db")):
     table, columns = _table(kind)
+    unknown = set(payload) - set(columns)
+    if unknown:
+        raise HTTPException(422, "Champs inconnus : %s" % ", ".join(sorted(unknown)))
     sets, args = [], []
     for col in columns:
         if col in payload:
@@ -126,43 +200,5 @@ def delete_item(kind: str, item_id: str, db_name: str = Query(alias="db")):
         if cur.rowcount == 0:
             raise HTTPException(404, "Élément introuvable")
         return {"deleted": True}
-    finally:
-        conn.close()
-
-
-class ImportBody(BaseModel):
-    mode: str = "merge"  # merge | replace
-    terms: Optional[list] = None
-    programs: Optional[list] = None
-    assessments: Optional[list] = None
-    links: Optional[list] = None
-
-
-@router.post("/import")
-def import_curriculum(body: ImportBody, db_name: str = Query(alias="db")):
-    """Import structuré complet (Blueprint §7.6) — replace vide d'abord les 4 tables."""
-    conn = db.get_connection_or_http(db_name)
-    try:
-        conn.execute("BEGIN")
-        if body.mode == "replace":
-            for table in ("content_links", "assessments", "curriculum_programs", "curriculum_terms"):
-                conn.execute("DELETE FROM %s" % table)
-        counts = {}
-        for kind in ("terms", "programs", "assessments", "links"):
-            items = getattr(body, kind) or []
-            table, columns = _TABLES[kind]
-            for item in items:
-                conn.execute("INSERT OR REPLACE INTO %s (id, %s) VALUES (%s)"
-                             % (table, ", ".join(columns), ", ".join("?" * (len(columns) + 1))),
-                             [item.get("id") or str(uuid.uuid4())] + [item.get(c) for c in columns])
-            counts[kind] = len(items)
-        conn.commit()
-        return {"imported": counts, "mode": body.mode}
-    except HTTPException:
-        conn.rollback()
-        raise
-    except Exception as exc:  # noqa: BLE001
-        conn.rollback()
-        raise HTTPException(400, "Import invalide : %s" % exc)
     finally:
         conn.close()
