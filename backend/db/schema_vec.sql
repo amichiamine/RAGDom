@@ -31,3 +31,11 @@ AFTER DELETE ON document_chunks
 BEGIN
     DELETE FROM vec_chunks WHERE chunk_id = old.id;
 END;
+
+CREATE TRIGGER IF NOT EXISTS trg_chunks_vec_update
+AFTER UPDATE OF embedding_vector ON document_chunks
+BEGIN
+    DELETE FROM vec_chunks WHERE chunk_id = old.id;
+    INSERT INTO vec_chunks (chunk_id, embedding)
+    SELECT new.id, new.embedding_vector WHERE new.embedding_vector IS NOT NULL;
+END;

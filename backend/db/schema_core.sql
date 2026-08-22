@@ -25,6 +25,9 @@ CREATE TABLE IF NOT EXISTS pipeline_jobs (
 CREATE INDEX IF NOT EXISTS idx_jobs_status      ON pipeline_jobs(status);
 CREATE INDEX IF NOT EXISTS idx_jobs_document_id ON pipeline_jobs(document_id);
 CREATE INDEX IF NOT EXISTS idx_jobs_batch_id    ON pipeline_jobs(batch_id);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_jobs_active_page
+ON pipeline_jobs(document_id, page_number)
+WHERE status IN ('QUEUED','PROCESSING_CV','SEGMENTING','EXTRACTING','LINTING','VLM_RECOVERY','INDEXED');
 
 -- ============================================================
 -- TABLE 1bis : Batches d'Ingestion (V3.1 — granularité job/batch)
@@ -349,6 +352,7 @@ CREATE INDEX IF NOT EXISTS idx_links_from ON content_links(from_id);
 CREATE INDEX IF NOT EXISTS idx_links_to   ON content_links(to_id);
 CREATE INDEX IF NOT EXISTS idx_curriculum_terms_document ON curriculum_terms(document_id);
 CREATE INDEX IF NOT EXISTS idx_curriculum_programs_document ON curriculum_programs(document_id);
+CREATE INDEX IF NOT EXISTS idx_assessments_document ON assessments(document_id);
 CREATE INDEX IF NOT EXISTS idx_content_links_document ON content_links(document_id);
 
 -- ============================================================
@@ -375,6 +379,7 @@ CREATE TABLE IF NOT EXISTS validation_run_pages (
     status TEXT NOT NULL DEFAULT 'PENDING' CHECK(status IN ('PENDING','PROCESSING','READY','ACCEPTED','REJECTED','CANCELLED','FAILED')),
     baseline_json TEXT NOT NULL,
     working_json TEXT NOT NULL,
+    baseline_hash TEXT,
     error_log TEXT,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(run_id, document_id, page_number)
@@ -382,6 +387,7 @@ CREATE TABLE IF NOT EXISTS validation_run_pages (
 CREATE TABLE IF NOT EXISTS validation_events (
     id TEXT PRIMARY KEY,
     run_id TEXT NOT NULL REFERENCES validation_runs(id) ON DELETE CASCADE,
+    document_id TEXT REFERENCES documents(id) ON DELETE CASCADE,
     page_number INTEGER,
     event_type TEXT NOT NULL,
     payload_json TEXT NOT NULL DEFAULT '{}',
@@ -414,6 +420,7 @@ CREATE INDEX IF NOT EXISTS idx_validation_runs_document ON validation_runs(docum
 CREATE INDEX IF NOT EXISTS idx_validation_runs_status ON validation_runs(status);
 CREATE INDEX IF NOT EXISTS idx_validation_pages_run ON validation_run_pages(run_id, page_number);
 CREATE INDEX IF NOT EXISTS idx_validation_events_run ON validation_events(run_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_validation_events_document ON validation_events(document_id, page_number);
 CREATE INDEX IF NOT EXISTS idx_validation_snapshots_run ON validation_snapshots(run_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_bench_validation_run ON processing_benchmarks(validation_run_id);
 CREATE INDEX IF NOT EXISTS idx_artifacts_validation_run ON scientific_artifacts(validation_run_id);
@@ -428,7 +435,7 @@ CREATE TABLE IF NOT EXISTS schema_version (
 );
 -- Insertion de la version initiale (à exécuter une seule fois à la création)
 INSERT OR IGNORE INTO schema_version (version, description)
-VALUES (5, 'Schema RAGDom V5 — Studio de validation live, embeddings et curriculum multi-document');
+VALUES (6, 'Schema RAGDom V6 — validation et queue durcies');
 -- Historique migrations : migration_003_v32.sql (is_human_edited ×2),
 -- migration_004_v35.sql (CREATE page_scans ; ALTER document_chunks ADD pedagogical_index, updated_at ;
 --                        ALTER scientific_artifacts ADD updated_at ; backfill des scans par ré-ingestion Couche 0+7 seule).

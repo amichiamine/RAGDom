@@ -65,7 +65,7 @@ class StrictBody(BaseModel):
 class StartBody(StrictBody):
     source_path: str
     target_db: Optional[str] = None
-    mode: str = "document"  # document | chapter | page_range | folder
+    mode: Literal["document", "chapter", "page_range", "folder"] = "document"
     page_start: Optional[int] = None
     page_end: Optional[int] = None
     toc_id: Optional[str] = None
@@ -103,18 +103,28 @@ def _register_document(db_name: str, source_path: str) -> dict:
 
 def _resolve_pages(body: StartBody, db_name: str, doc: dict):
     if body.mode == "page_range":
-        if not body.page_start or not body.page_end:
+        if body.page_start is None or body.page_end is None:
             raise HTTPException(400, "page_start/page_end requis pour page_range")
-        return max(1, body.page_start), min(doc["total_pages"], body.page_end)
+        if body.page_start < 1 or body.page_end > doc["total_pages"] or body.page_start > body.page_end:
+            raise HTTPException(400, "page_range hors bornes ou inversée")
+        return body.page_start, body.page_end
     if body.mode == "chapter":
         if not body.toc_id:
             raise HTTPException(400, "toc_id requis pour chapter")
         conn = db.get_connection(db_name)
-        row = conn.execute("SELECT page_start, page_end FROM document_toc WHERE id=?", (body.toc_id,)).fetchone()
-        conn.close()
-        if row is None:
-            raise HTTPException(404, "Entrée TOC introuvable")
-        return row[0], row[1] or doc["total_pages"]
+        try:
+            row = conn.execute("SELECT page_start, page_end FROM document_toc"
+                               " WHERE id=? AND document_id=?", (body.toc_id, doc["id"])).fetchone()
+            if row is None:
+                foreign = conn.execute("SELECT 1 FROM document_toc WHERE id=?", (body.toc_id,)).fetchone()
+                raise HTTPException(409 if foreign else 404,
+                                    "Entrée TOC hors document" if foreign else "Entrée TOC introuvable")
+        finally:
+            conn.close()
+        start, end = int(row[0]), int(row[1] or doc["total_pages"])
+        if start < 1 or end > doc["total_pages"] or start > end:
+            raise HTTPException(409, "Plage TOC historique invalide")
+        return start, end
     return 1, doc["total_pages"]  # document
 
 
@@ -164,7 +174,12 @@ def resume_pending_queues() -> list:
 @router.post("/start", status_code=202)
 def start(body: StartBody):
     real = _resolve_source(body.source_path)
+    source_root = os.path.realpath(config.SOURCES_DIR) + os.sep
+    if not (real + os.sep).startswith(source_root):
+        raise HTTPException(400, "source_path hors de /sources/")
     if body.mode == "folder":
+        if not os.path.isdir(real):
+            raise HTTPException(404, "Dossier source introuvable")
         folder_db = body.target_db or extract_document_metadata(
             os.path.join(real, "x.pdf"), config.SOURCES_DIR)["db_name"]
         batches, total = [], 0
@@ -313,27 +328,38 @@ def reprocess(body: ReprocessBody):
         conn.close()
 
     # Aucune mutation avant que TOUS les documents, TOC et bornes soient validés.
-    purge_result = purge(PurgeBody(db=body.db, scope=body.scope,
-                                   document_id=body.document_id, toc_id=body.toc_id,
-                                   page=body.page, page_start=body.page_start,
-                                   page_end=body.page_end, pages=body.pages, dry_run=False,
-                                   preserve_human_edits=body.preserve_human_edits,
-                                   confirm=body.db if body.scope == "base" else None))
-    batches = []
-    for target in targets:
-        # Le pipeline historique accepte une plage continue. Une sélection discontinue
-        # est découpée en lots contigus, sans englober les pages intermédiaires.
-        groups = []
-        for selected in target.pages:
-            if not groups or selected != groups[-1][-1] + 1:
-                groups.append([selected])
-            else:
-                groups[-1].append(selected)
-        for group in groups:
-            batch = orchestrator.enqueue_batch(body.db, target.document_id,
-                                               sources[target.document_id], body.scope,
-                                               group[0], group[-1])
-            batches.append(batch)
+    # Purge and enqueue historically used separate commits. Keep a consistent image
+    # and automatically restore it if any enqueue fails, so a failed reprocess never
+    # leaves an empty official scope.
+    backup_path = db.backup_database(body.db)
+    try:
+        purge_result = purge(PurgeBody(db=body.db, scope=body.scope,
+                                       document_id=body.document_id, toc_id=body.toc_id,
+                                       page=body.page, page_start=body.page_start,
+                                       page_end=body.page_end, pages=body.pages, dry_run=False,
+                                       preserve_human_edits=body.preserve_human_edits,
+                                       confirm=body.db if body.scope == "base" else None))
+        batches = []
+        for target in targets:
+            groups = []
+            for selected in target.pages:
+                if not groups or selected != groups[-1][-1] + 1:
+                    groups.append([selected])
+                else:
+                    groups[-1].append(selected)
+            for group in groups:
+                batch = orchestrator.enqueue_batch(body.db, target.document_id,
+                                                   sources[target.document_id], body.scope,
+                                                   group[0], group[-1])
+                batches.append(batch)
+    except Exception:
+        db.restore_database(body.db, backup_path)
+        raise
+    finally:
+        try:
+            os.remove(backup_path)
+        except FileNotFoundError:
+            pass
     _launch(body.db)
     return {"reprocessed_scope": body.scope, "purged": purge_result.get("deleted"),
             "batch_id": batches[0]["batch_id"] if batches else None,
@@ -854,6 +880,10 @@ def requalify_artifacts(body: RequalifyBody):
                 raise HTTPException(404, "Run de validation introuvable")
             if run[0] not in ("DRAFT", "RUNNING", "READY"):
                 raise HTTPException(409, "Run de validation terminal")
+            if not body.dry_run:
+                # The historical implementation tagged then mutated official artifacts.
+                # Until the qualifier can operate purely on working_json, fail closed.
+                raise HTTPException(409, "Requalification avec run_id non stagée : utilisez la copie de travail")
         where, args = ["a.artifact_type='dense_illustration'", "a.raw_binary IS NOT NULL",
                        "length(a.raw_binary)<=?"], [body.max_payload_bytes]
         if body.document_id:

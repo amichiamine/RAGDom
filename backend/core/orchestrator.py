@@ -90,8 +90,11 @@ class PipelineOrchestrator:
                       mode: str, page_start: int, page_end: int) -> dict:
         conn = db.get_connection(db_name)
         try:
+            if page_start < 1 or page_end < page_start:
+                raise ValueError("Plage de pages invalide")
             batch_id = str(uuid.uuid4())
             pages = list(range(page_start, page_end + 1))
+            conn.execute("BEGIN IMMEDIATE")
             conn.execute(
                 "INSERT INTO ingestion_batches (id, source_path, target_db, mode, page_start, page_end, status, pages_total)"
                 " VALUES (?,?,?,?,?,?, 'QUEUED', ?)",
@@ -102,7 +105,9 @@ class PipelineOrchestrator:
             for page in pages:
                 already = conn.execute(
                     "SELECT status FROM pipeline_jobs WHERE document_id=? AND page_number=?"
-                    " AND status='READY' LIMIT 1",
+                    " AND status IN ('READY','QUEUED','PROCESSING_CV','SEGMENTING','EXTRACTING',"
+                    " 'LINTING','VLM_RECOVERY','INDEXED')"
+                    " ORDER BY CASE status WHEN 'READY' THEN 0 ELSE 1 END LIMIT 1",
                     (document_id, page),
                 ).fetchone()
                 if already:
@@ -111,11 +116,17 @@ class PipelineOrchestrator:
                     else:
                         skipped_active += 1
                     continue
-                conn.execute(
-                    "INSERT INTO pipeline_jobs (id, document_id, page_number, status, batch_id)"
-                    " VALUES (?,?,?, 'QUEUED', ?)",
-                    (str(uuid.uuid4()), document_id, page, batch_id),
-                )
+                try:
+                    conn.execute(
+                        "INSERT INTO pipeline_jobs (id, document_id, page_number, status, batch_id)"
+                        " VALUES (?,?,?, 'QUEUED', ?)",
+                        (str(uuid.uuid4()), document_id, page, batch_id),
+                    )
+                except Exception as exc:
+                    if "uq_jobs_active_page" in str(exc) or "UNIQUE constraint failed" in str(exc):
+                        skipped_active += 1
+                        continue
+                    raise
             conn.commit()
             skipped = skipped_ready + skipped_active
             self._emit("queue_update", {"queue_length": len(pages) - skipped, "batch_id": batch_id})
@@ -301,14 +312,28 @@ class PipelineOrchestrator:
     def _next_job(self, db_name: str) -> Optional[dict]:
         conn = db.get_connection(db_name)
         try:
+            # BEGIN IMMEDIATE serializes claimers across processes.  The state
+            # transition is committed before work begins; crash recovery returns
+            # PROCESSING_CV to QUEUED.
+            conn.execute("BEGIN IMMEDIATE")
             row = conn.execute(
                 "SELECT id, document_id, page_number, batch_id, retry_count FROM pipeline_jobs"
                 " WHERE status='QUEUED' ORDER BY rowid LIMIT 1"
             ).fetchone()
             if row is None:
+                conn.commit()
+                return None
+            changed = conn.execute("UPDATE pipeline_jobs SET status='PROCESSING_CV',"
+                                   " updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='QUEUED'",
+                                   (row[0],)).rowcount
+            conn.commit()
+            if changed != 1:
                 return None
             return {"id": row[0], "document_id": row[1], "page_number": row[2],
                     "batch_id": row[3], "retry_count": row[4]}
+        except Exception:
+            conn.rollback()
+            raise
         finally:
             conn.close()
 

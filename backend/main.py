@@ -49,15 +49,10 @@ async def lifespan(app: FastAPI):
             raise RuntimeError("Variable d'environnement manquante : %s" % env_var)
         os.makedirs(path, exist_ok=True)
 
-    from api import routes_pipeline
-    resumed = routes_pipeline.resume_pending_queues()
-    if resumed:
-        print("[RAGDom] Reprise des files interrompues : %s" % resumed)
-
     # Bases PUBLIÉES : toute base .sqlite présente dans databases_publiees/
     # (dépôt local ou image Docker) est copiée vers DATABASES_DIR si absente —
     # la bibliothèque renaît identique à chaque réveil du disque éphémère.
-    import shutil
+    import sqlite3
     published = os.environ.get("RAGDOM_PUBLISHED_DBS") or os.path.join(
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "databases_publiees")
     if os.path.isdir(published):
@@ -66,8 +61,28 @@ async def lifespan(app: FastAPI):
             if name.endswith(".sqlite"):
                 target = os.path.join(os.environ["DATABASES_DIR"], name)
                 if not os.path.exists(target):
-                    shutil.copy2(os.path.join(published, name), target)
+                    source_conn = sqlite3.connect(os.path.join(published, name))
+                    target_conn = sqlite3.connect(target)
+                    try:
+                        source_conn.backup(target_conn)
+                    finally:
+                        target_conn.close()
+                        source_conn.close()
                     print("[RAGDom] Base publiée installée : %s" % name)
+
+    # Every visible database is installed and migrated before queue recovery reads
+    # pipeline tables. A broken published image fails boot instead of being resumed
+    # against an obsolete schema.
+    from db import connection as db_connection
+    for name in sorted(os.listdir(os.environ["DATABASES_DIR"])):
+        if db_connection.DB_NAME_RE.fullmatch(name):
+            migrated = db_connection.get_connection(name)
+            migrated.close()
+
+    from api import routes_pipeline
+    resumed = routes_pipeline.resume_pending_queues()
+    if resumed:
+        print("[RAGDom] Reprise des files interrompues : %s" % resumed)
 
     engines = engine_registry.scan_engines()
     print("[RAGDom] Moteurs détectés : %s" % (", ".join(e["id"] for e in engines) or "aucun"))
