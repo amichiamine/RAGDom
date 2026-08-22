@@ -1,11 +1,11 @@
-# CONTEXT — État complet du projet RAGDom (MAJ 2026-08-22 20:58 UTC+1 — V5.1)
+# CONTEXT — État complet du projet RAGDom (MAJ 2026-08-22 — Studio de validation final)
 
 ## Identité du projet
 Bibliothèque numérique scientifique **local-first** + version web complète.
 Backend FastAPI (Python 3.9+/3.11) + moteur d'ingestion PDF **sci-engine**
 (9 couches, engines/sci-engine/pipeline/) + SQLite (FTS5 + sqlite-vec 384d,
-RRF k=60, seuils cosinus ≤0.45 / bm25 ≤-0.3) + frontend React 19/Vite 5/TS
-strict/Tailwind, arabe RTL par défaut, single-origin (FastAPI sert
+RRF k=60, seuils cosinus ≤0.45 / bm25 ≤-0.3) + frontend React 19/Vite 8.2.2/
+React Router DOM 7.18.2/TS strict/Tailwind, arabe RTL par défaut, single-origin (FastAPI sert
 frontend/dist, SPA fallback). Dockerfile multi-étages tout-en-un.
 Cible locale utilisateur : Windows, c:\xampp\htdocs\RAGDom, `npm run dev` racine.
 
@@ -27,7 +27,10 @@ Cible locale utilisateur : Windows, c:\xampp\htdocs\RAGDom, `npm run dev` racine
   DATABASES_DIR au démarrage (main.py). La bibliothèque live renaît pré-chargée.
 
 ## État fonctionnel (tout VÉRIFIÉ en exécution réelle)
-- 106/106 tests pytest verts en mode hybride complet ET faible mémoire ; tsc 0 erreur ; build vert.
+- **Studio de validation final** : scopes universels et multi-documents, routeur `/api/validation`, runs isolés, copies de travail, snapshots logiques, diffs, rapports et décisions accept/reject au niveau run. Migrations 005/006, curriculum multi-document et profils FastEmbed `mean` 384d compatibles intégrés.
+- Sécurité : résolution stricte avant mutation, DTO sans champs supplémentaires, DB sanitisée, ownership cross-document contrôlé, éditions humaines et baseline protégées, acceptation atomique; readonly masque Validation en 404. Suivi UI par polling ciblé 5 s, pas de SSE Validation dédié.
+- Limite : une requalification mutante avec `run_id` renvoie 409 faute de staging des artefacts; elle ne touche jamais les tables officielles par contournement.
+- 149/149 tests pytest verts en mode normal ET faible mémoire ; Vitest 13/13 ; TypeScript/build Vite 8.2.2 verts ; npm audit 0 vulnérabilité.
 - Recherche RRF V5.1 : chaque canal BM25/vectoriel est filtré par son seuil avant fusion ; rangs FTS uniques par chunk et déterministes.
 - Ingestion réelle 230/230 pages : sommaire 45 entrées (dérivé des titres),
   613 formules LaTeX, 230 scans WebP, corrections typées, réponse Gemini réelle

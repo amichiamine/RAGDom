@@ -1,5 +1,14 @@
 # JOURNAL des passes (le plus récent en premier)
 
+## 2026-08-22 — Studio de validation final intégré
+- **Backend** : routeur admin `/api/validation` (18 opérations) pour prévisualiser les scopes universels `base`, `document`, `toc` et alias `chapter/course/title`, `page`, `page_range`, `page_selection`; le scope `base` couvre réellement plusieurs documents. Runs isolés avec baseline/copie de travail par `(document_id, page_number)`, snapshots logiques restaurables, diffs page/run, rapport et rattachement de benchmarks.
+- **Décision** : acceptation et rejet atomiques au niveau du run, pas au niveau page. L'acceptation est la seule étape qui mute les tables officielles; elle vérifie sous transaction le hash de baseline, les éditions humaines, les appartenances document/page et toutes les références cross-document avant la première mutation.
+- **Schéma** : migrations additives 005 (runs/pages/events/snapshots, profils embeddings, propriétaires curriculum, provenance validation) et 006 (ownership assessments/events, `baseline_hash`, unicité des jobs actifs par page). Curriculum multi-document reconstruit sans détruire les autres livres; les lignes legacy ambiguës ne sont pas attribuées silencieusement.
+- **Embeddings** : contrat FastEmbed compatible réel = `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2`, pooling `mean`, 384 dimensions, normalisé, préfixes query/passage et métadonnées de profil complètes; profil manquant/incompatible ou plusieurs profils actifs bloque le vectoriel au lieu de réindexer silencieusement.
+- **Frontend** : Studio dans Automation (builder/preview, scopes, liste paginée, deep-links run+document+page, inspecteur chunks/artefacts/TOC/curriculum/benchmarks, diff, restauration, confirmation d'acceptation). Suivi du seul run ouvert par polling ciblé toutes les 5 s; aucun SSE Validation dédié. En readonly, les contrôles sont désactivés et le middleware masque toutes les routes Validation en 404.
+- **Limite honnête** : `POST /api/pipeline/requalify-artifacts` mutante avec `run_id` renvoie volontairement 409 tant que le qualifier ne sait pas écrire dans les artefacts de staging de la copie de travail; le `dry_run` scopé reste possible.
+- **Qualité rejouée** : pytest **149/149** en mode normal puis **149/149** avec `RAGDOM_LOW_MEMORY=true`; Vitest **13/13**; build TypeScript/Vite **8.2.2** vert; React Router DOM **7.18.2**; `npm audit` **0 vulnérabilité**.
+
 ## 2026-08-22 20:58 — V5.1 : seuils par canal avant fusion RRF
 - **Cause racine mesurée** : les 20 voisins vectoriels contribuaient tous au RRF,
   même avec une distance supérieure au seuil 0,45, dès que le chunk restait éligible

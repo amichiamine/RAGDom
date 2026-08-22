@@ -1,3 +1,13 @@
+# 2026-08-22 — Studio de validation final
+
+- Routeur admin `/api/validation` finalisé : scopes universels dont `base` multi-documents, runs/copies de travail document-page, snapshots logiques/restauration, diffs page/run, rapport, benchmarks, profils et diagnostic embeddings.
+- Accept/reject au **niveau run**; acceptation transactionnelle avec hash de baseline, protection des éditions humaines et validation complète des owners/références cross-document avant mutation officielle.
+- Migrations 005/006 : schéma Validation, provenance, ownership curriculum terms/programs/assessments/links, `baseline_hash`, événements document/page et unicité des jobs actifs.
+- Curriculum multi-livres non destructif et profil FastEmbed compatible MiniLM-L12-v2 / pooling **mean** / 384d normalisées, sans réindexation silencieuse.
+- UI Automation : builder/preview, scopes, deep-links, liste/pagination, inspecteur/diff, restauration et confirmation. Polling ciblé toutes les 5 s; aucun SSE Validation dédié. Readonly : UI désactivée et routes masquées en 404.
+- Limite : requalification mutante avec `run_id` = 409 faute de staging des artefacts de copie de travail; `dry_run` reste autorisé.
+- Qualité : pytest **149/149** normal + **149/149** faible mémoire, Vitest **13/13**, build Vite **8.2.2** vert, React Router DOM **7.18.2**, `npm audit` **0 vulnérabilité**.
+
 # 2026-08-22 — V5.1 : fusion RRF filtrée par canal
 
 - Les rangs BM25 et vectoriels sont désormais calculés uniquement après application de leur seuil brut respectif ; un voisin vectoriel hors seuil ne peut plus reclasser un résultat lexical valide.

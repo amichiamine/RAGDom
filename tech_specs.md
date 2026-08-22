@@ -1439,3 +1439,58 @@ python -m venv .venv
 pip install -r requirements.txt
 uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 ```
+
+---
+
+## **16. STUDIO DE VALIDATION FINAL — CONTRAT IMPLÉMENTÉ (MAJ 2026-08-22)**
+
+### **16.1 Scopes universels**
+
+Le résolveur `backend/core/validation_scope.py` valide entièrement le périmètre avant toute écriture. Les scopes acceptés sont :
+
+- `base` : tous les documents exploitables de la base, donc réellement multi-document ;
+- `document` : toutes les pages d'un document ;
+- `toc`, `chapter`, `course`, `title` : même sémantique canonique TOC, avec contrôle obligatoire de l'appartenance du `toc_id` au document ;
+- `page`, `page_range`, `page_selection` : page unique, plage fermée ou sélection dédupliquée/triée (maximum DTO : 1000 pages).
+
+Aucune borne n'est corrigée silencieusement. Sélecteur incompatible, page hors bornes, sélection vide, TOC étranger, base vide ou document sans page exploitable produisent une erreur 400/404/409 explicite. Dans l'UI, `database` est traduit en `base` et `selection` en `page_selection`.
+
+### **16.2 Routes `/api/validation`**
+
+Le routeur réel expose 18 opérations :
+
+- `POST /resolve-scope` ;
+- `POST /runs`, `GET /runs`, `GET /runs/{run_id}` ;
+- `GET|PUT /runs/{run_id}/pages/{page_number}` (`document_id` requis si le même numéro de page existe dans plusieurs documents du run) ;
+- `POST /runs/{run_id}/snapshots`, `POST /runs/{run_id}/snapshots/{snapshot_id}/restore` ;
+- `GET /runs/{run_id}/pages/{page_number}/diff`, `GET /runs/{run_id}/diff`, `GET /runs/{run_id}/report` ;
+- `POST /runs/{run_id}/benchmarks` ;
+- `POST /runs/{run_id}/accept`, `POST /runs/{run_id}/reject`, `POST /runs/{run_id}/cancel` ;
+- `POST /embeddings/profiles`, `POST /embeddings/assign`, `GET /embeddings/diagnostic`.
+
+Un run capture pour chaque `(document_id,page_number)` un `baseline_json`, son `baseline_hash` et un `working_json` séparé. Création, édition de copie, snapshot, restauration, diff, rejet et annulation renvoient ou garantissent `official_mutated:false`. Les snapshots publiquement créables sont **logiques uniquement** : la base sait stocker la valeur historique `physical`, mais l'API la refuse car la restauration ne sait restaurer sans risque que `working_json`.
+
+`accept` et `reject` sont des décisions **au niveau du run entier**. L'acceptation ouvre `BEGIN IMMEDIATE`, recalcule chaque hash officiel, protège toute ligne `is_human_edited`, valide l'image finale et toutes les références TOC/chunks/artefacts/curriculum cross-document avant le premier DELETE/UPDATE, puis publie atomiquement toutes les pages. Toute concurrence sur l'officiel, référence invalide ou tentative de modifier un run terminal échoue fermée.
+
+### **16.3 Migrations 005 et 006**
+
+- **005 — validation_studio** : ajoute la provenance `validation_run_id` aux benchmarks/artefacts, l'ownership `document_id` aux terms/programs/links, et crée `validation_runs`, `validation_run_pages`, `validation_events`, `validation_snapshots`, `embedding_profiles`, `document_embedding_profiles` et leurs index.
+- **006 — hardening** : ajoute `assessments.document_id`, `validation_events.document_id`, `validation_run_pages.baseline_hash` et l'index unique partiel `uq_jobs_active_page` empêchant deux jobs actifs pour la même page.
+
+Le migrateur rejoue 005/006 de façon reprenable, tolère seulement les colonnes déjà présentes, vérifie le schéma durci après migration et ne déclare la version qu'après succès. Le backfill d'ownership curriculum n'est automatique que pour une base mono-document ; en multi-document, les NULL ambigus restent signalés au lieu d'être attribués arbitrairement.
+
+### **16.4 Curriculum multi-document et embeddings compatibles**
+
+Les tables `curriculum_terms`, `curriculum_programs`, `assessments` et `content_links` portent désormais `document_id`. La construction multi-livres traite chaque document isolément, préserve le curriculum des autres livres et ignore proprement un document sans structure pédagogique. Les programmes, évaluations et liens sont refusés s'ils relient des propriétaires de documents différents.
+
+Le profil de requête/vectorisation compatible est contractuel : `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2`, FastEmbed installé, pooling **`mean`**, 384 dimensions, L2-normalisé, float32 little-endian, métrique sqlite-vec L2, préfixes `query: ` / `passage: `, troncature tokenizer et `pipeline_version=ragdom-fastembed-mean-v1`. Les métadonnées complètes de contrat sont obligatoires. Profil absent/incompatible, dimensions de BLOB incohérentes, vecteurs non assignés ou plusieurs profils actifs sont diagnostiqués et bloquent la recherche vectorielle ; aucune réindexation silencieuse n'est effectuée.
+
+### **16.5 Readonly, sécurité et limites**
+
+Toutes les routes Validation sont administratives. `RAGDOM_READONLY=true` les masque en 404 via `AccessPolicyMiddleware`; lorsqu'une authentification admin est activée, session ou Bearer valide requis. Le nom de base passe par le résolveur anti-traversal existant et les DTO Pydantic interdisent les champs supplémentaires.
+
+Limite assumée : `POST /api/pipeline/requalify-artifacts` avec `run_id` accepte le filtrage en `dry_run`, mais une requalification mutante renvoie **409** (`Requalification avec run_id non stagée`) tant que le qualifier ne sait pas écrire exclusivement dans les artefacts de staging de `working_json`. Il ne contourne jamais l'isolation en mutant l'officiel.
+
+### **16.6 Preuves de qualité**
+
+État vérifié sur `feat/validation-integration` : pytest **149/149** en mode normal et **149/149** avec `RAGDOM_LOW_MEMORY=true`; Vitest **13/13**; build TypeScript strict + Vite **8.2.2** vert; `react-router-dom` **7.18.2**; `npm audit` **0 vulnérabilité**.

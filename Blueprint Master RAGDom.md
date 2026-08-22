@@ -1051,3 +1051,37 @@ data: {"batch_id":"uuid","page_number":5,"error":"UNBALANCED_LATEX","details":"M
 4. **Intégrité Logicielle :** Règle d'or de non-régression stricte. L'évolution se fait exclusivement par add-ons. Les bases SQLite sont versionnées via leur nom de fichier.
 5. **Portabilité Maximale :** Chaque fichier .sqlite est 100% autonome et consommable par n'importe quelle plateforme (Web, Mobile, Desktop, No-Code).
 6. **Résilience Opérationnelle :** Key Manager avec rotation automatique des clés API, fallback hiérarchique Cloud → Local, gestion des fichiers corrompus (INVALID_SOURCE) sans arrêt du backend.
+
+---
+
+## **PARTIE 9 : STUDIO DE VALIDATION FINAL (ÉTAT IMPLÉMENTÉ — 2026-08-22)**
+
+### **9.1 Architecture et périmètres universels**
+
+Le Studio ajoute une couche de validation isolée entre l'officiel et la décision humaine. Il ne duplique pas la base : chaque run matérialise une baseline et une copie de travail par `(document_id,page_number)`. Le résolveur universel couvre la base entière (plusieurs livres), un document, une entrée TOC et ses alias métier `chapter/course/title`, une page, une plage ou une sélection explicite. Il valide ownership et bornes avant création du run.
+
+Le routeur FastAPI est monté sous `/api/validation`. Il fournit prévisualisation du scope, création/liste/détail des runs, lecture et mise à jour des copies, snapshots logiques/restauration, diffs page et run, rapport auditable, rattachement des benchmarks, accept/reject/cancel au niveau run et gestion/diagnostic des profils embeddings. Pour un run multi-document, `document_id` désambiguïse les numéros de page identiques.
+
+### **9.2 Isolation, snapshots, diff et publication**
+
+Toutes les opérations avant `accept` restent dans `validation_run_pages.working_json` et ne mutent pas les tables officielles. Un snapshot exposé est logique et restaure seulement la copie de travail. Les diffs comparent baseline/working avec empreintes SHA-256, page par page ou pour le run entier. Le rapport `ragdom.validation-report.v1` regroupe run, diff, événements document/page et benchmarks rattachés.
+
+L'acceptation est atomique et porte sur le **run entier** : verrou d'écriture, contrôle anti-concurrence par `baseline_hash`, protection des éditions humaines, contrôle de tous les propriétaires et liens cross-document, puis remplacement coordonné des pages. Le rejet est lui aussi au niveau run et ne publie rien. Il n'existe pas d'accept/reject page par page ; seule la restauration de copie peut cibler une page.
+
+### **9.3 Schéma, curriculum et espace vectoriel**
+
+Les migrations additives **005/006** apportent runs/pages/events/snapshots, provenance benchmark/artefact, profils embeddings, ownership curriculum par document, hash de baseline et unicité d'un job actif par page. Le curriculum devient sûr en multi-livres : terms, programs, assessments et links appartiennent explicitement à un document ; les données legacy ambiguës ne sont jamais backfillées au hasard.
+
+L'espace vectoriel compatible est gelé sur le modèle FastEmbed multilingue MiniLM-L12-v2 en pooling **mean**, 384 dimensions normalisées. Le profil persistant inclut paramètres de préfixe, troncature, format, métrique et version de pipeline. Profil manquant ou incompatible, mélange de profils actifs et vecteurs de dimensions erronées sont refusés/diagnostiqués ; RAGDom ne réindexe jamais silencieusement.
+
+### **9.4 UI, readonly et sécurité**
+
+Le Studio est intégré à Automation : builder avec preview obligatoire, sélecteur de scope multi-base/multi-document, liste paginée, deep-link `db/run/document/page`, progression, inspecteur (chunks, artefacts, TOC, curriculum, benchmarks), diff, restauration et modale de confirmation avant acceptation. Le suivi interroge uniquement le run ouvert toutes les 5 secondes : **polling ciblé, pas de SSE Validation dédié**. Le flux SSE Pipeline reste indépendant.
+
+En readonly, le frontend désactive les actions et le middleware masque toutes les routes `/api/validation` en 404. En mode administré, session ou Bearer est exigé. La sécurité complète inclut DTO stricts, nom de base sanitisé, validation de scope, ownership document/page, interdiction des références cross-document, protection `is_human_edited`, conflit optimiste et transaction unique de publication.
+
+### **9.5 Limite honnête et état qualité**
+
+La requalification mutante `POST /api/pipeline/requalify-artifacts` avec `run_id` retourne volontairement **409** faute d'artefacts de staging opérés directement dans `working_json`; son `dry_run` peut être scopé au run. Cette fermeture évite toute mutation officielle hors acceptation.
+
+Preuves rejouées : pytest **149/149** normal et **149/149** faible mémoire, Vitest **13/13**, build Vite **8.2.2**/TypeScript vert, React Router DOM **7.18.2**, `npm audit` **0 vulnérabilité**.

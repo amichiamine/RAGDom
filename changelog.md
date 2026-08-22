@@ -7,6 +7,17 @@
 
 ---
 
+## 2026-08-22 — Studio de validation final
+
+- Ajout du routeur admin `/api/validation` : résolution non mutante des scopes universels (`base` multi-documents, document, TOC et alias chapter/course/title, page, plage, sélection), runs et copies de travail document/page, snapshots logiques/restauration, diffs page/run, rapports, benchmarks et diagnostics embeddings.
+- Publication sécurisée : baseline SHA-256, copies isolées, protection `is_human_edited`, validation globale des références/owners cross-document, acceptation atomique et rejet au **niveau run**. Aucun accept/reject page par page.
+- Migrations additives 005/006 : tables Validation, provenance benchmark/artefact, ownership curriculum multi-document (terms/programs/assessments/links), profils embeddings, `baseline_hash`, événements documentés et unicité des jobs actifs par page.
+- Profil FastEmbed compatible durci : MiniLM-L12-v2 multilingue, pooling **mean**, 384 dimensions normalisées et contrat complet; profils manquants/incompatibles ou multiples refusés sans réindexation silencieuse.
+- UI Studio intégrée à Automation : preview, deep-links db/run/document/page, liste/pagination, inspecteur et diff, restauration, confirmation d'acceptation, readonly. Suivi par polling ciblé 5 s, **pas de SSE Validation dédié**.
+- Sécurité : DTO stricts, sanitisation de base, contrôle des scopes et owners, auth admin; toutes les routes Validation sont masquées en 404 en readonly.
+- Limite honnête : requalification mutante avec `run_id` refusée en 409 tant que les artefacts de staging ne sont pas opérés dans la copie de travail; `dry_run` possible.
+- Dépendances et qualité corrigées : Vite **8.2.2**, React Router DOM **7.18.2**, Vitest **13/13**, `npm audit` **0 vulnérabilité**, pytest **149/149** normal et **149/149** faible mémoire.
+
 ## 2026-08-22 — V5.1 : fusion RRF filtrée par canal
 
 - Les rangs BM25 et vectoriels sont désormais calculés uniquement après application de leur seuil brut respectif ; un voisin vectoriel hors seuil ne peut plus reclasser un résultat lexical valide.

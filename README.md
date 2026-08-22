@@ -78,6 +78,18 @@ Depuis la racine : `npm install` puis `npm run dev` (lance simultanément le bac
 
    Réglages par variables d'environnement (valeurs par défaut, aucune obligatoire) : `RAGDOM_RELEASE_REPO` (défaut `amichiamine/RAGDom`), `RAGDOM_RELEASE_TAG` (défaut `corpus-1am-v1`), `RAGDOM_PUBLISHED_DBS` (défaut `<racine>/databases_publiees`).
 
+### **0ter. STUDIO DE VALIDATION FINAL (MAJ 2026-08-22)**
+
+Le Studio est disponible dans **Automation** et s'appuie sur le routeur admin `/api/validation`. Il permet de prévisualiser puis valider une base entière multi-documents, un document, une entrée TOC (`toc/chapter/course/title`), une page, une plage ou une sélection. Chaque run conserve une baseline et une copie de travail isolée par document/page, avec snapshots logiques restaurables, diffs, rapport et benchmarks rattachés. Tant que le run n'est pas accepté, les tables officielles ne changent pas.
+
+L'acceptation et le rejet portent sur **le run entier**. L'acceptation est atomique et refuse toute baseline devenue obsolète, écrasement d'édition humaine ou référence cross-document. Le suivi UI est un polling ciblé du run ouvert toutes les 5 s ; il n'existe pas de SSE Validation dédié. En `RAGDOM_READONLY=true`, le Studio est désactivé et les routes Validation sont masquées en 404.
+
+Les migrations SQLite 005/006 rendent le dispositif compatible avec les bases multi-livres (ownership curriculum explicite) et ajoutent runs/copies/events/snapshots, `baseline_hash`, provenance et profils embeddings. Le profil compatible courant utilise FastEmbed MiniLM-L12-v2, pooling **mean**, 384 dimensions normalisées ; aucun mélange de profils actifs ni réindexation silencieuse.
+
+**Limite connue :** une requalification mutante `/api/pipeline/requalify-artifacts` avec `run_id` renvoie 409 faute de staging des artefacts dans la copie de travail ; le `dry_run` scopé reste possible. Les décisions Validation ne doivent jamais contourner ce garde-fou.
+
+**Versions et qualité vérifiées :** Vite **8.2.2**, React Router DOM **7.18.2**, Vitest **13/13**, `npm audit` **0 vulnérabilité**, pytest **149/149** en mode normal et **149/149** avec `RAGDOM_LOW_MEMORY=true`.
+
 **Instructions pour ArchiSys3.0 :**
 
 Attache les **fichiers** suivants à ta session avec l'agent, puis copie-colle le bloc de texte ci-dessous comme **premier message** de la session.

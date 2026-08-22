@@ -1527,3 +1527,40 @@ const domainHue = (name: string) => [...name].reduce((h, c) => (h * 31 + c.charC
 
 * `package.json` : + `"@tanstack/react-virtual": "^3.10.8"` (tech_specs §9, whitelist gelée amendée).
 * D.O.D frontend +2 tests (tech_specs §5.2) : Virtualisation (1000+ éléments à 60 fps, DOM borné) et Command Palette (pilotage 100% clavier).
+
+---
+
+## **PARTIE 9 : VALIDATION STUDIO — UI FINALE IMPLÉMENTÉE (MAJ 2026-08-22)**
+
+### **9.1 Intégration et composants**
+
+Le Studio vit dans `AutomationView` et reçoit `databases`, `activeDb` et `health.readonly`. Son implémentation est découpée en :
+
+- `ValidationStudio` : composition builder + panneau des runs ;
+- `ValidationRunBuilder` : scope, prévisualisation obligatoire, création du run ;
+- `ScopeSelector` : base, document, niveau, TOC, page/plage/sélection ;
+- `ValidationRunsPanel` : liste, pagination client, détail, progression, pages, décisions ;
+- `ValidationDiffView` : diff chunks/artefacts avant/après ;
+- `ValidationInspector` : copie de travail enrichie avec TOC, curriculum, benchmarks et liens vers les écrans sources.
+
+Le client `api.validation` adapte strictement le contrat backend : `database`→`base`, `selection`→`page_selection`; preview via `/resolve-scope`; runs/pages/snapshots/diffs/accept/reject/cancel via `/api/validation`. Un run de scope `base` peut contenir plusieurs documents ; les clés et deep-links incluent alors `document_id` pour désambiguïser la page.
+
+### **9.2 Parcours et décisions**
+
+1. Choisir une base puis un scope universel ; charger documents et TOC réels.
+2. Exécuter la prévisualisation non mutante et afficher nombre de pages/cibles.
+3. Lancer un run isolé, ouvrir automatiquement sa première `(document,page)` et conserver `db`, `run`, `document`, `page` dans l'URL.
+4. Inspecter baseline/copie, diff chunks/artefacts, TOC/curriculum/benchmarks ; restaurer une page ou tout le run depuis la baseline/snapshot logique.
+5. Accepter ou rejeter **le run entier**. Il n'existe pas de décision accept/reject au niveau page. L'acceptation exige une modale récapitulant base, scope, pages et cibles.
+
+### **9.3 Suivi, readonly et erreurs**
+
+`routes_validation.py` ne fournit aucun SSE. L'UI effectue donc un **polling ciblé toutes les 5 secondes du seul run deep-linké**, arrêté dès qu'il devient terminal. Le rafraîchissement manuel recharge liste, run et page ; le SSE `/api/pipeline/stream` n'est pas utilisé comme substitut Validation.
+
+En `readonly`, aucun appel Validation n'est lancé : liste et détail sont vidés, preview/lancement/restauration/annulation/acceptation/rejet sont désactivés, et un état explicite est affiché. Cette UI reflète la politique serveur : toutes les routes Validation sont administratives et masquées en 404 par le middleware readonly.
+
+Les erreurs 400/404/409 sont montrées inline et en toast. Sont notamment attendus : scope invalide, page multi-document ambiguë sans `document_id`, run terminal, baseline officielle modifiée, édition humaine protégée, référence cross-document et profil embedding incompatible. La requalification mutante Pipeline avec `run_id` reste hors parcours : elle renvoie 409 faute de staging des artefacts de copie de travail.
+
+### **9.4 Dépendances et preuves**
+
+Stack réellement verrouillée : React 19, TypeScript strict, **Vite 8.2.2**, `react-router-dom` **7.18.2**, Vitest 4.1.11. Preuves rejouées : **13/13 tests Vitest**, build Vite vert (3709 modules), `npm audit` **0 vulnérabilité** ; backend associé **149/149 pytest** en modes normal et faible mémoire.
