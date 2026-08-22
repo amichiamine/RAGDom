@@ -1,5 +1,20 @@
 # JOURNAL des passes (le plus récent en premier)
 
+## 2026-08-22 03:05 — V3.12 : GRAND AUDIT 4 axes + mise en conformité totale
+- Audits parallèles : live-navigateur (0 erreur console, 2 écarts), contrats
+  front↔back (1 bloquant key_id, 2 latents db manquant, types mensongers),
+  backend profond (500 sur db invalide ×8 routes, agrégats cours/évals faux,
+  TOC dérivé non-reconstruit après reprocess scopé), conformité doc (14 items
+  corrigeables + 4 arbitrages).
+- TOUT corrigé : wrapper 404/400 commun, agrégats justes (33/7 cours, 4/2 évals),
+  TOC dérivé reconstruit si non-natif, splitter \n/espace, fallback embedder
+  L6-v2, warning sécurité boot, key_id, db params, mapping badges sidebar,
+  toggle densité, sélection en masse quarantaine, inspecteur cycle de vie 🔬.
+- Doc alignée : tech_specs §3.6.1 (OCR VLM), §10 (env web), §14 (non paginés) ;
+  Blueprint §3.1 (modèle par clé), §7.4 (reprocess/reprise), §5.4 (déploiement) ;
+  current_state (60 routes, main unique). 55/55 tests, tsc 0.
+- Env web live vérifiés conformes : reveal=false, ask rate=12, token défini.
+- Multi-bases : parallélisme confirmé (ThreadPoolExecutor) — arbitrage B4 clos.
 ## 2026-08-22 02:00 — V3.11.1 : chargement infini élucidé AU NAVIGATEUR
 - Le fix V3.11 ne suffisait pas : effet React auto-annulant dans CoursTab
   (`loading` dans les deps → setLoading(true) relance l'effet → cleanup

@@ -66,9 +66,18 @@ def _get_embedder():
                      # → recherche BM25 seule (repli documenté tech_specs §3.3)
     try:
         from fastembed import TextEmbedding
-        _embedder["model"] = TextEmbedding("sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
-    except Exception:  # noqa: BLE001 — hors-ligne / modèle absent : FTS seul
+    except Exception:  # noqa: BLE001 — fastembed absent : FTS seul
         _embedder["model"] = None
+        return _embedder["model"]
+    # Modèle principal (multilingue FR/AR/EN) puis repli mono-lingue plus léger
+    # (tech_specs §3.2) avant d'abandonner la recherche vectorielle.
+    for model_name in ("sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+                       "sentence-transformers/all-MiniLM-L6-v2"):
+        try:
+            _embedder["model"] = TextEmbedding(model_name)
+            return _embedder["model"]
+        except Exception:  # noqa: BLE001 — hors-ligne / modèle absent : essaie le repli
+            _embedder["model"] = None
     return _embedder["model"]
 
 
@@ -94,6 +103,50 @@ def _split_units(markdown: str):
     return [u for u in units if u.strip()]
 
 
+def _has_open_math(text: str) -> bool:
+    """Un fragment laisse-t-il un bloc $$..$$ ouvert ? (nombre impair de $$)."""
+    return text.count("$$") % 2 == 1
+
+
+def _split_by_separator(unit: str, separator: str, max_tokens: int, encoder):
+    """Redécoupe un pavé monolithique sur `separator` (repli \\n puis espace),
+    sans jamais couper à l'intérieur d'un bloc $$..$$ (tech_specs §3.1)."""
+    fragments = unit.split(separator)
+    pieces, buffer = [], ""
+    for fragment in fragments:
+        candidate = (buffer + separator + fragment) if buffer else fragment
+        # Ne pas fermer un chunk tant qu'un bloc mathématique reste ouvert.
+        if buffer and _token_len(candidate, encoder) > max_tokens and not _has_open_math(buffer):
+            pieces.append(buffer)
+            buffer = fragment
+        else:
+            buffer = candidate
+    if buffer:
+        pieces.append(buffer)
+    return [p for p in pieces if p != ""]
+
+
+def _enforce_max_size(unit: str, max_tokens: int, encoder):
+    """Garantit qu'aucune unité ne dépasse max_tokens : replis hiérarchiques
+    \\n\\n → \\n → espace (dernier recours). Les blocs $$..$$ restent intègres."""
+    if _token_len(unit, encoder) <= max_tokens:
+        return [unit]
+    for separator in ("\n\n", "\n", " "):
+        if separator not in unit:
+            continue
+        pieces = _split_by_separator(unit, separator, max_tokens, encoder)
+        # Un séparateur n'a réduit la taille que s'il a réellement scindé le pavé.
+        if len(pieces) > 1:
+            result = []
+            for piece in pieces:
+                if _token_len(piece, encoder) > max_tokens and separator != " ":
+                    result.extend(_enforce_max_size(piece, max_tokens, encoder))
+                else:
+                    result.append(piece)
+            return result
+    return [unit]  # aucun séparateur exploitable (ou bloc math indivisible) : intègre
+
+
 def run(ctx: dict) -> dict:
     started = time.perf_counter()
     markdown = ctx.get("content_markdown", "") or ""
@@ -104,8 +157,13 @@ def run(ctx: dict) -> dict:
         encoder = None
 
     max_tokens, overlap_ratio = 512, 0.15
-    chunks, current, current_tokens = [], [], 0
+    # Découpage hiérarchique complet (tech_specs §3.1) : H2/H3 → \n\n → \n →
+    # espace en dernier recours pour les pavés monolithiques dépassant max_tokens.
+    base_units = []
     for unit in _split_units(markdown):
+        base_units.extend(_enforce_max_size(unit, max_tokens, encoder))
+    chunks, current, current_tokens = [], [], 0
+    for unit in base_units:
         unit_tokens = _token_len(unit, encoder)
         if current and current_tokens + unit_tokens > max_tokens:
             chunks.append("\n\n".join(current))

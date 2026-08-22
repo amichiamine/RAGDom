@@ -206,7 +206,21 @@
       "purge_type_ok": "اكتب OK لتأكيد التطهير",
       "purge_confirm_btn": "تنفيذ التطهير",
       "purged": "تم تنفيذ التطهير.",
-      "live_running": "توجد مهمة معالجة قيد التشغيل."
+      "live_running": "توجد مهمة معالجة قيد التشغيل.",
+      "lifecycle": "دورة الحياة",
+      "lifecycle_title": "دورة الحياة — صفحة",
+      "lifecycle_hint": "زمن استجابة المحرك لكل تمريرة على هذه الصفحة.",
+      "lifecycle_empty": "لا يوجد سجل أداء لهذه الصفحة.",
+      "lifecycle_page_required": "اختر صفحة لفحص دورة حياتها.",
+      "bench_engine": "المحرك",
+      "bench_latency": "زمن الاستجابة",
+      "bench_ram": "ذروة الذاكرة",
+      "bench_confidence": "الثقة",
+      "bench_vlm": "مزوّد VLM",
+      "bench_fallback": "تفعيل البديل",
+      "bench_yes": "نعم",
+      "bench_no": "لا",
+      "bench_none": "—"
     }
   },
   "pipeline": {
@@ -242,7 +256,10 @@
     "error_log": "سجل الأخطاء",
     "retry_selected": "إعادة المحاولة للمحدد",
     "not_retryable": "غير قابل لإعادة المحاولة (المصدر لم يتغيّر)",
-    "empty": "لا توجد عناصر في الحجر الصحي"
+    "empty": "لا توجد عناصر في الحجر الصحي",
+    "select_all": "تحديد الكل",
+    "n_selected": "{n} محدَّد",
+    "clear_selection": "مسح"
   },
   "settings": {
     "vec_threshold": "عتبة المسافة المتجهية",

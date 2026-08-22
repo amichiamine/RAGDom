@@ -2,7 +2,7 @@
 """RAGDom — Routes /api/search/* : hybride RRF, multi-bases, Ask RAG (Blueprint §7.3/§7.6).
 
 RRF k=60 (tech_specs §3.3) sur rangs BM25 (bm25() ASC = meilleur) + sqlite-vec.
-Seuils anti-hallucination RÉELS depuis app_settings : cosinus ≤ 0.45 OU bm25 ≤ -1.5.
+Seuils anti-hallucination RÉELS depuis app_settings : cosinus ≤ 0.45 OU bm25 ≤ -0.3.
 Mode fts5-fallback : BM25 seul. /ask : ZÉRO appel LLM si aucun chunk éligible.
 Python 3.9+.
 """

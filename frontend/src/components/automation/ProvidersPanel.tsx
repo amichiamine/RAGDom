@@ -168,7 +168,7 @@ export default function ProvidersPanel() {
       toast.success(t('buttons.add'))
       // Test automatique de la clé fraîchement ajoutée.
       try {
-        const res = await api.llm.testKey(created.id)
+        const res = await api.llm.testKey(created.key_id)
         toast.push(res.success ? 'success' : 'error', res.message)
       } catch (e) {
         toast.error(e instanceof Error ? e.message : t('common.error_generic'))

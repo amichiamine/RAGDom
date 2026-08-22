@@ -201,7 +201,7 @@ def _launch(db_name: str) -> None:
 
 @router.get("/status")
 def status(batch_id: str = Query(...), db_name: str = Query(alias="db")):
-    conn = db.get_connection(db_name)
+    conn = db.get_connection_or_http(db_name)
     try:
         batch = conn.execute(
             "SELECT status, pages_total, pages_done, updated_at FROM ingestion_batches WHERE id=?",
@@ -223,7 +223,7 @@ def status(batch_id: str = Query(...), db_name: str = Query(alias="db")):
 
 @router.get("/queue")
 def queue_state(db_name: str = Query(alias="db")):
-    conn = db.get_connection(db_name)
+    conn = db.get_connection_or_http(db_name)
     try:
         queued = conn.execute("SELECT COUNT(*) FROM pipeline_jobs WHERE status='QUEUED'").fetchone()[0]
         completed_today = conn.execute(
@@ -249,7 +249,7 @@ def stop():
 
 @router.delete("/batch/{batch_id}")
 def cancel_batch(batch_id: str, db_name: str = Query(alias="db")):
-    conn = db.get_connection(db_name)
+    conn = db.get_connection_or_http(db_name)
     try:
         cur = conn.execute("DELETE FROM pipeline_jobs WHERE batch_id=? AND status='QUEUED'", (batch_id,))
         conn.execute("UPDATE ingestion_batches SET status='STOPPED', updated_at=CURRENT_TIMESTAMP"
@@ -280,7 +280,7 @@ class ReprocessBody(BaseModel):
 def reprocess(body: ReprocessBody):
     if body.scope not in ("document", "page_range", "chapter"):
         raise HTTPException(400, "scope invalide (document | page_range | chapter)")
-    conn = db.get_connection(body.db)
+    conn = db.get_connection_or_http(body.db)
     try:
         row = conn.execute("SELECT source_path, total_pages FROM documents WHERE id=?",
                            (body.document_id,)).fetchone()
@@ -345,7 +345,7 @@ def purge(body: PurgeBody):
     if body.scope in ("page", "page_range", "chapter", "document", "artifacts_only") and not body.document_id \
             and body.scope != "artifacts_only":
         raise HTTPException(400, "document_id requis pour ce scope")
-    conn = db.get_connection(body.db)
+    conn = db.get_connection_or_http(body.db)
     try:
         # Périmètre de pages
         page_clause, args = "", []
@@ -373,8 +373,7 @@ def purge(body: PurgeBody):
 
         deleted = {
             "chunks": count("document_chunks", human),
-            "artifacts": count("scientific_artifacts", human) if body.scope != "artifacts_only"
-                         else count("scientific_artifacts", human),
+            "artifacts": count("scientific_artifacts", human),
             "toc_entries": (conn.execute("SELECT COUNT(*) FROM document_toc WHERE document_id=?",
                                          [body.document_id]).fetchone()[0]
                             if body.scope == "document" else
@@ -442,7 +441,7 @@ def reset(db_name: str = Query(alias="db"), document_id: Optional[str] = None):
 
 @router.get("/quarantine")
 def quarantine(db_name: str = Query(alias="db")):
-    conn = db.get_connection(db_name)
+    conn = db.get_connection_or_http(db_name)
     try:
         rows = conn.execute(
             "SELECT id, document_id, page_number, status, retry_count, error_log, updated_at"
@@ -461,7 +460,7 @@ class RetryBody(BaseModel):
 
 @router.post("/retry")
 def retry(body: RetryBody):
-    conn = db.get_connection(body.db)
+    conn = db.get_connection_or_http(body.db)
     try:
         retried, refused = 0, []
         for job_id in body.job_ids:

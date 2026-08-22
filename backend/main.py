@@ -31,6 +31,16 @@ async def lifespan(app: FastAPI):
     print("[RAGDom] Initialisation de la base de configuration...")
     init_config_db()
 
+    # Avertissement sécurité : exposition réseau (0.0.0.0) sans aucun contrôle
+    # d'accès (ni jeton env, ni compte). Aucun blocage — postulat Local-First.
+    if config.BACKEND_HOST == "0.0.0.0" and not config.RAGDOM_AUTH_TOKEN:
+        from api.routes_auth import users_exist
+        if not users_exist():
+            print("[RAGDom][AVERTISSEMENT] Administration OUVERTE : le backend écoute "
+                  "sur 0.0.0.0 sans RAGDOM_AUTH_TOKEN ni compte utilisateur. "
+                  "Définissez RAGDOM_AUTH_TOKEN (ou créez un compte via /api/auth/setup) "
+                  "avant toute exposition réseau.")
+
     print("[RAGDom] Vérification des dossiers physiques...")
     for env_var in ["SOURCES_DIR", "DATABASES_DIR", "PIPELINE_SET_DIR", "MODELS_DIR", "ENGINES_DIR"]:
         path = os.environ.get(env_var)

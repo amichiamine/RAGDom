@@ -100,6 +100,23 @@ def get_connection(db_name: str) -> sqlite3.Connection:
     return conn
 
 
+def get_connection_or_http(db_name: str) -> sqlite3.Connection:
+    """Ouvre une base documentaire en traduisant les erreurs d'ouverture en
+    HTTPException (contrat API commun : 400 nom invalide / 404 base introuvable).
+
+    Factorisation du garde-fou historique de routes_library._conn — utilisée par
+    library, curriculum et pipeline pour qu'un ?db= invalide ne remonte jamais en
+    500 (Skills §3.3/§3.4).
+    """
+    from fastapi import HTTPException  # import local : db/ reste utilisable hors HTTP
+    try:
+        return get_connection(db_name)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc))
+
+
 def create_database(db_name: str) -> sqlite3.Connection:
     """Crée (ou ouvre) une base documentaire et applique le DDL conditionnel."""
     db_path = sanitize_db_name(db_name)

@@ -1,5 +1,6 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { ThemeProvider } from '@/contexts/ThemeContext'
+import { DensityProvider } from '@/contexts/DensityContext'
 import { DatabaseProvider } from '@/contexts/DatabaseContext'
 import { LanguageProvider } from '@/contexts/LanguageContext'
 import { EngineProvider } from '@/contexts/EngineContext'
@@ -19,6 +20,7 @@ import LoginView from '@/views/LoginView'
 export default function App() {
   return (
     <ThemeProvider>
+      <DensityProvider>
       <LanguageProvider>
         <ToastProvider>
           <ConnectionGuard>
@@ -39,6 +41,7 @@ export default function App() {
           </ConnectionGuard>
         </ToastProvider>
       </LanguageProvider>
+      </DensityProvider>
     </ThemeProvider>
   )
 }

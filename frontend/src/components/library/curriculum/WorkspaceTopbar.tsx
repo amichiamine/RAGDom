@@ -1,6 +1,8 @@
 import { Link } from 'react-router-dom'
-import { House, Cog, PanelRight } from 'lucide-react'
+import { House, Cog, PanelRight, Rows3, Rows4 } from 'lucide-react'
 import { useCurriculumBridge, type TabKey } from '@/contexts/CurriculumBridgeContext'
+import { useDensity } from '@/contexts/DensityContext'
+import { useLanguage } from '@/contexts/LanguageContext'
 
 /** Libellés arabes normatifs des onglets (template l.1808-1815). */
 export const TAB_LABELS: Record<TabKey, string> = {
@@ -27,6 +29,8 @@ interface Props {
  */
 export default function WorkspaceTopbar({ dbName, pagesCount, docsCount, dbApproved, onToggleSidebar }: Props) {
   const { activeTab } = useCurriculumBridge()
+  const { density, toggleDensity } = useDensity()
+  const { t } = useLanguage()
 
   return (
     <div className="workspace-topbar">
@@ -35,6 +39,16 @@ export default function WorkspaceTopbar({ dbName, pagesCount, docsCount, dbAppro
         <Link to="/automation" className="btn btn-outline-success btn-sm rounded-pill"><Cog size={15} /> الأتمتة</Link>
         <button className="btn btn-outline-secondary btn-sm rounded-pill" onClick={onToggleSidebar} aria-label="toggle sidebar">
           <PanelRight size={15} />
+        </button>
+        {/* Densité d'affichage confort/compact (§8.2) — persistée localStorage['ragdom_density'] */}
+        <button
+          className="btn btn-outline-secondary btn-sm rounded-pill"
+          onClick={toggleDensity}
+          aria-pressed={density === 'compact'}
+          title={density === 'compact' ? t('density.comfortable') : t('density.compact')}
+        >
+          {density === 'compact' ? <Rows3 size={15} /> : <Rows4 size={15} />}
+          {' '}{density === 'compact' ? t('density.comfortable') : t('density.compact')}
         </button>
         <span style={{ color: 'var(--text-muted)', fontSize: '0.85rem', fontWeight: 600 }} dir="auto">
           {dbName ?? '—'} <span style={{ opacity: 0.5 }}>/</span> {TAB_LABELS[activeTab]}

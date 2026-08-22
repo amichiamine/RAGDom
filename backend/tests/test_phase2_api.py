@@ -298,3 +298,63 @@ def test_key_model_per_key():
     keys = {k["id"]: k for k in client.get("/api/llm/keys").json()["keys"]}
     assert keys[k1]["active_model"] == "modele-alpha" and keys[k2]["active_model"] == "modele-beta"
     client.delete("/api/llm/keys/%s" % k1); client.delete("/api/llm/keys/%s" % k2)
+
+
+# ── Mise en conformité : ?db= invalide → 404 (jamais 500) sur curriculum ET pipeline ──
+def test_invalid_db_returns_404_not_500():
+    """Une base inexistante doit remonter 404 (garde-fou _conn factorisé),
+    jamais une 500 (ValueError/FileNotFoundError crues). Point d'audit n°1."""
+    assert client.get("/api/curriculum/terms", params={"db": "nope.sqlite"}).status_code == 404
+    assert client.get("/api/pipeline/queue", params={"db": "nope.sqlite"}).status_code == 404
+    # nom malformé (regex stricte) → 400
+    assert client.get("/api/pipeline/queue", params={"db": "../etc/passwd"}).status_code == 400
+    # purge sur base inexistante → 404 (et non 500)
+    purge_nope = client.post("/api/pipeline/purge",
+                             json={"db": "nope.sqlite", "scope": "curriculum_only", "dry_run": True})
+    assert purge_nope.status_code == 404
+
+
+# ── Mise en conformité : agrégat « cours » = unités de lecture réelles (TOC level=1) ──
+def test_curriculum_aggregate_courses_reflects_toc():
+    """`courses` = COUNT(document_toc level=1), repli COUNT(documents) si 0 ;
+    `assessments` = max(assessments, chunks evaluation_exam). Points d'audit 2 & 3."""
+    agg_db = "Agg_TestAPI.sqlite"
+    for suffix in ("", "-wal", "-shm"):
+        path = os.path.join(config.DATABASES_DIR, agg_db + suffix)
+        if os.path.exists(path):
+            os.remove(path)
+    conn = db.create_database(agg_db)
+    try:
+        conn.execute("INSERT INTO documents (id, title, filename, source_path, total_pages)"
+                     " VALUES ('d1','Doc','doc.pdf','/tmp/inexistant_doc.pdf', 30)")
+        # 3 chapitres (level=1) + 1 sous-section (level=2, ne compte pas comme cours)
+        for i, (lvl, ps) in enumerate([(1, 1), (1, 11), (1, 21), (2, 12)]):
+            conn.execute("INSERT INTO document_toc (id, document_id, level, title, page_start)"
+                         " VALUES (?, 'd1', ?, ?, ?)", ("t%d" % i, lvl, "Chap %d" % i, ps))
+        # 2 chunks evaluation_exam (0 assessment curriculum → repli sur les chunks)
+        for i in range(2):
+            conn.execute("INSERT INTO document_chunks (id, document_id, page_number, chunk_index,"
+                         " content_markdown, pedagogical_type) VALUES (?, 'd1', ?, ?, 'Examen', 'evaluation_exam')",
+                         ("c%d" % i, i + 1, i))
+        conn.commit()
+    finally:
+        conn.close()
+    try:
+        agg = client.get("/api/library/curriculum", params={"db": agg_db}).json()["aggregates"]["global"]
+        assert agg["courses"] == 3          # 3 chapitres TOC level=1 (pas les chunks course_theory)
+        assert agg["assessments"] == 2      # max(0 assessments, 2 chunks evaluation_exam)
+        assert agg["chapters"] == 3
+        # Repli documents : sans aucune entrée TOC, courses tombe sur COUNT(documents).
+        conn2 = db.get_connection(agg_db)
+        try:
+            conn2.execute("DELETE FROM document_toc")
+            conn2.commit()
+        finally:
+            conn2.close()
+        agg2 = client.get("/api/library/curriculum", params={"db": agg_db}).json()["aggregates"]["global"]
+        assert agg2["courses"] == 1         # repli : COUNT(documents) = 1
+    finally:
+        for suffix in ("", "-wal", "-shm"):
+            path = os.path.join(config.DATABASES_DIR, agg_db + suffix)
+            if os.path.exists(path):
+                os.remove(path)

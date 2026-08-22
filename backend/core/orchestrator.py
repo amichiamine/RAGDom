@@ -297,21 +297,49 @@ class PipelineOrchestrator:
 _HEADING_RE = None  # compilé paresseusement (module importé au boot)
 
 
+def _has_native_toc(source_path) -> bool:
+    """Le PDF source porte-t-il des signets NATIFS ? (fitz get_toc non vide).
+
+    source_path vient de la base ; si le fichier est absent (disque éphémère,
+    /sources/ non monté) on considère le document NON-natif — jamais de crash.
+    """
+    if not source_path:
+        return False
+    try:
+        import fitz
+        pdf = fitz.open(source_path)
+        try:
+            return bool(pdf.get_toc())
+        finally:
+            pdf.close()
+    except Exception:  # noqa: BLE001 — fichier absent / illisible : non-natif
+        return False
+
+
 def _build_toc_from_headings(conn, doc_id: str) -> int:
     """Sommaire de REPLI (documents scannés sans signets natifs) : dérivé des
     titres Markdown (## niveau 1, ### niveau 2) produits par l'extraction.
-    N'écrit RIEN si un sommaire natif existe déjà. Idempotent (purge scope
-    incluse : les toc_entries du document sont recalculées à chaque finalize
-    complet). Relie les chunks du périmètre à leur entrée (toc_id).
+
+    Ne touche JAMAIS un sommaire NATIF (le PDF porte des signets fitz) : dans ce
+    cas la fonction est inerte. Pour un document NON-natif, le sommaire dérivé est
+    intégralement reconstruit à chaque finalize (DELETE puis rebuild) — idempotent
+    et réparateur : après un reprocess chapter qui a laissé des trous dans le TOC
+    dérivé, celui-ci est recalculé sans dérive. Relie les chunks à leur entrée.
     """
     import re as _re
     import uuid as _uuid
     global _HEADING_RE
     if _HEADING_RE is None:
         _HEADING_RE = _re.compile(r"^(#{2,3})\s+(.{3,120})$", _re.M)
-    if conn.execute("SELECT COUNT(*) FROM document_toc WHERE document_id=?",
-                    (doc_id,)).fetchone()[0] > 0:
-        return 0
+    source_path = conn.execute("SELECT source_path FROM documents WHERE id=?",
+                               (doc_id,)).fetchone()
+    source_path = source_path[0] if source_path else None
+    if _has_native_toc(source_path):
+        return 0  # sommaire natif : intouchable
+    # NON-natif : on repart du TOC dérivé à neuf (répare toute dérive/trou).
+    # Les liens chunk→toc sont remis à NULL pour une reconstruction complète.
+    conn.execute("DELETE FROM document_toc WHERE document_id=?", (doc_id,))
+    conn.execute("UPDATE document_chunks SET toc_id=NULL WHERE document_id=?", (doc_id,))
     rows = conn.execute(
         "SELECT page_number, content_markdown FROM document_chunks"
         " WHERE document_id=? AND content_markdown LIKE '%#%'"
@@ -329,6 +357,7 @@ def _build_toc_from_headings(conn, doc_id: str) -> int:
                 last_title[2] = None
             break  # UNE entrée par page : granularité sommaire, pas index exhaustif
     if not entries:
+        conn.commit()  # persiste la purge du TOC dérivé même sans nouveau titre
         return 0
     total = conn.execute("SELECT total_pages FROM documents WHERE id=?", (doc_id,)).fetchone()[0]
     parent_l1 = None

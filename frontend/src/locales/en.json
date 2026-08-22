@@ -206,7 +206,21 @@
       "purge_type_ok": "Type OK to confirm the purge",
       "purge_confirm_btn": "Execute purge",
       "purged": "Purge executed.",
-      "live_running": "A processing job is running."
+      "live_running": "A processing job is running.",
+      "lifecycle": "Lifecycle",
+      "lifecycle_title": "Lifecycle — Page",
+      "lifecycle_hint": "Engine latencies per pass for this page.",
+      "lifecycle_empty": "No performance record for this page.",
+      "lifecycle_page_required": "Select a page to inspect its lifecycle.",
+      "bench_engine": "Engine",
+      "bench_latency": "Latency",
+      "bench_ram": "Peak RAM",
+      "bench_confidence": "Confidence",
+      "bench_vlm": "VLM provider",
+      "bench_fallback": "Fallback triggered",
+      "bench_yes": "Yes",
+      "bench_no": "No",
+      "bench_none": "—"
     }
   },
   "pipeline": {
@@ -242,7 +256,10 @@
     "error_log": "Error log",
     "retry_selected": "Retry selection",
     "not_retryable": "Not retryable (source unchanged)",
-    "empty": "No items in quarantine"
+    "empty": "No items in quarantine",
+    "select_all": "Select all",
+    "n_selected": "{n} selected",
+    "clear_selection": "Clear"
   },
   "settings": {
     "vec_threshold": "Vector distance threshold",

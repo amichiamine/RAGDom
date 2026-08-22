@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Database, FileText, ListTree, Layers, RefreshCw, Trash2, UserPen, Image as ImageIcon, Search, Activity, Pencil } from 'lucide-react'
+import { Database, FileText, ListTree, Layers, RefreshCw, Trash2, UserPen, Image as ImageIcon, Search, Activity, Pencil, Microscope } from 'lucide-react'
 import { api } from '@/lib/api'
 import type { Chunk, Document, TocNode, DatabaseInfo, PurgePayload, PurgeResult, PurgeScope } from '@/types'
 import { useLanguage } from '@/contexts/LanguageContext'
@@ -8,6 +8,7 @@ import Modal from '@/components/common/Modal'
 import ImageModal from '@/components/library/curriculum/ImageModal'
 // Le composant d'édition est IMPORTÉ tel quel (Markdown+KaTeX+lint+PUT). Jamais modifié ici.
 import ChunkEditor from '@/components/library/ChunkEditor'
+import LifecycleInspector from './LifecycleInspector'
 
 interface Props {
   /** Bases exposées par le contexte (jamais de liste en dur — cf. api.system.getDatabases). */
@@ -70,6 +71,8 @@ export default function ContentsExplorer({
   // ── Édition & scan ──
   const [editing, setEditing] = useState<Chunk | null>(null)
   const [scanChunk, setScanChunk] = useState<Chunk | null>(null)
+  // ── Inspecteur de cycle de vie par page (§8.3.4) ──
+  const [lifecyclePage, setLifecyclePage] = useState<number | null>(null)
 
   // ── Purge scopée (dry_run → impact → confirmation) ──
   const [purgeImpact, setPurgeImpact] = useState<PurgeResult | null>(null)
@@ -314,6 +317,10 @@ export default function ContentsExplorer({
                 <button className="btn btn-sm btn-outline-danger" onClick={() => previewPurge('page')} disabled={busy}>
                   <Trash2 size={14} /> {t('automation.contents.purge_page')}
                 </button>
+                {/* Inspecteur de cycle de vie de la page (§8.3.4) — latences du moteur par passe. */}
+                <button className="btn btn-sm btn-outline-secondary" onClick={() => setLifecyclePage(Number(pageNumber))} title={t('automation.contents.lifecycle')}>
+                  <Microscope size={14} /> 🔬 {t('automation.contents.lifecycle')}
+                </button>
               </>
             )}
           </div>
@@ -434,6 +441,16 @@ export default function ContentsExplorer({
           src={api.library.getPageScanUrl(db, documentId, scanChunk.page_number, false)}
           fallbackSrc={api.library.getPageScanUrl(db, documentId, scanChunk.page_number, true)}
           onClose={() => setScanChunk(null)}
+        />
+      )}
+
+      {/* Inspecteur de cycle de vie par page (§8.3.4) */}
+      {lifecyclePage != null && db && documentId && (
+        <LifecycleInspector
+          db={db}
+          documentId={documentId}
+          pageNumber={lifecyclePage}
+          onClose={() => setLifecyclePage(null)}
         />
       )}
 

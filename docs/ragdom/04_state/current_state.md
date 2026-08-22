@@ -1,12 +1,20 @@
 # État Actuel du Projet RAGDom
 
-**Phase :** EXÉCUTION AUTONOME N°2 TERMINÉE — v1 complète livrée sur `main` ·
-extensions post-v1 (Web-Ready + Parallélisme D4-B) livrées sur la branche `post-v1`
-**Date de mise à jour :** 2026-08-21 (soir)
+**Phase :** V3.11.1 — v1 complète + extensions Web-Ready et Parallélisme D4-B
+**fusionnées sur une BRANCHE UNIQUE `main`** (plus de branche `post-v1` : tout est
+sur `main`).
+**Date de mise à jour :** 2026-08-22
 
-## OPÉRATIONNEL SUR MAIN (preuves : pytest 47/47, bench réels, e2e)
-- [x] Backend COMPLET : noyau agnostique, moteur sci-engine 9 couches, 6 routers
-      (48 routes avec le manifeste page-scans), Key Manager, purge scopée, ask RAG, SSE
+> **Mémoire de reprise :** `.hyperagent/` à la racine du dépôt sert de mémoire de
+> reprise inter-sessions (état d'avancement, décisions, points de reprise). À
+> consulter au démarrage de toute session de travail.
+
+## OPÉRATIONNEL SUR MAIN (preuves : pytest, bench réels, e2e)
+- [x] Backend COMPLET : noyau agnostique, moteur sci-engine, **7 routers** exposant
+      **60 routes** (décompte réel `grep -c '@router\.' backend/api/*.py` au 2026-08-22 :
+      auth 4 · curriculum 5 · library 13 · llm 10 · pipeline 11 · search 3 · system 14),
+      Key Manager (modèle par clé + auto-détection live), purge scopée, `/pipeline/reprocess`,
+      reprise auto des files + chaînage multi-bases, OCR VLM de page entière (Tier 2), ask RAG, SSE
 - [x] **Lot 1 sprint** : GET /library/page-scans (manifeste galerie), agrégats curriculum
       (per_term + global en SQL), filtres chunks (pedagogical_type/page_start/page_end/toc_id)
 - [x] **Frontend pixel-perfect COMPLET (vagues A/B/C/D + audit croisé)** :
@@ -22,11 +30,13 @@ extensions post-v1 (Web-Ready + Parallélisme D4-B) livrées sur la branche `pos
 - [x] Audit statique croisé : 2 bugs bloquants-runtime corrigés (formes pagination getChunks
       et getPageScansManifest — perte silencieuse au-delà de la page 1)
 
-## BRANCHE post-v1
+## FUSIONNÉ SUR MAIN (ex-branche post-v1, désormais unique)
 - [x] Lot Web-Ready (Phase 7) : RAGDOM_READONLY (admin absent = 404), auth Bearer,
       rate-limit /ask (429), verrou /reveal (403), CORS multi-origines, health.readonly
 - [x] Phase 6 (D4-B) : layer_2_extract_v2 add-only, pool 2-3 workers par blocs,
       équivalence des sorties prouvée, flag RAGDOM_INTRA_PAGE_WORKERS
+- [x] Déploiement Docker single-origin, bases publiées (release GitHub → databases_publiees/
+      → seed DATABASES_DIR), RAGDOM_LOW_MEMORY (BM25 seul ≤512 Mo), RAGDOM_SEED_LLM_KEYS
 
 ## RESTE À FAIRE (machine cible uniquement)
 1. ~~npm install + tsc + vite build~~ **FAIT le 2026-08-21 soir** (registre ouvert par l'utilisateur) :
@@ -36,8 +46,8 @@ extensions post-v1 (Web-Ready + Parallélisme D4-B) livrées sur la branche `pos
    rapid-*/fastembed au 1er run (RAGDOM_OFFLINE=false).
 3. Tests Jest/Playwright (node_modules requis). Reliquat mineur PARTIE 8 : toggle densité,
    sélection en masse, Inspecteur de Cycle de Vie.
-4. Post-v1 : chiffrement des clés LLM au repos (seul item Web-Ready restant) ; merge de
-   la branche post-v1 quand un déploiement web est décidé.
+4. Chiffrement des clés LLM au repos (seul item Web-Ready restant). *(Le merge post-v1 → main
+   est FAIT : branche unique `main`.)*
 
 ## Prochaine Action Prioritaire
 Machine cible Windows : cloner, README §0, backend 47/47, npm install + build, ingérer un
@@ -45,3 +55,5 @@ premier manuel réel, peupler le curriculum via CurriculumStudio → les 6 ongle
 
 
 **MAJ 2026-08-21 (V3.8)** : modèle LLM par clé (active_model), POST /pipeline/reprocess (ré-exécution scopée), PipelineLauncher UI (lancer/ré-exécuter/stop/file), SourcesManager avec dossiers imbriqués + upload ciblé, 3 écarts d'audit Library corrigés. 53/53 tests, tsc/build verts.
+
+**MAJ 2026-08-22 (V3.11.1)** : alignement de la doc normative sur le code audité (le code fait référence) — décompte réel 60 routes / 7 routers, branche unique `main` (post-v1 fusionné), `.hyperagent/` = mémoire de reprise. Documenté côté specs : OCR VLM de page entière Tier 2 (RAGDOM_VLM_PAGE_OCR), modèle par clé + auto-détection live, /pipeline/reprocess + reprise/chaînage + sommaire de repli au finalize, déploiement Docker single-origin (bases publiées, RAGDOM_LOW_MEMORY), variables d'env web réelles, .env versionné pré-rempli sans secrets, formes {data,pagination}+alias, toc/curriculum non paginés.

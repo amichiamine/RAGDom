@@ -15,12 +15,7 @@ router = APIRouter()
 
 
 def _conn(db_name: str):
-    try:
-        return db.get_connection(db_name)
-    except ValueError as exc:
-        raise HTTPException(400, str(exc))
-    except FileNotFoundError as exc:
-        raise HTTPException(404, str(exc))
+    return db.get_connection_or_http(db_name)
 
 
 def _paginate(page: int, limit: int, total: int) -> dict:
@@ -239,8 +234,15 @@ def _curriculum_aggregates(conn) -> dict:
         "per_term": per_term,
         "global": {
             "programs": one("SELECT COUNT(*) FROM curriculum_programs"),
-            "assessments": one("SELECT COUNT(*) FROM assessments"),
-            "courses": one("SELECT COUNT(*) FROM document_chunks WHERE pedagogical_type='course_theory'"),
+            # « évaluations » : au moins autant que les sujets d'examen extraits
+            # (les assessments curriculum sont optionnels — repli sur les chunks).
+            "assessments": max(
+                one("SELECT COUNT(*) FROM assessments"),
+                one("SELECT COUNT(*) FROM document_chunks WHERE pedagogical_type='evaluation_exam'")),
+            # « cours » = unités de lecture réelles : chapitres du sommaire (level=1),
+            # repli sur le nombre de documents si aucun sommaire n'a été dérivé.
+            "courses": (one("SELECT COUNT(*) FROM document_toc WHERE level=1")
+                        or one("SELECT COUNT(*) FROM documents")),
             "exercises": one("SELECT COUNT(*) FROM document_chunks"
                              " WHERE pedagogical_type IN ('exercise_solved','exercise_unsolved')"),
             "solutions": one("SELECT COUNT(*) FROM document_chunks WHERE pedagogical_type='solution_only'"),

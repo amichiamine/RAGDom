@@ -153,6 +153,14 @@ Le système intègre un **Key Manager / Circuit Breaker** pour piloter les infé
 3. **Détection Dynamique des Modèles :** L'orchestrateur interroge l'API du provider pour lister les modèles disponibles associés à chaque clé. Ces modèles sont sélectionnables via l'UI.
 4. **Bascule Hiérarchique (Fallback Total) :** Si **toutes** les clés Cloud échouent ou sont épuisées, le système bascule automatiquement sur un serveur local (Ollama / LM Studio GGUF) sans intervention humaine.
 
+**Modèle PAR CLÉ (MAJ 2026-08-22 — source : `backend/llm/key_manager.py`) :** le modèle est un attribut **de la clé** (`llm_keys.active_model`), pas seulement du provider (`llm_settings.active_model`). Conséquences réelles :
+
+* **Même clé enregistrable N fois** avec N modèles/quotas distincts : chaque ligne `llm_keys` (même `api_key`, `active_model` différent) est une entrée indépendante, avec sa propre rotation et son propre blocage temporaire.
+* **Priorité clé > provider :** à la génération, `effective_model = active_model DE LA CLÉ or active_model DU PROVIDER` — le modèle porté par la clé l'emporte sur le réglage provider.
+* **Auto-détection LIVE (zéro modèle codé en dur) :** si aucun modèle n'est fixé (clé ni provider), `_autodetect_working_model` liste les modèles EN DIRECT via l'API du provider, relègue en fin de liste les modèles non-texte (indices `tts/image/audio/embedding/live/veo/imagen` → 400 en texte), puis **parcourt les candidats** (jusqu'à 12) avec un `ping` réel : un candidat qui répond 404 (déprécié), 400 (non-texte), 403 (interdit pour cette clé) ou 429/503 (saturé) est **ignoré sans lever**, on passe au suivant.
+* **Mémorisation sur la clé :** le premier modèle qui répond réellement est écrit dans `llm_keys.active_model` (uniquement si encore `NULL`) — la détection coûteuse n'a lieu qu'une fois par clé. `test_key` applique la même logique et renvoie le modèle auto-détecté (« mémorisé sur la clé »).
+* **Providers OpenAI-compatibles :** `base_url` personnalisable (`llm_settings.base_url`) — LM Studio (`http://localhost:1234/v1`, clé facultative), Groq, OpenAI ; `make` = webhook REST sans clé ni modèle.
+
 ### **3.2 Hiérarchie de Routage VLM**
 
 ```
@@ -311,6 +319,15 @@ La promotion d'une famille Tier 2/3 → Tier 1 se fait exclusivement par add-on 
 ### **5.3 Schéma Base de Données SQLite (Source de Vérité)**
 
 *Note : Le DDL complet et exhaustif, incluant tous les indexes et triggers, est défini dans `tech_specs.md` (Section 1). Ce fichier fait autorité pour l'implémentation.*
+
+### **5.4 Déploiement Web (Docker Single-Origin) — (MAJ 2026-08-22)**
+
+Source : `Dockerfile`, `backend/main.py`. Un build = un artefact = un processus : FastAPI sert l'UI compilée **et** l'API en single-origin (zéro CORS inter-origines). Hébergeurs de **conteneurs** uniquement (VPS, Fly.io, Railway, Render, Coolify) — les binaires natifs excluent Cloudflare Workers pour le backend (la vitrine Cloudflare reste un add-on séparé, `deploy/cloudflare/`).
+
+* **Bases pré-ingérées via release GitHub :** les `.sqlite` du corpus (trop volumineux pour le dépôt) sont publiés comme **assets d'une release GitHub** et **téléchargés au build Docker** (`curl` → `databases_publiees/`). Au démarrage, le lifespan copie chaque `.sqlite` absent de `DATABASES_DIR` (seed non destructif, cf. `RAGDOM_PUBLISHED_DBS`) → la bibliothèque renaît identique à chaque réveil du disque éphémère. Échec de téléchargement = build tolérant (démarrage à vide, message d'avertissement).
+* **Corpus embarqué dans l'image :** les PDF sources font partie de l'image (`COPY sources/`), `SOURCES_DIR=/app/sources` — persistants aux restarts malgré le disque éphémère ; les uploads web atterrissent au même endroit.
+* **Données persistantes :** volume `/data` (`DATABASES_DIR`, `PIPELINE_SET_DIR`, `MODELS_DIR`, `CONFIG_DB_PATH`).
+* **Contrainte 512 Mo (hébergements FREE) → `RAGDOM_LOW_MEMORY=true` :** l'encodeur d'embeddings ONNX (~300 Mo de pic) n'est **jamais** chargé (sinon OOM kill) ; la recherche passe en **BM25 seul** en ligne. Les bases pré-construites conservent leurs vecteurs pour un futur hébergement plus large. `llama-cpp-python` (LLM GGUF local) est exclu de l'image web (compilation longue, inutile en ligne) — fallback LLM web = Ollama/API.
 
 ---
 
@@ -517,13 +534,13 @@ La promotion d'une famille Tier 2/3 → Tier 1 se fait exclusivement par add-on 
 
 ### **7.2 Routes Bibliothèque (/api/library)**
 
-#### `GET /api/library/documents?db={nom.sqlite}`
-**Description :** Retourne la liste des documents de la base ciblée.
+#### `GET /api/library/documents?db={nom.sqlite}&page=1&limit=50`
+**Description :** Retourne la liste **paginée** (tech_specs §14) des documents de la base ciblée.
 
-**Réponse 200 :**
+**Réponse 200 (MAJ 2026-08-22 — forme `{data, pagination}` + alias legacy) :**
 ```json
 {
-  "documents": [
+  "data": [
     {
       "id": "uuid",
       "title": "Manuel d'Algèbre 1AM",
@@ -534,12 +551,14 @@ La promotion d'une famille Tier 2/3 → Tier 1 se fait exclusivement par add-on 
       "domain_tags_json": "[\"math\", \"algebra\"]",
       "created_at": "2026-08-19T10:00:00"
     }
-  ]
+  ],
+  "documents": [ "…alias legacy = même tableau que data…" ],
+  "pagination": { "page": 1, "limit": 50, "total": 3, "total_pages": 1 }
 }
 ```
 
 #### `GET /api/library/toc?db={nom.sqlite}&document_id={id}`
-**Description :** Retourne l'arbre TOC complet d'un document.
+**Description :** Retourne l'**arbre** TOC complet d'un document. **Non paginé** (structure hiérarchique — tech_specs §14).
 
 **Réponse 200 :**
 ```json
@@ -578,13 +597,13 @@ La promotion d'une famille Tier 2/3 → Tier 1 se fait exclusivement par add-on 
 }
 ```
 
-#### `GET /api/library/chunks?db={nom.sqlite}&document_id={id}&page={n}`
-**Description :** Retourne les chunks d'une page donnée.
+#### `GET /api/library/chunks?db={nom.sqlite}&document_id={id}&page=1&limit=50`
+**Description :** Retourne les chunks **paginés** (tech_specs §14) d'un document. Filtres optionnels : `page_number`, `pedagogical_type` (`exercise` = raccourci solved+unsolved), `page_start`, `page_end`, `toc_id`.
 
-**Réponse 200 :**
+**Réponse 200 (MAJ 2026-08-22 — forme `{data, pagination}` + alias legacy `chunks`) :**
 ```json
 {
-  "chunks": [
+  "data": [
     {
       "id": "uuid",
       "page_number": 12,
@@ -592,10 +611,15 @@ La promotion d'une famille Tier 2/3 → Tier 1 se fait exclusivement par add-on 
       "section_title": "1.2 Équations du second degré",
       "content_markdown": "## Équations du second degré\n...",
       "pedagogical_type": "course_theory",
+      "pedagogical_index": null,
       "has_solution": 0,
+      "is_human_edited": 0,
+      "updated_at": "2026-08-19T10:00:00",
       "token_count": 412
     }
-  ]
+  ],
+  "chunks": [ "…alias legacy = même tableau que data…" ],
+  "pagination": { "page": 1, "limit": 50, "total": 128, "total_pages": 3 }
 }
 ```
 
@@ -708,6 +732,33 @@ La promotion d'une famille Tier 2/3 → Tier 1 se fait exclusivement par add-on 
 ```json
 { "batch_id": "uuid", "status": "QUEUED", "pages_total": 45 }
 ```
+Le mode `folder` enfile TOUS les PDF d'un dossier vers une même base et renvoie `{ "batch_id", "batch_ids": [...], "status", "pages_total", "target_db" }`.
+
+**Reprise & chaînage (MAJ 2026-08-22 — source : `backend/api/routes_pipeline.py`, `backend/main.py`) :**
+* **Reprise automatique au démarrage :** au lifespan, `resume_pending_queues()` parcourt toutes les bases de `DATABASES_DIR` ; toute base ayant des jobs `QUEUED`/`RUNNING` voit ses `RUNNING` re-mis en file (`orchestrator.recover`) puis son worker relancé — **aucun lot orphelin** après un crash ou un redéploiement.
+* **Séquentiel strict multi-bases avec relance en chaîne :** UN worker draine UNE base à la fois (D2-B). Un lot enfilé sur une **autre** base pendant un run est mis en attente (`_worker["pending"]`) et son worker est **relancé en chaîne** à la fin du run courant — jamais deux moteurs lourds résidents en parallèle, jamais de lot perdu.
+
+#### `POST /api/pipeline/reprocess` *(Ré-exécution scopée — MAJ 2026-08-22)*
+**Description :** Purge scopée du périmètre **puis** ré-ingestion complète (TOUTES les couches du moteur) du même périmètre. L'unité d'exécution reste la page (D4-A). Réutilise la purge scopée réelle (`/pipeline/purge`) — jamais de code dupliqué.
+
+**Corps :**
+```json
+{
+  "db": "Maths_1AM.sqlite",
+  "scope": "document | page_range | chapter",
+  "document_id": "uuid",
+  "page_start": 12, "page_end": 45,
+  "toc_id": "uuid (requis si scope=chapter)",
+  "preserve_human_edits": true
+}
+```
+**Règles :** `scope` limité à `document | page_range | chapter` (400 sinon) ; `page_start` requis pour `page_range`, `toc_id` requis pour `chapter` ; PDF source absent de `/sources/` → **HTTP 409** (ré-exécution impossible) ; `preserve_human_edits=true` (défaut) exclut les lignes `is_human_edited=1` de la purge préalable.
+
+**Réponse 202 :**
+```json
+{ "reprocessed_scope": "document", "purged": { "chunks": 412, "artifacts": 180, "...": "..." },
+  "batch_id": "uuid", "pages_total": 45, "page_start": 1, "page_end": 45, "status": "QUEUED" }
+```
 
 #### `GET /api/pipeline/status?batch_id={uuid}`
 **Description :** Retourne le statut agrégé d'un batch et de sa page courante.
@@ -779,6 +830,8 @@ data: {"batch_id":"uuid","page_number":5,"error":"UNBALANCED_LATEX","details":"M
 ```
 
 **Sémantique des états `INDEXED` vs `READY` (V3.1) :** `INDEXED` = chunks + artefacts persistés et FTS synchronisé (fin de l'écriture Couche 7) ; `READY` = benchmarks Couche 6 écrits et checkpoint `/pipeline-set/` purgé — état terminal. La transition `INDEXED → READY` est automatique, dans la même transaction de clôture.
+
+**Sommaire de repli dérivé des titres au finalize (MAJ 2026-08-22 — source : `backend/core/orchestrator._finalize_batches` / `_build_toc_from_headings`) :** à la clôture d'un document (toutes les pages `READY`), si le document **n'a AUCUN sommaire natif** (`document_toc` vide pour ce document), un TOC de repli est **dérivé des titres Markdown** (`##/###`) des chunks — une entrée par page (granularité sommaire, pas un index exhaustif) — puis les chunks du périmètre y sont reliés (`toc_id`). Garde-fous : **jamais d'écrasement d'un TOC natif** (n'écrit rien si `document_toc` est déjà peuplé) ; idempotent (recalculé à chaque finalize complet, compatible reprocess).
 
 ### **7.5 Routes LLM Key Manager (/api/llm)**
 

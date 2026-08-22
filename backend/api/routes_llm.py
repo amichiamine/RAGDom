@@ -140,9 +140,9 @@ def test_key(key_id: str):
 
 @router.post("/keys/{key_id}/reveal")
 def reveal_key(key_id: str):
+    """Seule route retournant la clé complète (usage local — bouton « Révéler »)."""
     if not config.RAGDOM_ALLOW_REVEAL:  # Phase 7 : verrouillé sur les déploiements web
         raise HTTPException(403, "Révélation des clés désactivée (RAGDOM_ALLOW_REVEAL=false)")
-    """Seule route retournant la clé complète (usage local — bouton « Révéler »)."""
     conn = db.get_config_db()
     try:
         row = conn.execute("SELECT api_key FROM llm_keys WHERE id=?", (key_id,)).fetchone()

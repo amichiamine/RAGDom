@@ -1,4 +1,4 @@
-import { useEffect, useState, Fragment } from 'react'
+import { useEffect, useMemo, useRef, useState, Fragment } from 'react'
 import { api } from '@/lib/api'
 import type { QuarantineJob } from '@/types'
 import { useLanguage } from '@/contexts/LanguageContext'
@@ -21,20 +21,52 @@ export default function QuarantineManager({ db, onCount }: Props) {
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [busy, setBusy] = useState(false)
+  // Ancre de la dernière ligne cochée pour la sélection de plage par Maj+clic (§8.2.3).
+  const lastClickedRef = useRef<string | null>(null)
 
   const load = () => {
     setLoading(true); setError(null)
     api.pipeline.getQuarantine(db)
-      .then(res => { setJobs(res.jobs); onCount(res.jobs.length) })
+      .then(res => { setJobs(res.jobs); onCount(res.jobs.length); setSelected(new Set()); lastClickedRef.current = null })
       .catch(e => setError(e instanceof Error ? e.message : t('common.error_generic')))
       .finally(() => setLoading(false))
   }
 
   useEffect(() => { if (db) load() }, [db]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const toggle = (id: string) => setSelected(prev => {
-    const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n
-  })
+  // Lignes retryables uniquement (INVALID_SOURCE exclu du lot et du « tout sélectionner »).
+  const retryableIds = useMemo(() => jobs.filter(j => j.status === 'QUARANTINE').map(j => j.id), [jobs])
+  const allSelected = retryableIds.length > 0 && retryableIds.every(id => selected.has(id))
+
+  // Case par ligne + Maj+clic : coche toute la plage entre l'ancre et la ligne cliquée.
+  const toggle = (id: string, shiftKey = false) => {
+    if (jobs.find(j => j.id === id)?.status !== 'QUARANTINE') return
+    setSelected(prev => {
+      const next = new Set(prev)
+      if (shiftKey && lastClickedRef.current) {
+        const order = jobs.map(j => j.id)
+        const a = order.indexOf(lastClickedRef.current)
+        const b = order.indexOf(id)
+        if (a !== -1 && b !== -1) {
+          const [lo, hi] = a < b ? [a, b] : [b, a]
+          for (let i = lo; i <= hi; i++) {
+            const jid = order[i]
+            if (jobs.find(j => j.id === jid)?.status === 'QUARANTINE') next.add(jid)
+          }
+          return next
+        }
+      }
+      next.has(id) ? next.delete(id) : next.add(id)
+      return next
+    })
+    lastClickedRef.current = id
+  }
+
+  const toggleAll = () => {
+    setSelected(prev => (retryableIds.every(id => prev.has(id)) ? new Set() : new Set(retryableIds)))
+    lastClickedRef.current = null
+  }
+
   const toggleExpand = (id: string) => setExpanded(prev => {
     const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n
   })
@@ -68,7 +100,14 @@ export default function QuarantineManager({ db, onCount }: Props) {
           <table className="data-table">
             <thead>
               <tr>
-                <th></th><th>{t('quarantine.page')}</th><th>{t('quarantine.document')}</th>
+                <th>
+                  <input type="checkbox" aria-label={t('quarantine.select_all')}
+                    disabled={retryableIds.length === 0}
+                    checked={allSelected}
+                    ref={el => { if (el) el.indeterminate = selected.size > 0 && !allSelected }}
+                    onChange={toggleAll} title={t('quarantine.select_all')} />
+                </th>
+                <th>{t('quarantine.page')}</th><th>{t('quarantine.document')}</th>
                 <th>{t('quarantine.status')}</th><th>{t('quarantine.retries')}</th><th>{t('quarantine.date')}</th><th></th>
               </tr>
             </thead>
@@ -79,7 +118,9 @@ export default function QuarantineManager({ db, onCount }: Props) {
                   <Fragment key={j.id}>
                     <tr style={notRetryable ? { opacity: 0.55 } : undefined}>
                       <td>
-                        <input type="checkbox" disabled={notRetryable} checked={selected.has(j.id)} onChange={() => toggle(j.id)}
+                        <input type="checkbox" disabled={notRetryable} checked={selected.has(j.id)}
+                          onClick={e => toggle(j.id, (e as unknown as { shiftKey: boolean }).shiftKey)}
+                          onChange={() => { /* sélection pilotée par onClick (support Maj+clic) */ }}
                           title={notRetryable ? t('quarantine.not_retryable') : ''} />
                       </td>
                       <td className="font-num">{j.page_number}</td>
@@ -107,6 +148,23 @@ export default function QuarantineManager({ db, onCount }: Props) {
               })}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {/* Barre d'actions flottante (§8.2.3) — apparaît dès qu'une ligne est sélectionnée. */}
+      {selected.size > 0 && (
+        <div className="bulk-action-bar" role="region" aria-label={t('quarantine.retry_selected')}>
+          <div className="bulk-action-bar__inner">
+            <span className="bulk-action-bar__count">
+              {t('quarantine.n_selected').replace('{n}', String(selected.size))}
+            </span>
+            <button className="btn btn-sm btn-primary" onClick={retry} disabled={busy}>
+              <i className="fa-solid fa-rotate-right" /> {t('quarantine.retry_selected')}
+            </button>
+            <button className="btn btn-sm btn-outline-secondary" onClick={() => setSelected(new Set())} disabled={busy}>
+              {t('quarantine.clear_selection')}
+            </button>
+          </div>
         </div>
       )}
     </div>

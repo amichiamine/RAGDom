@@ -59,18 +59,27 @@ export default function CurriculumSidebar({
     return () => { if (debounceRef.current) window.clearTimeout(debounceRef.current) }
   }, [localSearch, setSearch])
 
-  // Compteurs de badges par onglet, dérivés des agrégats globaux (jamais en dur).
-  const badgeCounts = useMemo<Record<TabKey, number>>(() => {
+  // Compteurs de badges par onglet, dérivés STRICTEMENT des agrégats globaux SQL
+  // (routes_library.py _curriculum_aggregates) — jamais de calcul client, jamais en dur.
+  // Mapping badge↔onglet aligné sur ce que chaque onglet affiche réellement :
+  //   • Matrice   → la matrice 360° EXIGE le curriculum : sans lui l'onglet est un
+  //                 empty-state, donc PAS de badge (null). Avec curriculum, le badge
+  //                 reflète les مقاطع (programs) autour desquels la matrice est construite.
+  //                 (Correctif audit : « Matrice (33) » venait de g.chapters = TOC niveau 1.)
+  //   • Programme → programs (مقاطع du TDS)      • Cours       → courses (unités de lecture)
+  //   • Exercices → exercises                    • Évaluations → assessments (corrigé côté backend)
+  //   • Scans     → page_scans
+  const badgeCounts = useMemo<Record<TabKey, number | null>>(() => {
     const g = aggregates?.global
     return {
-      matrix: g?.chapters ?? 0,
+      matrix: curriculumAvailable ? (g?.programs ?? 0) : null,
       programme: g?.programs ?? 0,
       cours: g?.courses ?? 0,
       exercices: g?.exercises ?? 0,
       evaluations: g?.assessments ?? 0,
       scans: g?.page_scans ?? 0,
     }
-  }, [aggregates])
+  }, [aggregates, curriculumAvailable])
 
   const activeTrimLabel = TRIM_OPTIONS.find(o => o.value === trimFilter)?.label ?? TRIM_OPTIONS[0].label
 
@@ -214,7 +223,9 @@ export default function CurriculumSidebar({
                 <span style={{ color: activeTab === item.tab ? '#fff' : item.color, display: 'inline-flex' }}>{item.icon}</span>
                 {item.label}
               </span>
-              <span className="badge badge-subtle font-num">{badgeCounts[item.tab]}</span>
+              {badgeCounts[item.tab] !== null && (
+                <span className="badge badge-subtle font-num">{badgeCounts[item.tab]}</span>
+              )}
             </button>
           ))}
         </div>

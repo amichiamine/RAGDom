@@ -21,6 +21,7 @@ export interface SystemHealth {
   vector_engine_status: 'ready' | 'fallback_bm25_only' | 'error';
   vector_engine_message: string;
   force_sqlite_vec: boolean;
+  readonly: boolean; // V3.6 : mode lecture seule (GET /system/health) — masque les actions mutatives
 }
 
 export interface Document {
@@ -74,6 +75,7 @@ export interface Artifact {
   bounding_box_json: string | null;
   page_number?: number | null;   // V3.5 : page d'origine (rendu multimodal côté lecture)
   has_binary?: boolean;          // V3.5 : crop WebP disponible via /library/artifact-binary
+  is_human_edited?: number | boolean; // V3.2/V3.5 : artefact corrigé manuellement (badge édition humaine)
 }
 
 export interface FacetItem {

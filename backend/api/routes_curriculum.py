@@ -31,7 +31,7 @@ def _table(kind: str):
 @router.get("/{kind}")
 def list_items(kind: str, db_name: str = Query(alias="db")):
     table, columns = _table(kind)
-    conn = db.get_connection(db_name)
+    conn = db.get_connection_or_http(db_name)
     try:
         rows = conn.execute("SELECT id, %s FROM %s" % (", ".join(columns), table)).fetchall()
         return {"items": [dict(zip(("id",) + columns, row)) for row in rows]}
@@ -44,7 +44,7 @@ def create_item(kind: str, payload: dict, db_name: str = Query(alias="db")):
     table, columns = _table(kind)
     values = [payload.get(col) for col in columns]
     item_id = payload.get("id") or str(uuid.uuid4())
-    conn = db.get_connection(db_name)
+    conn = db.get_connection_or_http(db_name)
     try:
         conn.execute("INSERT INTO %s (id, %s) VALUES (%s)" % (table, ", ".join(columns),
                      ", ".join("?" * (len(columns) + 1))), [item_id] + values)
@@ -64,7 +64,7 @@ def update_item(kind: str, item_id: str, payload: dict, db_name: str = Query(ali
             args.append(payload[col])
     if not sets:
         raise HTTPException(400, "Aucun champ à mettre à jour")
-    conn = db.get_connection(db_name)
+    conn = db.get_connection_or_http(db_name)
     try:
         cur = conn.execute("UPDATE %s SET %s WHERE id=?" % (table, ", ".join(sets)), args + [item_id])
         conn.commit()
@@ -78,7 +78,7 @@ def update_item(kind: str, item_id: str, payload: dict, db_name: str = Query(ali
 @router.delete("/{kind}/{item_id}")
 def delete_item(kind: str, item_id: str, db_name: str = Query(alias="db")):
     table, _ = _table(kind)
-    conn = db.get_connection(db_name)
+    conn = db.get_connection_or_http(db_name)
     try:
         cur = conn.execute("DELETE FROM %s WHERE id=?" % table, (item_id,))
         conn.commit()
@@ -100,7 +100,7 @@ class ImportBody(BaseModel):
 @router.post("/import")
 def import_curriculum(body: ImportBody, db_name: str = Query(alias="db")):
     """Import structuré complet (Blueprint §7.6) — replace vide d'abord les 4 tables."""
-    conn = db.get_connection(db_name)
+    conn = db.get_connection_or_http(db_name)
     try:
         conn.execute("BEGIN")
         if body.mode == "replace":

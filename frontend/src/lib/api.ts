@@ -225,9 +225,13 @@ export const api = {
       request<{ reprocessed_scope: string; purged: unknown; batch_id: string; pages_total: number; page_start: number; page_end: number; status: BatchStatus }>('/pipeline/reprocess', {
         method: 'POST', body: JSON.stringify(payload),
       }),
-    getStatus: (batchId: string) => request<BatchStatusResponse>(`/pipeline/status?batch_id=${batchId}`),
+    // Backend /pipeline/status EXIGE ?db= (alias du query `db_name`) — sans lui : 422.
+    getStatus: (batchId: string, db: string) =>
+      request<BatchStatusResponse>(withDb('/pipeline/status', db, { batch_id: batchId })),
     stop: () => request<{ stopped: boolean; batch_id: string; last_completed_page: number }>('/pipeline/stop', { method: 'POST' }),
-    cancelBatch: (batchId: string) => request(`/pipeline/batch/${batchId}`, { method: 'DELETE' }),
+    // Backend DELETE /pipeline/batch/{id} EXIGE ?db= (alias du query `db_name`) — sans lui : 422.
+    cancelBatch: (batchId: string, db: string) =>
+      request<{ cancelled: boolean; removed_jobs: number }>(withDb(`/pipeline/batch/${batchId}`, db), { method: 'DELETE' }),
     reset: (db: string, documentId?: string) => // V3.1.1 : document_id optionnel (reset base entière)
       request(withDb('/pipeline/reset', db, documentId ? { document_id: documentId } : undefined), { method: 'POST' }),
     createStream: (): EventSource => {
@@ -244,13 +248,15 @@ export const api = {
   llm: {
     getKeys: () => request<{ keys: LlmKey[] }>('/llm/keys'), // V3.1 : clés masquées (masked_key)
     revealKey: (keyId: string) => request<{ api_key: string }>(`/llm/keys/${keyId}/reveal`, { method: 'POST' }), // V3.1
+    // VÉRITÉ backend (routes_llm.py add_key) : POST renvoie { key_id, status } — PAS un LlmKey complet.
     addKey: (provider: string, apiKey: string) =>
-      request<LlmKey>('/llm/keys', { method: 'POST', body: JSON.stringify({ provider, api_key: apiKey }) }),
+      request<{ key_id: string; status: string }>('/llm/keys', { method: 'POST', body: JSON.stringify({ provider, api_key: apiKey }) }),
     deleteKey: (keyId: string) => request<{ deleted: boolean }>(`/llm/keys/${keyId}`, { method: 'DELETE' }),
     getSettings: () => request<{ settings: LlmSetting[] }>('/llm/settings'),
     // V3.6 : PUT partiel — provider requis + tout sous-ensemble de {active_model, is_enabled, priority, base_url}.
     updateSettings: (provider: string, patch: { active_model?: string | null; is_enabled?: boolean; priority?: number; base_url?: string | null }) =>
-      request<{ setting: LlmSetting }>('/llm/settings', { method: 'PUT', body: JSON.stringify({ provider, ...patch }) }),
+      // VÉRITÉ backend (routes_llm.py put_settings) : renvoie { success, updated:{provider, active_model} }.
+      request<{ success: boolean; updated: { provider: string; active_model: string | null } }>('/llm/settings', { method: 'PUT', body: JSON.stringify({ provider, ...patch }) }),
     testKey: (keyId: string) => request<{ success: boolean; status?: string; latency_ms?: number; message: string }>(`/llm/keys/${keyId}/test`, { method: 'POST' }),
     // V3.7 : détection LIVE des modèles chez le fournisseur (clé stockée + base_url).
     // Renvoie { models, error } — error non nul = pas de clé / URL injoignable / provider sans modèles.

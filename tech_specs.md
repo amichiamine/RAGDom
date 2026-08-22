@@ -627,6 +627,18 @@ Afin de garantir une résilience maximale sous tous les environnements hôtes (W
 * **Indexation FTS5 Bilingue (V3.1) :** Le tokenizer `unicode61 remove_diacritics 2` indexe sans perte les tokens arabes (diacritiques normalisés nativement par le tokenizer) et les termes techniques ou formules latines dans la même table virtuelle `search_index`.
 * **Préservation BiDi des Actifs :** Lors de l'extraction, les formules LaTeX (`$ ... $` et `$$ ... $$`), les noms chimiques, les codes et les tableaux contenant des symboles scientifiques sont étiquetés pour un rendu strict en `LTR` côté Frontend via `direction: ltr !important; unicode-bidi: isolate !important;`, évitant toute corruption d'ordre de lecture dans un flux RTL.
 
+### **3.6.1 OCR VLM de Page Entière (Tier 2, contrat D3-B étendu) — (MAJ 2026-08-22)**
+
+Extension du contrat D3-B : au-delà de la réparation VLM par bloc (Couche 5), la Couche 2 (`engines/sci-engine/pipeline/layer_2_extract.py`) sait transcrire une **page entière** par le VLM lorsque l'extraction Tier 1 est illisible. Référence code : `layer_2_extract._maybe_vlm_page_ocr`.
+
+* **Déclenchement :**
+  * **Pages scannées (non natives) :** OCR VLM systématiquement tenté (RapidOCR sans modèle adapté = repli hors-ligne).
+  * **Pages natives vectorielles :** OCR VLM tenté **uniquement** si le texte extrait est jugé illisible par une **gate qualité générique** (`_looks_unreadable`) — cas des polices non-Unicode (glyphes privés) qui produisent du texte extrait mais inexploitable. La gate ne se déclenche jamais sur du texte arabe/latin sain (détection : longueur, ratio de tokens ultra-courts, mots longs sans voyelles, seuil arabe ≥ 0.3 = lisible).
+* **Sortie :** transcription **Markdown fidèle + LaTeX** (`$...$` / `$$...$$`), titres `##/###`, texte arabe exact (RTL préservé), tableaux Markdown, numéros d'exercices conservés (prompt `_VLM_OCR_PROMPT`).
+* **Provider vision :** appel `llm.key_manager.generate(prompt, image_b64=...)` — le noyau gère la **rotation de clés/providers** (priorité croissante, 429/403 → clé suivante, 401 → désactivation, 5xx → backoff). Le provider retenu est tracé dans `ctx["vlm"]["page_ocr_provider"]`. Aucun provider joignable → `None` : **repli sur le Tier 1**, le pipeline ne s'arrête jamais.
+* **Repli hors-ligne :** RapidOCR (modèles PP-OCRv4 embarqués dans le paquet) reste le premier extracteur des scans ; le VLM ne fait que le **surclasser** quand il répond.
+* **Flag :** `RAGDOM_VLM_PAGE_OCR` — `auto` (défaut : comportement ci-dessus) | `false` (désactive totalement l'OCR VLM de page → Tier 1 seul). Le moteur retenu est reporté dans `engine_used` (`VLM-OCR` en cas de succès).
+
 ---
 
 ## **4. PROTOCOLE DES AGENTS & HANDOFFS**
@@ -967,7 +979,7 @@ npx shadcn@latest add button card dialog dropdown-menu input label select separa
 
 ## **10. STRUCTURE DU FICHIER `.env` (VARIABLES D'ENVIRONNEMENT)**
 
-Fichier : `/backend/.env`. Ce fichier est **obligatoirement** dans `.gitignore`. L'agent crée un fichier `/backend/.env.example` (sans valeurs réelles) pour référence.
+Fichier : `/backend/.env`. **(MAJ 2026-08-22 — règle révisée)** Le `.env` est désormais **VERSIONNÉ, pré-rempli et prêt à l'emploi, MAIS SANS AUCUN SECRET** : chaque variable est présente en commentaire (`#`) à sa valeur par défaut, avec son mode d'emploi en commentaire ; pour personnaliser, on décommente et on modifie la ligne. Le `.env` est **optionnel** — sans lui, `backend/config.py` déduit tous les chemins de l'arborescence du projet (portabilité clone-and-run). Les secrets (clés LLM, `RAGDOM_AUTH_TOKEN`) ne sont **jamais** committés : ils se définissent dans l'environnement de l'hébergeur (ou dans un `.env` local non poussé si le dépôt est privé). *(L'ancien `.env.example` séparé n'est plus requis ; le `.env` versionné pré-rempli en tient lieu.)*
 
 ```env
 # ── Chemins Physiques du Projet ───────────────────────────────
@@ -1002,7 +1014,20 @@ MAX_RAM_MB=2048   # Pic d'inférence (Palier 2, D2-B). Plancher structurel fixe 
 RAGDOM_FORCE_SQLITE_VEC=false   # Mode strict Option A (voir §3.3.1). false = Option B résiliente.
 VLM_TIMEOUT_SECONDS=30
 MAX_RETRY_COUNT=3
+RAGDOM_INTRA_PAGE_WORKERS=1   # Parallélisme intra-page borné 1-3 (D4-B). 1 = séquentiel strict (défaut).
+RAGDOM_VLM_PAGE_OCR=auto   # OCR VLM de page entière (§3.6.1) : auto (défaut) | false (Tier 1 seul).
+
+# ── Web-Ready (Phase 7 — à définir chez l'hébergeur, jamais de secret dans le dépôt) ──
+RAGDOM_READONLY=false   # true = mode consultation : les routes d'ADMINISTRATION n'existent pas (404), seules les routes de LECTURE répondent.
+RAGDOM_AUTH_TOKEN=      # Jeton d'administration (Palier 3). Si défini, les routes admin exigent « Authorization: Bearer <jeton> ». Vide = aucun contrôle (local nominal).
+RAGDOM_ALLOW_REVEAL=true   # Autorise la révélation en clair des clés LLM (/api/llm/keys/{id}/reveal). DOIT être false sur tout déploiement web.
+RAGDOM_ASK_RATE_PER_MIN=0   # Quota /api/search/ask par IP et par minute (0 = désactivé, défaut local ; >0 → 429 au-delà).
+RAGDOM_LOW_MEMORY=false   # true (hébergements ≤512 Mo) : ne charge JAMAIS l'encodeur d'embeddings ONNX (~300 Mo de pic → OOM kill), recherche BM25 seule ; les bases pré-construites conservent leurs vecteurs.
+RAGDOM_SEED_LLM_KEYS=   # Seed IDEMPOTENT au démarrage (disque éphémère). Entrées séparées par virgules/retours ligne : « provider:clé » ou « provider:clé:modèle ». Toute entrée absente est insérée dans llm_keys et son provider activé. JAMAIS de vraie clé dans le dépôt.
+RAGDOM_PUBLISHED_DBS=  # Dossier des bases pré-ingérées à installer au démarrage (défaut : {racine}/databases_publiees). Chaque .sqlite absent de DATABASES_DIR y est copié (bibliothèque pré-chargée à chaque réveil).
 ```
+
+**Sémantique exacte (source : `backend/config.py`, `backend/.env`, `backend/main.py`, `backend/db/connection.py`) — (MAJ 2026-08-22) :** `RAGDOM_READONLY`, `RAGDOM_ALLOW_REVEAL` et `RAGDOM_LOW_MEMORY` sont booléens (`"true"` insensible à la casse). `RAGDOM_AUTH_TOKEN` vide vaut `None` (pas de contrôle). `RAGDOM_ASK_RATE_PER_MIN` et `RAGDOM_INTRA_PAGE_WORKERS` sont des entiers (ce dernier borné à `[1, 3]`). `RAGDOM_VLM_PAGE_OCR` : seule la valeur littérale `false` désactive ; toute autre valeur (dont `auto`) active. `RAGDOM_SEED_LLM_KEYS` est relu à chaque `init_config_db()` (seed idempotent). `RAGDOM_PUBLISHED_DBS` est lu au lifespan `main.py` (copie non destructive : jamais d'écrasement d'une base déjà présente).
 
 ---
 
@@ -1185,7 +1210,13 @@ Toutes les routes retournant des listes potentiellement longues acceptent les pa
 - `GET /api/library/benchmarks?db=...&page=1&limit=50` (V3.2)
 - `GET /api/pipeline/quarantine?db=...` (V3.2 — liste courte, pagination optionnelle)
 - `GET /api/curriculum/{terms|programs|assessments|links}?db=...` (V3.2)
-- `GET /api/pipeline/queue` (pas de pagination — la queue est courte par nature)
+- `GET /api/library/page-scans?db=...` (manifeste galerie, paginé)
+- `GET /api/library/benchmarks?db=...` (télémétrie historique, paginée)
+
+**Routes NON paginées (arbre ou objet complet) — (MAJ 2026-08-22) :**
+- `GET /api/library/toc` — renvoie un **arbre** `{ "toc": [...] }` (hiérarchie parent/enfants), jamais une liste plate paginée.
+- `GET /api/library/curriculum` — renvoie un **objet** agrégé `{ terms, programs, assessments, links, aggregates }`, non paginé.
+- `GET /api/library/facets` / `GET /api/system/engines` / `GET /api/pipeline/queue` — objets/listes courtes par nature, non paginés.
 
 **Format de réponse paginée (imposé) :**
 ```json
@@ -1199,6 +1230,8 @@ Toutes les routes retournant des listes potentiellement longues acceptent les pa
   }
 }
 ```
+
+**Alias legacy (MAJ 2026-08-22) :** pour la rétro-compatibilité UI, `GET /api/library/documents` et `GET /api/library/chunks` renvoient la charge sous **`data`** (forme imposée) **ET** sous une clé nommée d'origine (`documents` / `chunks` respectivement) pointant sur le même tableau. Tout nouveau code lit `data` ; les clés nommées sont conservées comme alias.
 
 ---
 

@@ -206,7 +206,21 @@
       "purge_type_ok": "Tapez OK pour confirmer la purge",
       "purge_confirm_btn": "Exécuter la purge",
       "purged": "Purge exécutée.",
-      "live_running": "Un traitement est en cours."
+      "live_running": "Un traitement est en cours.",
+      "lifecycle": "Cycle de vie",
+      "lifecycle_title": "Cycle de vie — Page",
+      "lifecycle_hint": "Latences du moteur par passe pour cette page.",
+      "lifecycle_empty": "Aucun relevé de performance pour cette page.",
+      "lifecycle_page_required": "Sélectionnez une page pour inspecter son cycle de vie.",
+      "bench_engine": "Moteur",
+      "bench_latency": "Latence",
+      "bench_ram": "RAM pic",
+      "bench_confidence": "Confiance",
+      "bench_vlm": "Fournisseur VLM",
+      "bench_fallback": "Repli déclenché",
+      "bench_yes": "Oui",
+      "bench_no": "Non",
+      "bench_none": "—"
     }
   },
   "pipeline": {
@@ -242,7 +256,10 @@
     "error_log": "Journal d'erreurs",
     "retry_selected": "Réessayer la sélection",
     "not_retryable": "Non retryable (source inchangée)",
-    "empty": "Aucun élément en quarantaine"
+    "empty": "Aucun élément en quarantaine",
+    "select_all": "Tout sélectionner",
+    "n_selected": "{n} sélectionné(s)",
+    "clear_selection": "Effacer"
   },
   "settings": {
     "vec_threshold": "Seuil de distance vectorielle",
