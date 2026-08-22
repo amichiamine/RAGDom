@@ -9,6 +9,8 @@ from typing import Any, Dict, List, Literal, Optional
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
 
+from core.embedding_profile import (CURRENT_PROFILE, active_vector_profiles,
+                                    compatibility_reasons, profile_from_row)
 from core.validation_scope import ScopeResolutionError, resolve_scope
 from db import connection as db
 
@@ -743,6 +745,9 @@ def assign_embedding_profile(body: EmbeddingAssignDTO):
                                (body.document_id,)).fetchone()
         vectors = conn.execute("SELECT COUNT(*) FROM document_chunks WHERE document_id=?"
                                " AND embedding_vector IS NOT NULL", (body.document_id,)).fetchone()[0]
+        active_profiles, _, _ = active_vector_profiles(conn)
+        if any(item["id"] != body.profile_id for item in active_profiles):
+            raise HTTPException(409, "Plusieurs profils actifs avec vecteurs interdits : réindexation explicite requise")
         if current and current[0] != body.profile_id and vectors:
             raise HTTPException(409, "Profil incompatible avec des vecteurs existants : réindexation explicite requise")
         if vectors:
@@ -772,25 +777,42 @@ def embedding_diagnostic(db_name: str = Query(alias="db"), document_id: Optional
             args.append(document_id)
         documents = []
         for doc_id, title in conn.execute(sql, args).fetchall():
-            profile = conn.execute("SELECT p.id, p.model_name, p.model_version, p.pooling, p.dimensions,"
-                                   " p.normalized FROM document_embedding_profiles d"
-                                   " JOIN embedding_profiles p ON p.id=d.profile_id WHERE d.document_id=?",
-                                   (doc_id,)).fetchone()
+            profile_row = conn.execute(
+                "SELECT p.id, p.model_name, p.model_version, p.pooling, p.dimensions,"
+                " p.normalized, p.metadata_json FROM document_embedding_profiles d"
+                " JOIN embedding_profiles p ON p.id=d.profile_id WHERE d.document_id=?",
+                (doc_id,),
+            ).fetchone()
+            profile = profile_from_row(profile_row) if profile_row else None
             lengths = conn.execute("SELECT length(embedding_vector), COUNT(*) FROM document_chunks"
                                    " WHERE document_id=? AND embedding_vector IS NOT NULL"
                                    " GROUP BY length(embedding_vector) ORDER BY 1", (doc_id,)).fetchall()
             inferred = sorted({int(length / 4) for length, _ in lengths if length and length % 4 == 0})
-            expected = profile[4] if profile else None
-            compatible = (not lengths) or (expected is not None and inferred == [expected])
+            expected = profile["dimensions"] if profile else None
+            shape_compatible = (not lengths) or (expected is not None and inferred == [expected])
+            reasons = []
+            if lengths and profile is None:
+                reasons.append("embedding_profile_missing")
+            if not shape_compatible:
+                reasons.append("vector_dimensions_mismatch")
+            query_reasons = compatibility_reasons(profile, CURRENT_PROFILE) if lengths else []
+            reasons.extend(reason for reason in query_reasons if reason not in reasons)
             documents.append({"document_id": doc_id, "title": title,
-                              "profile": ({"id": profile[0], "model_name": profile[1],
-                                           "model_version": profile[2], "pooling": profile[3],
-                                           "dimensions": profile[4], "normalized": bool(profile[5])}
-                                          if profile else None),
+                              "profile": profile,
                               "vector_count": sum(r[1] for r in lengths),
-                              "inferred_dimensions": inferred, "compatible": compatible,
-                              "action": None if compatible else "register_or_reindex_explicitly"})
-        return {"engine": db.vector_state(), "documents": documents,
-                "silent_reindex_performed": False}
+                              "inferred_dimensions": inferred, "compatible": shape_compatible,
+                              "query_compatible": not query_reasons,
+                              "reasons": reasons,
+                              "action": None if not reasons else "register_or_reindex_explicitly"})
+        active_profiles, vector_count, unassigned = active_vector_profiles(conn)
+        database_reasons = []
+        if len(active_profiles) > 1:
+            database_reasons.append("multiple_active_embedding_profiles")
+        if unassigned:
+            database_reasons.append("vectors_without_embedding_profile")
+        return {"engine": db.vector_state(), "query_profile": CURRENT_PROFILE.contract(),
+                "active_profiles": active_profiles, "vector_count": vector_count,
+                "database_compatible": not database_reasons, "reasons": database_reasons,
+                "documents": documents, "silent_reindex_performed": False}
     finally:
         conn.close()

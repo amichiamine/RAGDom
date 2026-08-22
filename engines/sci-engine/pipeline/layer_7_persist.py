@@ -17,12 +17,49 @@ import uuid
 import cv2
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "..", "backend"))
+from core.embedding_profile import active_vector_profiles, metadata_json, natural_key  # noqa: E402
 
 
 def _webp(image_rgb, quality: int) -> bytes:
     ok, buf = cv2.imencode(".webp", cv2.cvtColor(image_rgb, cv2.COLOR_RGB2BGR),
                            [cv2.IMWRITE_WEBP_QUALITY, quality])
     return buf.tobytes() if ok else b""
+
+
+def _resolve_profile_id(conn, profile: dict) -> str:
+    """Insert idempotent puis résolution autoritaire par clé naturelle."""
+    key = natural_key(profile)
+    serialized_metadata = metadata_json(profile)
+    for _attempt in range(3):
+        proposed_id = str(uuid.uuid4())
+        conn.execute(
+            "INSERT OR IGNORE INTO embedding_profiles"
+            " (id, model_name, model_version, pooling, dimensions, normalized, metadata_json)"
+            " VALUES (?,?,?,?,?,?,?)",
+            (proposed_id, *key, serialized_metadata),
+        )
+        stored = conn.execute(
+            "SELECT id, metadata_json FROM embedding_profiles WHERE model_name=?"
+            " AND model_version=? AND pooling=? AND dimensions=? AND normalized=?", key,
+        ).fetchone()
+        if stored is None:
+            continue  # collision exceptionnelle de l'UUID proposé avec une autre clé
+        if (stored[1] or "{}") != serialized_metadata:
+            try:
+                equivalent = json.loads(stored[1] or "{}") == json.loads(serialized_metadata)
+            except (TypeError, ValueError):
+                equivalent = False
+            if not equivalent:
+                raise RuntimeError("Profil naturel existant avec des métadonnées différentes")
+        return stored[0]
+    raise RuntimeError("Impossible d'allouer un identifiant de profil sans collision")
+
+
+def _assert_database_profile(conn, profile_id: str) -> None:
+    profiles, _, _ = active_vector_profiles(conn)
+    other = [profile["id"] for profile in profiles if profile["id"] != profile_id]
+    if other:
+        raise RuntimeError("Plusieurs profils actifs avec vecteurs interdits : réindexation explicite requise")
 
 
 def run(ctx: dict) -> dict:
@@ -44,6 +81,29 @@ def run(ctx: dict) -> dict:
         protected = {row[0] for row in conn.execute(
             "SELECT chunk_index FROM document_chunks WHERE document_id=? AND page_number=?",
             (doc_id, page_number))}
+
+        # ── Profil vectoriel DB-wide : un seul espace actif, jamais de mélange ──
+        profile = ctx.get("embedding_profile")
+        has_new_vectors = any(chunk.get("embedding_vector") is not None
+                              for chunk in ctx.get("chunks", []))
+        if has_new_vectors and not profile:
+            raise RuntimeError("Vecteurs sans contrat d'embedding interdits")
+        if profile:
+            profile_id = _resolve_profile_id(conn, profile)
+            _assert_database_profile(conn, profile_id)
+            current = conn.execute("SELECT profile_id FROM document_embedding_profiles"
+                                   " WHERE document_id=?", (doc_id,)).fetchone()
+            remaining_vectors = conn.execute(
+                "SELECT COUNT(*) FROM document_chunks WHERE document_id=? AND embedding_vector IS NOT NULL",
+                (doc_id,),
+            ).fetchone()[0]
+            if current and current[0] != profile_id and remaining_vectors:
+                raise RuntimeError("Profil d'embedding modifié : réindexation explicite requise")
+            conn.execute(
+                "INSERT INTO document_embedding_profiles (document_id, profile_id) VALUES (?,?)"
+                " ON CONFLICT(document_id) DO UPDATE SET profile_id=excluded.profile_id,"
+                " indexed_at=CURRENT_TIMESTAMP", (doc_id, profile_id),
+            )
 
         # ── page_scans (V3.5 — le .sqlite sert 100% de l'UI, scans inclus) ──
         image_webp = _webp(ctx["restored_rgb"], 80)
@@ -85,23 +145,6 @@ def run(ctx: dict) -> dict:
                  chunk["content_markdown"], chunk["pedagogical_type"], chunk["pedagogical_index"],
                  chunk["embedding_vector"], chunk["token_count"]),
             )
-
-        # ── Métadonnées d'embedding : profil explicite, jamais de bascule silencieuse ──
-        profile = ctx.get("embedding_profile")
-        if profile:
-            profile_id = str(uuid.uuid5(uuid.NAMESPACE_URL, "ragdom-embedding:" +
-                                   json.dumps(profile, sort_keys=True)))
-            conn.execute("INSERT OR IGNORE INTO embedding_profiles"
-                         " (id, model_name, model_version, pooling, dimensions, normalized, metadata_json)"
-                         " VALUES (?,?,?,?,?,?, '{}')",
-                         (profile_id, profile["model_name"], profile["model_version"], profile["pooling"],
-                          profile["dimensions"], int(profile["normalized"])))
-            current = conn.execute("SELECT profile_id FROM document_embedding_profiles"
-                                   " WHERE document_id=?", (doc_id,)).fetchone()
-            if current and current[0] != profile_id:
-                raise RuntimeError("Profil d'embedding modifié : réindexation explicite requise")
-            conn.execute("INSERT OR IGNORE INTO document_embedding_profiles"
-                         " (document_id, profile_id) VALUES (?,?)", (doc_id, profile_id))
 
         # ── Artefacts (rattachés au premier chunk de la page si présent) ──
         anchor_chunk = chunk_ids.get(0)
