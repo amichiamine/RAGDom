@@ -635,10 +635,20 @@ def _explode_frames_cv(conn, body, frames):
         active = engine_registry.active_engine()
         seg = engine_registry.load_layer(active["id"], "frame_segmenter")
     except Exception as exc:  # noqa: BLE001 — moteur/segmenteur indisponible
-        # Cause réelle exposée (diagnostic ops) : FileNotFoundError = couche absente
-        # de l'image, ImportError = dépendance manquante, etc.
-        raise HTTPException(503, "Segmentation CV indisponible : %s: %s"
-                            % (type(exc).__name__, str(exc)[:200]))
+        # Cause réelle exposée + inventaire des dépendances vision de l'image
+        # (diagnostic ops : une image web sans cv2 casse aussi toute ingestion web).
+        import importlib as _il
+        import sys as _sys
+        probe = {}
+        for mod in ("cv2", "numpy", "PIL", "fitz"):
+            try:
+                _il.import_module(mod)
+                probe[mod] = "ok"
+            except Exception as mexc:  # noqa: BLE001
+                probe[mod] = "%s: %s" % (type(mexc).__name__, str(mexc)[:80])
+        raise HTTPException(503, "Segmentation CV indisponible : %s: %s | python=%s | %s"
+                            % (type(exc).__name__, str(exc)[:150], _sys.executable,
+                               json.dumps(probe)))
     if body.dry_run:
         return {"dry_run": True, "mode": "explode", "strategy": "cv",
                 "frames": len(frames), "created": 0, "skipped_text_regions": 0}
