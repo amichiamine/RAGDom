@@ -57,19 +57,6 @@ def backup_database(db_name: str, destination: Optional[str] = None) -> str:
     return destination
 
 
-def restore_database(db_name: str, backup_path: str) -> None:
-    """Restore a backup image over a live database via SQLite's backup API."""
-    destination_path = sanitize_db_name(db_name)
-    source = sqlite3.connect(backup_path, check_same_thread=False)
-    target = sqlite3.connect(destination_path, check_same_thread=False)
-    try:
-        source.backup(target)
-        target.commit()
-    finally:
-        target.close()
-        source.close()
-
-
 def init_vector_support(conn: sqlite3.Connection, force_strict: Optional[bool] = None) -> str:
     """Option B (résiliente) par défaut ; Option A (stricte) si forcée.
 
@@ -92,12 +79,16 @@ def init_vector_support(conn: sqlite3.Connection, force_strict: Optional[bool] =
                          " SELECT id, embedding_vector FROM document_chunks"
                          " WHERE embedding_vector IS NOT NULL")
             vector_count = conn.execute("SELECT COUNT(*) FROM vec_chunks").fetchone()[0]
-            message = "Moteur hybride opérationnel; vec_chunks=%d (schéma et backfill vérifiés)" % vector_count
-        except sqlite3.OperationalError as schema_exc:
-            # In-memory probes and very old databases may not have core tables yet;
-            # create_database reapplies schema_vec after schema_core.
-            message = "sqlite-vec chargé; schéma vectoriel différé: %s" % schema_exc
-        _vector_state.update(engine="sqlite-vec", status="ready", message=message)
+        except Exception as schema_exc:  # extension chargée, index/backfill non fiable
+            # Ne jamais annoncer ready tant que le schéma ET le backfill n'ont pas
+            # réussi. Les probes :memory: sans schéma restent utiles pour vérifier
+            # le chargement de l'extension mais exposent explicitement cet état.
+            _vector_state.update(engine="sqlite-vec", status="loaded_not_ready",
+                                 message="sqlite-vec chargé mais schéma/backfill en échec: %s" % schema_exc)
+            return "sqlite-vec"
+        _vector_state.update(
+            engine="sqlite-vec", status="ready",
+            message="Moteur hybride opérationnel; vec_chunks=%d (schéma et backfill vérifiés)" % vector_count)
         return "sqlite-vec"
     except Exception as exc:  # noqa: BLE001 — tout échec de chargement => fallback contrôlé
         if force_strict:
@@ -282,9 +273,18 @@ def _repair_legacy_curriculum_scope(conn: sqlite3.Connection) -> int:
 
 def _hardened_schema_present(conn: sqlite3.Connection) -> bool:
     required = {
+        "processing_benchmarks": {"validation_run_id"},
+        "curriculum_terms": {"document_id"},
+        "curriculum_programs": {"document_id"},
+        "content_links": {"document_id"},
+        "scientific_artifacts": {"validation_run_id"},
         "assessments": {"document_id"},
-        "validation_events": {"document_id"},
-        "validation_run_pages": {"baseline_hash"},
+        "validation_runs": {"status", "scope_json"},
+        "validation_run_pages": {"document_id", "baseline_json", "working_json", "baseline_hash"},
+        "validation_events": {"document_id", "event_type", "payload_json"},
+        "validation_snapshots": {"run_id", "snapshot_type", "payload_json"},
+        "embedding_profiles": {"model_name", "dimensions"},
+        "document_embedding_profiles": {"document_id", "profile_id"},
         "pipeline_jobs": {"document_id", "page_number", "status"},
     }
     for table, columns in required.items():
@@ -297,9 +297,18 @@ def _hardened_schema_present(conn: sqlite3.Connection) -> bool:
 
 def _verify_hardened_schema(conn: sqlite3.Connection) -> None:
     required = {
+        "processing_benchmarks": {"validation_run_id"},
+        "curriculum_terms": {"document_id"},
+        "curriculum_programs": {"document_id"},
+        "content_links": {"document_id"},
+        "scientific_artifacts": {"validation_run_id"},
         "assessments": {"document_id"},
-        "validation_events": {"document_id"},
-        "validation_run_pages": {"baseline_hash"},
+        "validation_runs": {"status", "scope_json"},
+        "validation_run_pages": {"document_id", "baseline_json", "working_json", "baseline_hash"},
+        "validation_events": {"document_id", "event_type", "payload_json"},
+        "validation_snapshots": {"run_id", "snapshot_type", "payload_json"},
+        "embedding_profiles": {"model_name", "dimensions"},
+        "document_embedding_profiles": {"document_id", "profile_id"},
         "pipeline_jobs": {"document_id", "page_number", "status"},
     }
     for table, columns in required.items():
@@ -325,7 +334,8 @@ def apply_migrations(conn: sqlite3.Connection) -> int:
     conn.execute("CREATE TABLE IF NOT EXISTS schema_version (version INTEGER PRIMARY KEY,"
                  " applied_at DATETIME DEFAULT CURRENT_TIMESTAMP, description TEXT)")
     conn.commit()
-    if not _hardened_schema_present(conn):
+    repair_hardened = not _hardened_schema_present(conn)
+    if repair_hardened:
         _prepare_legacy_validation_schema(conn)
         conn.commit()
     applied = {r[0] for r in conn.execute("SELECT version FROM schema_version")}
@@ -335,7 +345,11 @@ def apply_migrations(conn: sqlite3.Connection) -> int:
         if not match:
             continue
         num = int(match.group(1))
-        if num in applied:
+        # Une version déclarée n'est pas une preuve que son DDL est complet : des
+        # images historiques ont été interrompues après l'écriture schema_version.
+        # Rejouer V5/V6 est sûr (CREATE IF NOT EXISTS + ALTER duplicate toléré) et
+        # répare notamment validation_events/tables de studio manquantes.
+        if num in applied and not (repair_hardened and num >= 5):
             continue
         script = "\n".join(line for line in path.read_text(encoding="utf-8").splitlines()
                            if not line.lstrip().startswith("--"))

@@ -359,24 +359,153 @@ def _assert_human_edits_preserved(baseline: dict, working: dict) -> None:
                 raise HTTPException(409, "Édition humaine protégée : %s" % item.get("id"))
 
 
-def _replace_official_page(conn, payload: dict) -> None:
+def _validate_accept_references(conn, payloads: List[dict]) -> None:
+    """Valide l'image finale complète avant la première mutation officielle."""
+    page_keys = set()
+    chunks = {}
+    artifacts = {}
+    for payload in payloads:
+        try:
+            key = (payload["document_id"], int(payload["page_number"]))
+        except (KeyError, TypeError, ValueError):
+            raise HTTPException(400, "Copie de travail sans document_id/page_number valide")
+        if key in page_keys:
+            raise HTTPException(400, "Page dupliquée dans le run")
+        page_keys.add(key)
+        for collection, index in ((payload.get("chunks", []), chunks),
+                                  (payload.get("artifacts", []), artifacts)):
+            if not isinstance(collection, list):
+                raise HTTPException(400, "chunks et artifacts doivent être des listes")
+            for item in collection:
+                if not isinstance(item, dict) or not item.get("id"):
+                    raise HTTPException(400, "Référence sans id")
+                try:
+                    item_key = (item.get("document_id"), int(item.get("page_number", -1)))
+                except (TypeError, ValueError):
+                    raise HTTPException(400, "Référence avec page_number invalide")
+                if item_key != key:
+                    raise HTTPException(400, "Copie de travail hors périmètre")
+                if item["id"] in index:
+                    raise HTTPException(400, "Identifiant dupliqué : %s" % item["id"])
+                index[item["id"]] = item
+
+    official_chunks = {r[0]: (r[1], int(r[2])) for r in conn.execute(
+        "SELECT id, document_id, page_number FROM document_chunks").fetchall()}
+    official_artifacts = {r[0]: (r[1], int(r[2])) for r in conn.execute(
+        "SELECT id, document_id, page_number FROM scientific_artifacts").fetchall()}
+    for item_id, item in chunks.items():
+        old = official_chunks.get(item_id)
+        wanted = (item["document_id"], int(item["page_number"]))
+        if old is not None and old != wanted:
+            raise HTTPException(409, "Chunk déjà détenu par un autre document/page : %s" % item_id)
+    for item_id, item in artifacts.items():
+        old = official_artifacts.get(item_id)
+        wanted = (item["document_id"], int(item["page_number"]))
+        if old is not None and old != wanted:
+            raise HTTPException(409, "Artefact déjà détenu par un autre document/page : %s" % item_id)
+
+    def final_chunk_owner(chunk_id):
+        candidate = chunks.get(chunk_id)
+        if candidate:
+            return candidate["document_id"]
+        old = official_chunks.get(chunk_id)
+        if old is None or old in page_keys:
+            return None
+        return old[0]
+
+    def require_owner(kind, ref_id, expected_document, owner):
+        if owner is None:
+            raise HTTPException(400, "Référence %s introuvable : %s" % (kind, ref_id))
+        if owner != expected_document:
+            raise HTTPException(409, "Référence %s cross-document : %s" % (kind, ref_id))
+
+    toc_owners = {r[0]: r[1] for r in conn.execute("SELECT id, document_id FROM document_toc")}
+    for item in chunks.values():
+        doc_id = item["document_id"]
+        if item.get("toc_id"):
+            require_owner("chunk.toc_id", item["toc_id"], doc_id, toc_owners.get(item["toc_id"]))
+        if item.get("linked_solution_chunk_id"):
+            ref = item["linked_solution_chunk_id"]
+            require_owner("linked_solution_chunk_id", ref, doc_id, final_chunk_owner(ref))
+    for item in artifacts.values():
+        if item.get("chunk_id"):
+            require_owner("artifact.chunk_id", item["chunk_id"], item["document_id"],
+                          final_chunk_owner(item["chunk_id"]))
+
+    documents = {r[0] for r in conn.execute("SELECT id FROM documents")}
+    term_owners = {r[0]: r[1] for r in conn.execute("SELECT id, document_id FROM curriculum_terms")}
+    program_owners = {r[0]: r[1] for r in conn.execute("SELECT id, document_id FROM curriculum_programs")}
+    assessment_owners = {r[0]: r[1] for r in conn.execute("SELECT id, document_id FROM assessments")}
+    scan_owners = {r[0]: r[1] for r in conn.execute("SELECT id, document_id FROM page_scans")}
+
+    def require_curriculum_document(table, item_id, document_id):
+        if document_id is None:
+            raise HTTPException(400, "%s.document_id manquant : %s" % (table, item_id))
+        if document_id not in documents:
+            raise HTTPException(400, "%s.document_id introuvable : %s" % (table, item_id))
+
+    for term_id, document_id in term_owners.items():
+        require_curriculum_document("curriculum_terms", term_id, document_id)
+    for program_id, document_id, term_id in conn.execute(
+            "SELECT id, document_id, term_id FROM curriculum_programs"):
+        require_curriculum_document("curriculum_programs", program_id, document_id)
+        if term_id:
+            require_owner("curriculum_programs.term_id", term_id, document_id, term_owners.get(term_id))
+    for assessment_id, document_id, term_id, subject_id, correction_id in conn.execute(
+            "SELECT id, document_id, term_id, subject_chunk_id, correction_chunk_id FROM assessments"):
+        require_curriculum_document("assessments", assessment_id, document_id)
+        if term_id:
+            require_owner("assessments.term_id", term_id, document_id, term_owners.get(term_id))
+        for field, ref in (("subject_chunk_id", subject_id), ("correction_chunk_id", correction_id)):
+            if ref:
+                require_owner("assessments.%s" % field, ref, document_id, final_chunk_owner(ref))
+
+    endpoint_tables = {
+        "program_term": (program_owners, term_owners),
+        "course_program": (lambda ref: final_chunk_owner(ref), program_owners),
+        "course_exercise": (lambda ref: final_chunk_owner(ref), lambda ref: final_chunk_owner(ref)),
+        "course_scan": (lambda ref: final_chunk_owner(ref), scan_owners),
+        "exercise_scan": (lambda ref: final_chunk_owner(ref), scan_owners),
+        "assessment_scan": (assessment_owners, scan_owners),
+    }
+
+    def endpoint_owner(source, ref):
+        return source(ref) if callable(source) else source.get(ref)
+
+    for link_id, document_id, link_type, from_id, to_id in conn.execute(
+            "SELECT id, document_id, link_type, from_id, to_id FROM content_links"):
+        require_curriculum_document("content_links", link_id, document_id)
+        pair = endpoint_tables.get(link_type)
+        if pair is None:
+            raise HTTPException(400, "content_links.link_type invalide : %s" % link_type)
+        require_owner("content_links.from_id", from_id, document_id, endpoint_owner(pair[0], from_id))
+        require_owner("content_links.to_id", to_id, document_id, endpoint_owner(pair[1], to_id))
+
+
+def _replace_official_page(conn, payload: dict) -> List[tuple]:
     doc_id, page_number = payload["document_id"], int(payload["page_number"])
     chunks, artifacts = payload.get("chunks", []), payload.get("artifacts", [])
-    for item in chunks + artifacts:
-        if item.get("document_id") != doc_id or int(item.get("page_number", -1)) != page_number:
-            raise HTTPException(400, "Copie de travail hors périmètre")
     conn.execute("DELETE FROM scientific_artifacts WHERE document_id=? AND page_number=?", (doc_id, page_number))
-    conn.execute("UPDATE document_chunks SET linked_solution_chunk_id=NULL"
-                 " WHERE document_id=? AND page_number=?", (doc_id, page_number))
-    conn.execute("DELETE FROM document_chunks WHERE document_id=? AND page_number=?", (doc_id, page_number))
+    candidate_ids = [item["id"] for item in chunks]
+    if candidate_ids:
+        conn.execute("DELETE FROM document_chunks WHERE document_id=? AND page_number=?"
+                     " AND id NOT IN (%s)" % ",".join("?" for _ in candidate_ids),
+                     [doc_id, page_number] + candidate_ids)
+        conn.execute("UPDATE document_chunks SET linked_solution_chunk_id=NULL"
+                     " WHERE document_id=? AND page_number=?", (doc_id, page_number))
+    else:
+        conn.execute("DELETE FROM document_chunks WHERE document_id=? AND page_number=?", (doc_id, page_number))
     chunk_cols = ("id", "document_id", "toc_id", "page_number", "chunk_index", "section_title",
                   "content_markdown", "pedagogical_type", "has_solution", "is_human_edited",
                   "pedagogical_index", "updated_at", "embedding_vector", "token_count", "created_at")
+    update_cols = chunk_cols[1:]
     links = []
     for item in chunks:
         values = [_decode(item.get(col)) for col in chunk_cols]
-        conn.execute("INSERT INTO document_chunks (%s) VALUES (%s)" %
-                     (", ".join(chunk_cols), ", ".join("?" for _ in chunk_cols)), values)
+        conn.execute("INSERT INTO document_chunks (%s) VALUES (%s)"
+                     " ON CONFLICT(id) DO UPDATE SET %s" %
+                     (", ".join(chunk_cols), ", ".join("?" for _ in chunk_cols),
+                      ", ".join("%s=excluded.%s" % (col, col) for col in update_cols)), values)
         if item.get("linked_solution_chunk_id"):
             links.append((item["linked_solution_chunk_id"], item["id"]))
     artifact_cols = ("id", "document_id", "chunk_id", "page_number", "domain", "artifact_type",
@@ -400,15 +529,24 @@ def accept_run(run_id: str, db_name: str = Query(alias="db")):
         rows = conn.execute("SELECT id, document_id, page_number, baseline_json, working_json, baseline_hash"
                             " FROM validation_run_pages WHERE run_id=? ORDER BY document_id, page_number",
                             (run_id,)).fetchall()
-        deferred_links = []
+        prepared = []
         for page_id, document_id, page_number, baseline, working, baseline_hash in rows:
-            baseline_payload = json.loads(baseline)
-            working_payload = json.loads(working)
+            try:
+                baseline_payload = json.loads(baseline)
+                working_payload = json.loads(working)
+            except (TypeError, ValueError):
+                raise HTTPException(400, "Copie de travail JSON invalide")
             current_hash = _payload_sha256(_official_page(conn, document_id, page_number))
             expected_hash = baseline_hash or _payload_sha256(baseline_payload)
             if current_hash != expected_hash:
                 raise HTTPException(409, "Données officielles modifiées depuis la création du run")
             _assert_human_edits_preserved(baseline_payload, working_payload)
+            prepared.append((page_id, working_payload))
+        # Toutes les références, y compris celles entre deux pages du run et celles
+        # détenues par le curriculum, sont validées avant le premier DELETE/UPDATE.
+        _validate_accept_references(conn, [payload for _, payload in prepared])
+        deferred_links = []
+        for page_id, working_payload in prepared:
             deferred_links.extend(_replace_official_page(conn, working_payload))
             conn.execute("UPDATE validation_run_pages SET status='ACCEPTED',"
                          " updated_at=CURRENT_TIMESTAMP WHERE id=?", (page_id,))
@@ -530,7 +668,9 @@ def attach_benchmarks(run_id: str, body: BenchmarkAttachDTO, db_name: str = Quer
     conn = _conn(db_name)
     try:
         conn.execute("BEGIN IMMEDIATE")
-        _run(conn, run_id)
+        run = _run(conn, run_id)
+        if run["status"] in ("ACCEPTED", "REJECTED", "CANCELLED", "FAILED"):
+            raise HTTPException(409, "Provenance benchmark immutable après terminalisation du run")
         allowed = {(r[0], r[1]) for r in conn.execute(
             "SELECT document_id, page_number FROM validation_run_pages WHERE run_id=?", (run_id,))}
         attached = []

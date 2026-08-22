@@ -87,14 +87,23 @@ class PipelineOrchestrator:
 
     # ── Mise en file d'un batch (contrat Blueprint §7.4 : 1 ligne/page) ──
     def enqueue_batch(self, db_name: str, document_id: str, source_path: str,
-                      mode: str, page_start: int, page_end: int) -> dict:
-        conn = db.get_connection(db_name)
+                      mode: str, page_start: int, page_end: int, *,
+                      conn=None, commit: bool = True, emit: bool = True) -> dict:
+        """Enfile un lot, avec possibilité de participer à une transaction appelante.
+
+        ``reprocess`` fournit sa connexion et garde ``commit=False`` afin que purge et
+        enqueue soient une seule transaction ``BEGIN IMMEDIATE``. Aucun snapshot de
+        base entière ne peut alors écraser une écriture concurrente.
+        """
+        own_connection = conn is None
+        conn = conn or db.get_connection(db_name)
         try:
             if page_start < 1 or page_end < page_start:
                 raise ValueError("Plage de pages invalide")
             batch_id = str(uuid.uuid4())
             pages = list(range(page_start, page_end + 1))
-            conn.execute("BEGIN IMMEDIATE")
+            if own_connection:
+                conn.execute("BEGIN IMMEDIATE")
             conn.execute(
                 "INSERT INTO ingestion_batches (id, source_path, target_db, mode, page_start, page_end, status, pages_total)"
                 " VALUES (?,?,?,?,?,?, 'QUEUED', ?)",
@@ -127,13 +136,21 @@ class PipelineOrchestrator:
                         skipped_active += 1
                         continue
                     raise
-            conn.commit()
+            if commit:
+                conn.commit()
             skipped = skipped_ready + skipped_active
-            self._emit("queue_update", {"queue_length": len(pages) - skipped, "batch_id": batch_id})
-            return {"batch_id": batch_id, "status": "QUEUED", "pages_total": len(pages),
-                    "skipped_ready": skipped_ready, "skipped_active": skipped_active}
+            result = {"batch_id": batch_id, "status": "QUEUED", "pages_total": len(pages),
+                      "skipped_ready": skipped_ready, "skipped_active": skipped_active}
+            if emit:
+                self._emit("queue_update", {"queue_length": len(pages) - skipped, "batch_id": batch_id})
+            return result
+        except Exception:
+            if own_connection:
+                conn.rollback()
+            raise
         finally:
-            conn.close()
+            if own_connection:
+                conn.close()
 
     def request_stop(self) -> None:
         self._stop_requested = True

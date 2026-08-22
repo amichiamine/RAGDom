@@ -132,9 +132,19 @@ def _safe_rel(rel_path: str) -> str:
     rel = (rel_path or "").strip().strip("/")
     if not _REL_RE.fullmatch(rel) or ".." in rel:
         raise HTTPException(400, "Chemin relatif invalide")
-    target = os.path.realpath(os.path.join(config.SOURCES_DIR, rel))
-    if not target.startswith(os.path.realpath(config.SOURCES_DIR)):
+    root = os.path.realpath(config.SOURCES_DIR)
+    target = os.path.abspath(os.path.join(root, rel))
+    resolved = os.path.realpath(target)
+    try:
+        lexical_common = os.path.commonpath((root, target))
+        resolved_common = os.path.commonpath((root, resolved))
+    except ValueError:
         raise HTTPException(400, "Chemin hors /sources/ interdit")
+    # commonpath évite les collisions de préfixe (/sources vs /sources-evil) ;
+    # le test root + os.sep documente et impose une vraie frontière de composant.
+    if lexical_common != root or resolved_common != root or not (
+            resolved == root or resolved.startswith(root + os.sep)):
+        raise HTTPException(400, "Chemin hors /sources/ interdit (symlink inclus)")
     return target
 
 
@@ -180,6 +190,12 @@ async def sources_upload(file: UploadFile = File(...), rel_path: str = Form(""))
     target_dir = _safe_rel(rel_path)
     os.makedirs(target_dir, exist_ok=True)
     dest = os.path.join(target_dir, os.path.basename(file.filename))
+    root = os.path.realpath(config.SOURCES_DIR)
+    resolved_dest = os.path.realpath(dest)
+    if os.path.commonpath((root, resolved_dest)) != root or not resolved_dest.startswith(root + os.sep):
+        raise HTTPException(400, "Destination upload hors /sources/ interdite (symlink)")
+    if os.path.islink(dest):
+        raise HTTPException(400, "Destination upload symlink interdite")
     size = 0
     with open(dest, "wb") as out:
         while True:

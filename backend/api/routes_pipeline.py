@@ -305,11 +305,61 @@ class ReprocessBody(StrictBody):
     preserve_human_edits: bool = True
 
 
+def _purge_for_reprocess(conn, body: ReprocessBody, targets) -> dict:
+    """Purge le périmètre déjà résolu dans la transaction du reprocess.
+
+    Les lignes ``documents`` sont conservées, y compris pour ``base`` : elles sont
+    nécessaires aux nouveaux jobs et empêchent les cascades hors périmètre. Cette
+    fonction ne commit jamais.
+    """
+    whole_base = body.scope == "base"
+    human = " AND is_human_edited=0" if body.preserve_human_edits and not whole_base else ""
+    deleted = {"chunks": 0, "artifacts": 0, "toc_entries": 0, "jobs": 0,
+               "curriculum_links": 0, "page_scans": 0}
+    impacted_batches = set()
+    for target in targets:
+        where, args = _target_where(target)
+        deleted["chunks"] += conn.execute(
+            "SELECT COUNT(*) FROM document_chunks WHERE %s%s" % (where, human), args).fetchone()[0]
+        deleted["artifacts"] += conn.execute(
+            "SELECT COUNT(*) FROM scientific_artifacts WHERE %s%s" % (where, human), args).fetchone()[0]
+        deleted["jobs"] += conn.execute(
+            "SELECT COUNT(*) FROM pipeline_jobs WHERE %s" % where, args).fetchone()[0]
+        deleted["page_scans"] += conn.execute(
+            "SELECT COUNT(*) FROM page_scans WHERE %s" % where, args).fetchone()[0]
+        impacted_batches.update(r[0] for r in conn.execute(
+            "SELECT DISTINCT batch_id FROM pipeline_jobs WHERE %s AND batch_id IS NOT NULL" % where,
+            args).fetchall())
+        conn.execute("DELETE FROM scientific_artifacts WHERE %s%s" % (where, human), args)
+        conn.execute("DELETE FROM document_chunks WHERE %s%s" % (where, human), args)
+        conn.execute("DELETE FROM page_scans WHERE %s" % where, args)
+        conn.execute("DELETE FROM processing_benchmarks WHERE %s" % where, args)
+        conn.execute("DELETE FROM pipeline_jobs WHERE %s" % where, args)
+        if whole_base or body.scope == "document":
+            doc_id = target.document_id
+            deleted["toc_entries"] += conn.execute(
+                "SELECT COUNT(*) FROM document_toc WHERE document_id=?", (doc_id,)).fetchone()[0]
+            deleted["curriculum_links"] += conn.execute(
+                "SELECT COUNT(*) FROM content_links WHERE document_id=?", (doc_id,)).fetchone()[0]
+            conn.execute("DELETE FROM document_toc WHERE document_id=?", (doc_id,))
+            for table in ("content_links", "assessments", "curriculum_programs", "curriculum_terms"):
+                conn.execute("DELETE FROM %s WHERE document_id=?" % table, (doc_id,))
+    if impacted_batches:
+        conn.execute("UPDATE ingestion_batches SET status='STOPPED', updated_at=CURRENT_TIMESTAMP"
+                     " WHERE id IN (%s)" % ",".join("?" for _ in impacted_batches),
+                     sorted(impacted_batches))
+    return {"deleted": deleted, "stopped_batch_ids": sorted(impacted_batches)}
+
+
 @router.post("/reprocess", status_code=202)
 def reprocess(body: ReprocessBody):
-    """Valide tout le périmètre, puis purge et enfile chaque document isolément."""
+    """Valide, purge et enfile sous un verrou SQLite d'écriture unique."""
     conn = db.get_connection_or_http(body.db)
     try:
+        # BEGIN IMMEDIATE est acquis avant la résolution. Toute écriture concurrente
+        # finit avant notre image ou attend notre commit; un échec fait un rollback
+        # local, jamais un restore whole-db susceptible d'écraser d'autres commits.
+        conn.execute("BEGIN IMMEDIATE")
         try:
             targets = resolve_scope(conn, body.scope, body.document_id, body.toc_id,
                                     body.page, body.page_start, body.page_end, body.pages)
@@ -324,21 +374,8 @@ def reprocess(body: ReprocessBody):
             if not os.path.exists(row[0]):
                 raise HTTPException(409, "PDF source absent de /sources/ — ré-exécution impossible")
             sources[target.document_id] = row[0]
-    finally:
-        conn.close()
 
-    # Aucune mutation avant que TOUS les documents, TOC et bornes soient validés.
-    # Purge and enqueue historically used separate commits. Keep a consistent image
-    # and automatically restore it if any enqueue fails, so a failed reprocess never
-    # leaves an empty official scope.
-    backup_path = db.backup_database(body.db)
-    try:
-        purge_result = purge(PurgeBody(db=body.db, scope=body.scope,
-                                       document_id=body.document_id, toc_id=body.toc_id,
-                                       page=body.page, page_start=body.page_start,
-                                       page_end=body.page_end, pages=body.pages, dry_run=False,
-                                       preserve_human_edits=body.preserve_human_edits,
-                                       confirm=body.db if body.scope == "base" else None))
+        purge_result = _purge_for_reprocess(conn, body, targets)
         batches = []
         for target in targets:
             groups = []
@@ -348,18 +385,20 @@ def reprocess(body: ReprocessBody):
                 else:
                     groups[-1].append(selected)
             for group in groups:
-                batch = orchestrator.enqueue_batch(body.db, target.document_id,
-                                                   sources[target.document_id], body.scope,
-                                                   group[0], group[-1])
+                batch = orchestrator.enqueue_batch(
+                    body.db, target.document_id, sources[target.document_id], body.scope,
+                    group[0], group[-1], conn=conn, commit=False, emit=False)
                 batches.append(batch)
+        conn.commit()
     except Exception:
-        db.restore_database(body.db, backup_path)
+        conn.rollback()
         raise
     finally:
-        try:
-            os.remove(backup_path)
-        except FileNotFoundError:
-            pass
+        conn.close()
+    for batch in batches:
+        orchestrator._emit("queue_update", {"queue_length": batch["pages_total"] -
+                                             batch["skipped_ready"] - batch["skipped_active"],
+                                             "batch_id": batch["batch_id"]})
     _launch(body.db)
     return {"reprocessed_scope": body.scope, "purged": purge_result.get("deleted"),
             "batch_id": batches[0]["batch_id"] if batches else None,
