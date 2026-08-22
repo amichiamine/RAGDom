@@ -1,5 +1,12 @@
 # JOURNAL des passes (le plus récent en premier)
 
+## 2026-08-22 02:00 — V3.11.1 : chargement infini élucidé AU NAVIGATEUR
+- Le fix V3.11 ne suffisait pas : effet React auto-annulant dans CoursTab
+  (`loading` dans les deps → setLoading(true) relance l'effet → cleanup
+  alive=false → réponse jetée, spinner éternel, ZÉRO erreur console).
+- Leçon de méthode : les preuves curl ne suffisent pas pour l'UI — vérifier
+  au NAVIGATEUR (BrowserEvaluate : hooks console.error + window.onerror,
+  performance.getEntriesByType pour tracer les requêtes réelles).
 ## 2026-08-22 01:40 — V3.11 : Library rend enfin TOUT (multimodal inclus)
 - Causes racines corrigées : api.ts typait {chunks} alors que l'API renvoie {data}
   (chargement infini) ; useCurriculumDoc ne chargeait qu'UN document par base

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   BookOpen, ChevronsDown, ChevronsUp, ChevronDown, FileImage, PenTool,
   GraduationCap, Image as ImageIcon, X, Expand,
@@ -138,8 +138,13 @@ function CoursCard({ cours, open, onToggle, activeDb, documentId, termIndex, onO
   const [sideBySide, setSideBySide] = useState(false)
 
   // Chargement paresseux des chunks du chapitre (une seule fois, à l'ouverture).
+  // PIÈGE ÉVITÉ : ni `loading` ni `chunks` dans les deps — setLoading(true)
+  // relancerait l'effet, dont le cleanup (alive=false) JETTERAIT la réponse
+  // → « chargement infini » silencieux (bug réel corrigé le 2026-08-22).
+  const startedRef = useRef(false)
   useEffect(() => {
-    if (!open || chunks !== null || loading || !documentId) return
+    if (!open || startedRef.current || !documentId) return
+    startedRef.current = true
     let alive = true
     setLoading(true); setError(null)
     ;(async () => {
@@ -164,7 +169,7 @@ function CoursCard({ cours, open, onToggle, activeDb, documentId, termIndex, onO
       }
     })()
     return () => { alive = false }
-  }, [open, chunks, loading, documentId, activeDb, cours.pageStart, cours.pageEnd])
+  }, [open, documentId, activeDb, cours.pageStart, cours.pageEnd])
 
   // Résolveur d'assets mémoïsé (stabilise le memo de MarkdownKatex).
   const resolveAsset = useCallback(
