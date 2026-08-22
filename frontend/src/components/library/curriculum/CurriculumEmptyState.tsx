@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom'
 import { TriangleAlert, Info, Cog } from 'lucide-react'
 import type { ReactNode } from 'react'
+import { useLanguage } from '@/contexts/LanguageContext'
 
 interface Props {
   /** Titre principal (ex. « المصفوفة الشاملة غير متوفرة »). */
@@ -20,8 +21,9 @@ interface Props {
  * `curriculum_available === false` — jamais d'écran cassé.
  */
 export default function CurriculumEmptyState({ title, description, icon }: Props) {
+  const { t } = useLanguage()
   return (
-    <div style={{ textAlign: 'center', padding: '48px 0' }} dir="rtl">
+    <div style={{ textAlign: 'center', padding: '48px 0' }}>
       <div className="content-box" style={{ maxWidth: 680, margin: '0 auto', padding: 40 }}>
         <div style={{ fontSize: '2.6rem', color: 'var(--warning)', marginBottom: 16, display: 'flex', justifyContent: 'center' }}>
           {icon ?? <TriangleAlert size={52} strokeWidth={1.6} />}
@@ -35,15 +37,15 @@ export default function CurriculumEmptyState({ title, description, icon }: Props
         >
           <Info size={30} style={{ color: 'var(--warning)', flexShrink: 0 }} />
           <div>
-            <h6 style={{ fontWeight: 700, margin: 0 }}>جاهز للبناء الفوري :</h6>
+            <h6 style={{ fontWeight: 700, margin: 0 }}>{t('curriculum_ui.ready_to_build')}</h6>
             <small style={{ color: 'var(--text-muted)' }}>
-              يمكنك بناء المنهاج والتدرج السنوي من مركز الأتمتة (استوديو المنهاج) خلال ثوانٍ.
+              {t('curriculum_ui.build_hint')}
             </small>
           </div>
         </div>
 
         <Link to="/automation" className="btn btn-success rounded-pill" style={{ padding: '10px 24px', fontWeight: 700 }}>
-          <Cog size={16} /> الانتقال إلى استوديو المنهاج (لوحة الأتمتة)
+          <Cog size={16} /> {t('curriculum_ui.open_studio')}
         </Link>
       </div>
     </div>

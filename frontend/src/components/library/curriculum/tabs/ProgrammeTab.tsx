@@ -6,6 +6,7 @@ import type { CurriculumPayload, TocNode } from '@/types'
 import { useCurriculumBridge, HighlightTarget } from '@/contexts/CurriculumBridgeContext'
 import BridgeButton from '@/components/library/BridgeButton'
 import CurriculumEmptyState from '../CurriculumEmptyState'
+import { useLanguage } from '@/contexts/LanguageContext'
 import {
   buildCurriculumModel, coursForProgram, parseCompetencies,
   type CurriculumModel,
@@ -25,6 +26,7 @@ interface Props {
  * vers les cours liés + leurs exercices. Respecte trimFilter + searchQuery.
  */
 export default function ProgrammeTab({ curriculum, toc }: Props) {
+  const { t } = useLanguage()
   const { trimFilter, searchQuery, jumpTo, filterExercicesByCours } = useCurriculumBridge()
 
   const model = useMemo<CurriculumModel>(() => buildCurriculumModel(curriculum, toc), [curriculum, toc])
@@ -34,8 +36,8 @@ export default function ProgrammeTab({ curriculum, toc }: Props) {
   if (!curriculum.curriculum_available || model.programs.length === 0) {
     return (
       <CurriculumEmptyState
-        title="المنهاج والتدرج السنوي غير متوفر"
-        description="لم يُبنَ المخطط الوزاري الرسمي (المقاطع، الموارد والكفاءات المستهدفة) لهذه القاعدة بعد."
+        title={t('curriculum_ui.programme_unavailable')}
+        description={t('curriculum_ui.programme_unavailable_desc')}
       />
     )
   }
@@ -60,19 +62,19 @@ export default function ProgrammeTab({ curriculum, toc }: Props) {
   })
 
   return (
-    <div dir="rtl">
+    <div>
       {/* Header */}
       <div style={{ marginBottom: 16 }}>
         <h4 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
-          <GraduationCap size={20} style={{ color: 'var(--success)' }} /> المنهاج والتدرج السنوي لبناء التعلمات (الجيل الثاني)
+          <GraduationCap size={20} style={{ color: 'var(--success)' }} /> {t('curriculum_ui.programme_heading')}
         </h4>
         <small style={{ color: 'var(--text-muted)' }}>
-          المخطط الوزاري الرسمي — المقطع، الموارد والكفاءات المستهدفة
+          {t('curriculum_ui.programme_subtitle')}
         </small>
       </div>
 
       {visible.length === 0 && (
-        <div className="alert-secondary-box">لا توجد مقاطع مطابقة للتصفية الحالية.</div>
+        <div className="alert-secondary-box">{t('curriculum_ui.no_programmes')}</div>
       )}
 
       <div className="row">

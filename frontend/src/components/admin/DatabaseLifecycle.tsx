@@ -23,6 +23,15 @@ export default function DatabaseLifecycle({ databases, onChanged }: Props) {
   const [delTarget, setDelTarget] = useState<DatabaseInfo | null>(null)
   const [delConfirm, setDelConfirm] = useState('')
 
+  const doExport = async (filename: string) => {
+    setBusy(true)
+    try {
+      await api.system.downloadDatabaseExport(filename)
+      toast.success(`Export téléchargé : ${filename}`)
+    } catch (e) { toast.error(e instanceof Error ? e.message : "Échec de l'export") }
+    finally { setBusy(false) }
+  }
+
   const doDuplicate = async () => {
     if (!dupTarget) return
     const name = dupName.trim()
@@ -74,13 +83,14 @@ export default function DatabaseLifecycle({ databases, onChanged }: Props) {
                   <td className="font-num">{d.metrics?.chunk_count ?? 0}</td>
                   <td>
                     <span style={{ display: 'inline-flex', gap: 6, flexWrap: 'wrap' }}>
-                      <a
+                      <button
+                        type="button"
                         className="btn btn-sm btn-outline-secondary"
-                        href={api.system.getDatabaseExportUrl(d.filename)}
-                        download
+                        onClick={() => void doExport(d.filename)}
+                        disabled={busy}
                       >
                         <Download size={14} /> Exporter
-                      </a>
+                      </button>
                       <button className="btn btn-sm btn-outline-primary" onClick={() => { setDupTarget(d); setDupName(`${d.filename.replace(/\.sqlite$/i, '')}_copy.sqlite`) }}>
                         <Copy size={14} /> Dupliquer
                       </button>

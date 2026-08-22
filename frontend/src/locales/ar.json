@@ -162,6 +162,19 @@
     "didactic_note_illustration": "توضيح الدرس",
     "didactic_note_exercise_support": "سند تمرين"
   },
+  "curriculum_ui": {
+    "tagline": "المنظومة البيداغوجية الشاملة",
+    "tabs": { "matrix": "المصفوفة الشاملة 360°", "programme": "المنهاج والتدرج السنوي", "cours": "مستودع الدروس", "exercices": "بنك التمارين", "evaluations": "الفروض والاختبارات", "scans": "المستودع البصري" },
+    "term_0": "جميع الفصول (360°)", "term_1": "الفصل الأول 🍂", "term_2": "الفصل الثاني ❄️", "term_3": "الفصل الثالث 🌸",
+    "no_databases": "لا توجد قواعد", "page_short": "ص", "soon": "قريباً", "filter_requires": "التصفية حسب الفصل تتطلب بناء المنهاج لهذه القاعدة.",
+    "pages_documents": "صفحات الكتاب ووثائق ممسوحة", "ready_to_build": "جاهز للبناء الفوري", "build_hint": "يمكنك بناء المنهاج من استوديو المنهاج في مركز الأتمتة.", "open_studio": "الانتقال إلى استوديو المنهاج",
+    "splash_prepare": "جاري تهيئة المنهاج والتدرج السنوي…", "splash_courses": "جاري تجميع الدروس…", "splash_exercises": "جاري فهرسة التمارين والحلول…", "splash_assessments": "جاري مطابقة الفروض والاختبارات…", "splash_done": "اكتملت التهيئة. جاري فتح المستودع…",
+    "programs": "مقاطع", "courses": "دروس", "exercises": "تمارين", "assessments": "اختبارات", "chapters": "فصول",
+    "matrix_unavailable": "المصفوفة الشاملة 360° غير متوفرة", "matrix_unavailable_desc": "لم يُبنَ المنهاج لهذه القاعدة بعد.", "matrix_heading": "المصفوفة البيداغوجية المترابطة", "open_terms": "فتح الفصول", "collapse_all": "طي الكل",
+    "programme_unavailable": "المنهاج والتدرج السنوي غير متوفر", "programme_unavailable_desc": "لم يُبنَ المخطط الوزاري الرسمي لهذه القاعدة بعد.", "programme_heading": "المنهاج والتدرج السنوي", "programme_subtitle": "المخطط الوزاري الرسمي والموارد والكفاءات المستهدفة", "no_programmes": "لا توجد مقاطع مطابقة للتصفية الحالية.",
+    "courses_heading": "مستودع الدروس والمفاهيم العلمية", "courses_subtitle": "المحتوى المرقمن وصفحات الكتاب الأصلية جنباً إلى جنب", "open_all_courses": "فتح كل الدروس", "no_courses": "لا توجد دروس مطابقة للتصفية الحالية.",
+    "exercises_heading": "بنك التمارين والأنشطة", "evaluations_heading": "بنك الفروض والاختبارات", "scans_heading": "المستودع البصري", "no_matches": "لا توجد عناصر مطابقة للتصفية الحالية."
+  },
   "search": {
     "placeholder": "ابحث في هذه القاعدة...",
     "run": "بحث",
@@ -180,6 +193,8 @@
   },
   "automation": {
     "title": "مركز الأتمتة RAGDom",
+    "readonly_title": "وضع القراءة فقط",
+    "readonly_message": "جميع إجراءات الإدارة معطلة في هذا المركز.",
     "live_status": "الحالة الحية",
     "vector_alert": "محرك البحث المتجهي",
     "engine_hybrid_active": "المحرك الهجين نشط (FTS5 BM25 + sqlite-vec 384d)",
@@ -562,7 +577,11 @@
       "accept_done": "تم حفظ القبول.",
       "reject_done": "تم حفظ الرفض.",
       "restore_done": "تمت استعادة نسخة العمل.",
-      "cancel_done": "تم إلغاء عملية التحقق."
+      "cancel_done": "تم إلغاء عملية التحقق.",
+      "accept_confirm_title": "تأكيد قبول العملية",
+      "accept_confirm_warning": "سيستبدل هذا الإجراء البيانات الرسمية ضمن النطاق المحدد بنسخة العمل المعتمدة.",
+      "accept_confirm_detail": "راجع قاعدة البيانات والنطاق والصفحات أدناه قبل تنفيذ أي تعديل.",
+      "accept_confirm_action": "قبول ونشر"
     }
   }
 }

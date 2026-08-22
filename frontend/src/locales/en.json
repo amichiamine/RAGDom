@@ -162,6 +162,19 @@
     "didactic_note_illustration": "Course illustration",
     "didactic_note_exercise_support": "Exercise support"
   },
+  "curriculum_ui": {
+    "tagline": "Unified learning workspace",
+    "tabs": { "matrix": "360° Matrix", "programme": "Annual curriculum", "cours": "Courses", "exercices": "Exercises", "evaluations": "Assessments", "scans": "Scans" },
+    "term_0": "All terms (360°)", "term_1": "First term 🍂", "term_2": "Second term ❄️", "term_3": "Third term 🌸",
+    "no_databases": "No databases", "page_short": "p.", "soon": "Soon", "filter_requires": "Term filtering requires a built curriculum.",
+    "pages_documents": "Textbook pages and scanned documents", "ready_to_build": "Ready to build", "build_hint": "Build the curriculum from the Automation Hub studio.", "open_studio": "Open Curriculum Studio",
+    "splash_prepare": "Preparing the annual curriculum…", "splash_courses": "Assembling courses…", "splash_exercises": "Indexing exercises and solutions…", "splash_assessments": "Matching assessments…", "splash_done": "Preparation complete. Opening the library…",
+    "programs": "programs", "courses": "courses", "exercises": "exercises", "assessments": "assessments", "chapters": "chapters",
+    "matrix_unavailable": "360° matrix unavailable", "matrix_unavailable_desc": "The curriculum has not been built for this database yet.", "matrix_heading": "Interconnected learning matrix", "open_terms": "Open terms", "collapse_all": "Collapse all",
+    "programme_unavailable": "Annual curriculum unavailable", "programme_unavailable_desc": "The official curriculum has not been built for this database yet.", "programme_heading": "Curriculum and annual progression", "programme_subtitle": "Official plan, resources, and target skills", "no_programmes": "No program matches the filters.",
+    "courses_heading": "Scientific courses and concepts", "courses_subtitle": "Digitized content and original pages side by side", "open_all_courses": "Open all courses", "no_courses": "No course matches the filters.",
+    "exercises_heading": "Exercise and activity bank", "evaluations_heading": "Assessment bank", "scans_heading": "Document and scan gallery", "no_matches": "No item matches the filters."
+  },
   "search": {
     "placeholder": "Search this database...",
     "run": "Search",
@@ -180,6 +193,8 @@
   },
   "automation": {
     "title": "RAGDom Automation Hub",
+    "readonly_title": "Read-only mode",
+    "readonly_message": "All administration actions are disabled in this workspace.",
     "live_status": "Live status",
     "vector_alert": "Vector engine",
     "engine_hybrid_active": "Hybrid Engine Active (FTS5 BM25 + sqlite-vec 384d)",
@@ -562,7 +577,11 @@
       "accept_done": "Acceptance saved.",
       "reject_done": "Rejection saved.",
       "restore_done": "Working copy restored.",
-      "cancel_done": "Validation cancelled."
+      "cancel_done": "Validation cancelled.",
+      "accept_confirm_title": "Confirm run acceptance",
+      "accept_confirm_warning": "This action will replace official data in the selected scope with the validated working copy.",
+      "accept_confirm_detail": "Review the database, scope, and pages below before any mutation.",
+      "accept_confirm_action": "Accept and publish"
     }
   }
 }

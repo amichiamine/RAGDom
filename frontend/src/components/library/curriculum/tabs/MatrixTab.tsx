@@ -7,6 +7,7 @@ import type { CurriculumPayload, TocNode } from '@/types'
 import { useCurriculumBridge, HighlightTarget } from '@/contexts/CurriculumBridgeContext'
 import BridgeButton from '@/components/library/BridgeButton'
 import CurriculumEmptyState from '../CurriculumEmptyState'
+import { useLanguage } from '@/contexts/LanguageContext'
 import {
   buildCurriculumModel, coursForTerm, assessmentsForTerm,
   TERM_EMOJI, TERM_BADGE_CLASS, type CoursNode, type CurriculumModel,
@@ -30,6 +31,7 @@ const trimId = (termIndex: number) => `${TRIM_PREFIX}${termIndex}`
  * searchQuery (filtre par titre). Aucun compteur en dur — tout via aggregates.
  */
 export default function MatrixTab({ curriculum, toc }: Props) {
+  const { t } = useLanguage()
   const { trimFilter, searchQuery, expandedIds, toggleExpanded, expandAll, jumpTo, filterExercicesByCours } = useCurriculumBridge()
 
   const model = useMemo<CurriculumModel>(() => buildCurriculumModel(curriculum, toc), [curriculum, toc])
@@ -39,8 +41,8 @@ export default function MatrixTab({ curriculum, toc }: Props) {
   if (!curriculum.curriculum_available || model.terms.length === 0) {
     return (
       <CurriculumEmptyState
-        title="المصفوفة الشاملة 360° غير متوفرة"
-        description="لم يُبنَ المنهاج (الفصول والمقاطع) لهذه القاعدة بعد. تعتمد المصفوفة على التدرج السنوي الرسمي لعرض الترابط بين الدروس والتمارين والاختبارات."
+        title={t('curriculum_ui.matrix_unavailable')}
+        description={t('curriculum_ui.matrix_unavailable_desc')}
       />
     )
   }
@@ -61,18 +63,18 @@ export default function MatrixTab({ curriculum, toc }: Props) {
   const matchesSearch = (c: CoursNode) => !q || c.title.toLowerCase().includes(q)
 
   return (
-    <div dir="rtl">
+    <div>
       {/* Header + boutons globaux */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12, marginBottom: 16 }}>
         <h4 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
-          <Network size={20} style={{ color: 'var(--warning)' }} /> المصفوفة البيداغوجية المترابطة
+          <Network size={20} style={{ color: 'var(--warning)' }} /> {t('curriculum_ui.matrix_heading')}
         </h4>
         <div style={{ display: 'flex', gap: 8 }}>
           <button className="btn btn-sm btn-outline-secondary rounded-pill" onClick={openAll}>
-            <ChevronsDown size={15} /> فتح الفصول
+            <ChevronsDown size={15} /> {t('curriculum_ui.open_terms')}
           </button>
           <button className="btn btn-sm btn-outline-secondary rounded-pill" onClick={collapseAll}>
-            <ChevronsUp size={15} /> طي الكل
+            <ChevronsUp size={15} /> {t('curriculum_ui.collapse_all')}
           </button>
         </div>
       </div>

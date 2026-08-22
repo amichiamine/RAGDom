@@ -7,6 +7,7 @@ import CoursTab from './CoursTab'
 import ExercicesTab from './ExercicesTab'
 import EvaluationsTab from './EvaluationsTab'
 import ScansTab from './ScansTab'
+import { useLanguage } from '@/contexts/LanguageContext'
 
 interface ConnectorProps {
   curriculum: CurriculumPayload
@@ -15,17 +16,18 @@ interface ConnectorProps {
 
 /** Cadre de chargement/erreur sobre partagé par les 3 connecteurs. */
 function TabFrame({ loading, error, children }: { loading: boolean; error: string | null; children: ReactNode }) {
+  const { t } = useLanguage()
   if (loading) {
     return (
-      <div className="content-box" style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 40 }} dir="rtl">
-        … جارٍ تحميل بنية المنهاج
+      <div className="content-box" style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 40 }}>
+        {t('common.loading')}
       </div>
     )
   }
   if (error) {
     return (
-      <div className="content-box" style={{ textAlign: 'center', color: 'var(--danger)', padding: 40 }} dir="rtl">
-        تعذّر تحميل الوثيقة : {error}
+      <div className="content-box" style={{ textAlign: 'center', color: 'var(--danger)', padding: 40 }}>
+        {t('common.error_generic')} : {error}
       </div>
     )
   }

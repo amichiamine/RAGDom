@@ -28,7 +28,7 @@ export default function CurriculumShell({ sidebarOpen, onToggleSidebar, sidebar,
   }, [onToggleSidebar])
 
   return (
-    <div className="app-layout" dir="rtl">
+    <div className="app-layout">
       {sidebar}
 
       <div className={`app-workspace ${sidebarOpen ? 'with-sidebar' : ''}`}>

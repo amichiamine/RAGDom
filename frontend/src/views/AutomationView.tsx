@@ -57,8 +57,16 @@ export default function AutomationView() {
     const linkedDb = searchParams.get('db')
     if (linkedDb && linkedDb !== activeDb && databases.some(database => database.filename === linkedDb)) {
       setActiveDb(linkedDb)
+      return
     }
-  }, [activeDb, databases, searchParams, setActiveDb])
+    if (activeDb && (!linkedDb || !databases.some(database => database.filename === linkedDb))) {
+      setSearchParams(previous => {
+        const next = new URLSearchParams(previous)
+        next.set('db', activeDb)
+        return next
+      }, { replace: true })
+    }
+  }, [activeDb, databases, searchParams, setActiveDb, setSearchParams])
 
   // ── Garde d'authentification (V3.6) : au montage, si l'atelier exige une
   // session et qu'aucune n'est active → /login. Seule cette vue est protégée. ──
@@ -258,7 +266,16 @@ export default function AutomationView() {
 
         {/* Sous-titre de l'onglet courant */}
         <p className="auto-tab-subtitle">{currentTabMeta.sub}</p>
+        {health?.readonly && (
+          <div className="auto-card automation-readonly-banner" role="status">
+            <ShieldCheck size={18} />
+            <strong>{t('automation.readonly_title')}</strong>
+            <span>{t('automation.readonly_message')}</span>
+          </div>
+        )}
 
+        <fieldset className="automation-readonly-scope" disabled={health?.readonly ?? false} aria-describedby={health?.readonly ? 'automation-readonly-note' : undefined}>
+        {health?.readonly && <span id="automation-readonly-note" className="sr-only">{t('automation.readonly_message')}</span>}
         {/* ─────────────────── ONGLET INGESTION ─────────────────── */}
         {activeTab === 'ingestion' && (
           <div className="workspace-tab">
@@ -385,9 +402,10 @@ export default function AutomationView() {
             <DatabaseLifecycle databases={databases} onChanged={refresh} />
           </div>
         )}
+        </fieldset>
       </main>
 
-      {activeDb && (
+      {activeDb && !health?.readonly && (
         <ArtifactImportModal
           db={activeDb}
           documents={documents}

@@ -162,6 +162,19 @@
     "didactic_note_illustration": "Illustration du cours",
     "didactic_note_exercise_support": "Support d'exercice"
   },
+  "curriculum_ui": {
+    "tagline": "Espace pédagogique unifié",
+    "tabs": { "matrix": "Matrice 360°", "programme": "Programme annuel", "cours": "Cours", "exercices": "Exercices", "evaluations": "Évaluations", "scans": "Scans" },
+    "term_0": "Tous les trimestres (360°)", "term_1": "Premier trimestre 🍂", "term_2": "Deuxième trimestre ❄️", "term_3": "Troisième trimestre 🌸",
+    "no_databases": "Aucune base", "page_short": "p.", "soon": "Bientôt", "filter_requires": "Le filtre par trimestre nécessite un curriculum construit.",
+    "pages_documents": "Pages du manuel et documents scannés", "ready_to_build": "Prêt à construire", "build_hint": "Construisez le curriculum depuis le studio de l’Automation Hub.", "open_studio": "Ouvrir le studio Curriculum",
+    "splash_prepare": "Préparation du programme annuel…", "splash_courses": "Assemblage des cours…", "splash_exercises": "Indexation des exercices et solutions…", "splash_assessments": "Rapprochement des évaluations…", "splash_done": "Préparation terminée. Ouverture de la bibliothèque…",
+    "programs": "programmes", "courses": "cours", "exercises": "exercices", "assessments": "évaluations", "chapters": "chapitres",
+    "matrix_unavailable": "Matrice 360° indisponible", "matrix_unavailable_desc": "Le curriculum n’est pas encore construit pour cette base.", "matrix_heading": "Matrice pédagogique interconnectée", "open_terms": "Ouvrir les trimestres", "collapse_all": "Tout replier",
+    "programme_unavailable": "Programme annuel indisponible", "programme_unavailable_desc": "Le programme officiel n’est pas encore construit pour cette base.", "programme_heading": "Programme et progression annuelle", "programme_subtitle": "Plan officiel, ressources et compétences visées", "no_programmes": "Aucun programme ne correspond aux filtres.",
+    "courses_heading": "Cours et concepts scientifiques", "courses_subtitle": "Contenu numérisé et pages originales côte à côte", "open_all_courses": "Ouvrir tous les cours", "no_courses": "Aucun cours ne correspond aux filtres.",
+    "exercises_heading": "Banque d’exercices et activités", "evaluations_heading": "Banque d’évaluations", "scans_heading": "Galerie des documents et scans", "no_matches": "Aucun élément ne correspond aux filtres."
+  },
   "search": {
     "placeholder": "Rechercher dans cette base...",
     "run": "Rechercher",
@@ -180,6 +193,8 @@
   },
   "automation": {
     "title": "RAGDom Automation Hub",
+    "readonly_title": "Mode lecture seule",
+    "readonly_message": "Toutes les actions d’administration sont désactivées dans cet atelier.",
     "live_status": "Statut live",
     "vector_alert": "Moteur vectoriel",
     "engine_hybrid_active": "Moteur Hybride Actif (FTS5 BM25 + sqlite-vec 384d)",
@@ -562,7 +577,11 @@
       "accept_done": "Acceptation enregistrée.",
       "reject_done": "Rejet enregistré.",
       "restore_done": "Copie de travail restaurée.",
-      "cancel_done": "Validation annulée."
+      "cancel_done": "Validation annulée.",
+      "accept_confirm_title": "Confirmer l’acceptation du run",
+      "accept_confirm_warning": "Cette action va remplacer les données officielles du périmètre par la copie de travail validée.",
+      "accept_confirm_detail": "Vérifiez la base, le périmètre et les pages ci-dessous avant toute mutation.",
+      "accept_confirm_action": "Accepter et publier"
     }
   }
 }

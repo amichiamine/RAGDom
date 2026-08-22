@@ -6,6 +6,7 @@ import { useLanguage } from '@/contexts/LanguageContext'
 import { useToast } from '@/components/common/Toast'
 import ValidationInspector from './ValidationInspector'
 import ValidationDiffView from './ValidationDiffView'
+import Modal from '@/components/common/Modal'
 import type { ValidationPage, ValidationRun, ValidationRunSummary } from '@/types'
 
 interface Props {
@@ -15,7 +16,7 @@ interface Props {
 }
 
 const PAGE_SIZE = 20
-const TERMINAL = new Set(['ACCEPTED', 'REJECTED', 'CANCELLED'])
+const TERMINAL = new Set(['ACCEPTED', 'REJECTED', 'CANCELLED', 'FAILED'])
 
 export default function ValidationRunsPanel({ activeDb, readonly, createdRun }: Props) {
   const { t } = useLanguage()
@@ -28,6 +29,7 @@ export default function ValidationRunsPanel({ activeDb, readonly, createdRun }: 
   const [totalPages, setTotalPages] = useState(1)
   const [loading, setLoading] = useState(false)
   const [mutating, setMutating] = useState(false)
+  const [confirmAcceptOpen, setConfirmAcceptOpen] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   const validationDb = searchParams.get('db') || activeDb
@@ -132,8 +134,10 @@ export default function ValidationRunsPanel({ activeDb, readonly, createdRun }: 
     setMutating(true)
     setError(null)
     try {
-      if (action === 'accept') await api.validation.acceptRun(run.id, run.scope.db)
-      else if (action === 'reject') await api.validation.rejectRun(run.id, run.scope.db)
+      if (action === 'accept') {
+        await api.validation.acceptRun(run.id, run.scope.db)
+        setConfirmAcceptOpen(false)
+      } else if (action === 'reject') await api.validation.rejectRun(run.id, run.scope.db)
       else if (action === 'cancel') await api.validation.cancelRun(run.id, run.scope.db)
       else if (target === 'page' && selectedPage) {
         await api.validation.restorePage(run.id, selectedPage.page_number, run.scope.db, selectedPage.document_id)
@@ -194,7 +198,7 @@ export default function ValidationRunsPanel({ activeDb, readonly, createdRun }: 
             {!TERMINAL.has(run.status) && (
               <div className="validation-decision-bar validation-run-decisions">
                 <strong>{t('validation.decisions.run_title')}</strong>
-                {run.status === 'READY' && <button type="button" className="btn btn-sm btn-success" onClick={() => void mutate('accept')} disabled={readonly || mutating}><Check size={14} /> {t('validation.decisions.accept_run')}</button>}
+                {run.status === 'READY' && <button type="button" className="btn btn-sm btn-success" onClick={() => setConfirmAcceptOpen(true)} disabled={readonly || mutating}><Check size={14} /> {t('validation.decisions.accept_run')}</button>}
                 {run.status === 'READY' && <button type="button" className="btn btn-sm btn-outline-danger" onClick={() => void mutate('reject')} disabled={readonly || mutating}><X size={14} /> {t('validation.decisions.reject_run')}</button>}
                 <button type="button" className="btn btn-sm btn-outline-warning" onClick={() => void mutate('restore')} disabled={readonly || mutating}><RotateCcw size={14} /> {t('validation.decisions.restore_run')}</button>
               </div>
@@ -202,13 +206,48 @@ export default function ValidationRunsPanel({ activeDb, readonly, createdRun }: 
           </>
         )}
       </div>
+
+      <Modal
+        open={confirmAcceptOpen && !!run}
+        title={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}><Check size={18} /> {t('validation.decisions.accept_confirm_title')}</span>}
+        onClose={() => { if (!mutating) setConfirmAcceptOpen(false) }}
+        footer={
+          <>
+            <button type="button" className="btn btn-outline-secondary" onClick={() => setConfirmAcceptOpen(false)} disabled={mutating}>{t('buttons.cancel')}</button>
+            <button type="button" className="btn btn-success" onClick={() => void mutate('accept')} disabled={mutating || readonly}>
+              <Check size={15} /> {mutating ? t('common.loading') : t('validation.decisions.accept_confirm_action')}
+            </button>
+          </>
+        }
+      >
+        {run && (
+          <div>
+            <p role="alert" style={{ fontWeight: 700, color: 'var(--warning)' }}>{t('validation.decisions.accept_confirm_warning')}</p>
+            <dl className="validation-confirm-summary">
+              <div><dt>{t('db.select')}</dt><dd dir="ltr">{run.scope.db}</dd></div>
+              <div><dt>{t('validation.scope.title')}</dt><dd>{t(`validation.scope.${run.scope.kind}`)}</dd></div>
+              <div><dt>{t('validation.metrics.pages')}</dt><dd className="font-num">{run.pages_total}</dd></div>
+            </dl>
+            <p>{t('validation.decisions.accept_confirm_detail')}</p>
+            {run.scope.targets.length > 0 && (
+              <ul className="validation-confirm-targets">
+                {run.scope.targets.map(target => (
+                  <li key={`${target.document_id}-${target.page_start}-${target.page_end}`}>
+                    <code dir="ltr">{target.document_id}</code> — {t('library.page')} {target.pages.join(', ')}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
+      </Modal>
     </section>
   )
 }
 
 function StatusBadge({ status }: { status: string }) {
   const { t } = useLanguage()
-  const klass = status === 'ACCEPTED' ? 'badge-success' : status === 'REJECTED' || status === 'CANCELLED' ? 'badge-danger' : 'badge-info'
+  const klass = status === 'ACCEPTED' ? 'badge-success' : status === 'REJECTED' || status === 'CANCELLED' || status === 'FAILED' ? 'badge-danger' : 'badge-info'
   return <span className={`badge ${klass}`}>{t(`validation.status.${status}`)}</span>
 }
 function StatusDot({ status }: { status: string }) {

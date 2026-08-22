@@ -24,7 +24,7 @@ export default function LibraryView() {
   const { databases, activeDb, setActiveDb, isLoading: dbLoading } = useDatabase()
   const { t } = useLanguage()
   const { theme } = useTheme()
-  const [params] = useSearchParams()
+  const [params, setParams] = useSearchParams()
 
   const [tab, setTab] = useState<Tab>('explore')
   const [sidebarOpen, setSidebarOpen] = useState(true)
@@ -117,65 +117,103 @@ export default function LibraryView() {
     return () => { alive = false }
   }, [activeDb, tab])
 
-  const loadDocument = useCallback(async (doc: Document) => {
-    if (!activeDb) return
-    setActiveDoc(doc); setPage(1); setHighlightChunkId(null)
+  const updateClassicUrl = useCallback((updates: { db?: string; tab?: Tab; documentId?: string | null; pdfPage?: number | null; chunkId?: string | null }) => {
+    setParams(previous => {
+      const next = new URLSearchParams(previous)
+      if (updates.db) next.set('db', updates.db)
+      if (updates.tab) next.set('tab', updates.tab)
+      if (updates.documentId === null) next.delete('doc')
+      else if (updates.documentId) next.set('doc', updates.documentId)
+      if (updates.pdfPage === null) next.delete('page')
+      else if (updates.pdfPage != null) next.set('page', String(updates.pdfPage))
+      if (updates.chunkId === null) next.delete('chunk')
+      else if (updates.chunkId) next.set('chunk', updates.chunkId)
+      return next
+    }, { replace: true })
+  }, [setParams])
+
+  const loadDocument = useCallback(async (doc: Document, pdfPage = 1, chunkId: string | null = null, dbName = activeDb) => {
+    if (!dbName) return
+    const safePdfPage = Math.max(1, Math.min(pdfPage, doc.total_pages || pdfPage))
+    setActiveDoc(doc); setPage(safePdfPage); setHighlightChunkId(chunkId)
     setChunksLoading(true); setChunksError(null)
+    updateClassicUrl({ db: dbName, tab: 'explore', documentId: doc.id, pdfPage: safePdfPage, chunkId })
     try {
       const [tocRes, chunksRes] = await Promise.all([
-        api.library.getToc(activeDb, doc.id).catch(() => ({ toc: [] as TocNode[] })),
-        api.library.getChunks(activeDb, doc.id, 1),
+        api.library.getToc(dbName, doc.id).catch(() => ({ toc: [] as TocNode[] })),
+        // `page` est la pagination API. La page PDF se filtre explicitement afin de
+        // ne jamais confondre la Nᵉ page du document avec la Nᵉ page de résultats.
+        api.library.getChunks(dbName, doc.id, 1, { page_start: safePdfPage, page_end: safePdfPage }),
       ])
       setToc(tocRes.toc ?? [])
       setChunks(chunksRes.chunks ?? [])
-      setTotalPages(chunksRes.total_pages ?? doc.total_pages ?? 0)
+      setTotalPages(doc.total_pages ?? 0)
     } catch (e) {
       setChunksError(e instanceof Error ? e.message : t('common.error_generic'))
     } finally {
       setChunksLoading(false)
     }
-  }, [activeDb, t])
+  }, [activeDb, t, updateClassicUrl])
 
-  const goToPage = (p: number) => {
-    setPage(p)
-    if (!chunks.some(c => c.page_number === p) && activeDoc && activeDb) {
-      // charge la tranche de la page demandée
-      api.library.getChunks(activeDb, activeDoc.id, p)
-        .then(res => setChunks(prev => {
-          const existing = new Set(prev.map(c => c.id))
-          return [...prev, ...(res.chunks ?? []).filter(c => !existing.has(c.id))]
-        }))
-        .catch(() => { /* silencieux : le scan reste affiché */ })
-    }
-  }
+  const goToPage = useCallback(async (pdfPage: number) => {
+    if (!activeDoc || !activeDb) return
+    const safePdfPage = Math.max(1, Math.min(pdfPage, totalPages || pdfPage))
+    setPage(safePdfPage)
+    setHighlightChunkId(null)
+    updateClassicUrl({ db: activeDb, tab: 'explore', documentId: activeDoc.id, pdfPage: safePdfPage, chunkId: null })
+    if (chunks.some(chunk => chunk.page_number === safePdfPage)) return
+    try {
+      const response = await api.library.getChunks(activeDb, activeDoc.id, 1, { page_start: safePdfPage, page_end: safePdfPage })
+      setChunks(previous => {
+        const existing = new Set(previous.map(chunk => chunk.id))
+        return [...previous, ...(response.chunks ?? []).filter(chunk => !existing.has(chunk.id))]
+      })
+    } catch { /* le scan reste navigable même sans chunk texte */ }
+  }, [activeDb, activeDoc, chunks, totalPages, updateClassicUrl])
 
-  // Clic sur une vignette de la galerie générique → ouvre la page dans le SideBySideViewer
-  // (réutilise le mécanisme de navigation de page du Mode Repli : loadDocument + goToPage).
+  // Restaure une navigation partageable base/onglet/document/page après chargement des documents.
+  useEffect(() => {
+    if (!activeDb || documents.length === 0 || tab !== 'explore') return
+    const documentId = params.get('doc')
+    if (!documentId || activeDoc?.id === documentId) return
+    const linkedDocument = documents.find(document => document.id === documentId)
+    if (!linkedDocument) return
+    const linkedPage = Math.max(1, Number(params.get('page')) || 1)
+    void loadDocument(linkedDocument, linkedPage, params.get('chunk'))
+  }, [activeDb, activeDoc?.id, documents, loadDocument, params, tab])
+
   const openScanPage = (entry: PageScanManifestEntry) => {
     const doc = documents.find(d => d.id === entry.document_id)
     if (!doc) return
     setTab('explore')
-    if (activeDoc?.id === doc.id) {
-      goToPage(entry.page_number)
-    } else {
-      loadDocument(doc).then(() => goToPage(entry.page_number))
-    }
+    if (activeDoc?.id === doc.id) void goToPage(entry.page_number)
+    else void loadDocument(doc, entry.page_number)
   }
 
-  const onSelectResult = (r: SearchResult) => {
+  const onSelectResult = async (result: SearchResult) => {
+    const resultDb = result.database_filename ?? activeDb
+    if (!resultDb) return
     setTab('explore')
-    const doc = documents.find(d => d.id === r.document_id)
-    if (doc) {
-      loadDocument(doc).then(() => {
-        setPage(r.page_number)
-        setHighlightChunkId(r.chunk_id)
-        window.setTimeout(() => document.getElementById(`chunk-${r.chunk_id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 200)
-      })
+    let resultDocuments = documents
+    if (resultDb !== activeDb) {
+      setActiveDb(resultDb)
+      try {
+        resultDocuments = (await api.library.getDocuments(resultDb, 1, 100)).data ?? []
+      } catch { resultDocuments = [] }
     }
+    const doc = resultDocuments.find(document => document.id === result.document_id)
+    if (!doc) return
+    await loadDocument(doc, result.page_number, result.chunk_id, resultDb)
+    window.setTimeout(() => document.getElementById(`chunk-${result.chunk_id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 200)
+  }
+
+  const selectTab = (nextTab: Tab) => {
+    setTab(nextTab)
+    updateClassicUrl({ db: activeDb ?? undefined, tab: nextTab })
   }
 
   const onSelectSource = (s: AskSource) => {
-    onSelectResult({
+    void onSelectResult({
       chunk_id: s.chunk_id, document_id: s.document_id, document_title: s.document_title,
       page_number: s.page_number, section_title: null, pedagogical_type: null,
       content_markdown: '', rrf_score: s.rrf_score, bm25_rank: null, vec_rank: null,
@@ -213,7 +251,10 @@ export default function LibraryView() {
       <CurriculumWorkspace
         activeDb={activeDb}
         databases={databases}
-        onSelectDb={setActiveDb}
+        onSelectDb={db => {
+          setActiveDb(db)
+          updateClassicUrl({ db, documentId: null, pdfPage: null, chunkId: null })
+        }}
         curriculum={curriculum}
       />
     )
@@ -243,7 +284,12 @@ export default function LibraryView() {
             className="form-select"
             style={{ marginTop: 6, marginBottom: 18, background: 'var(--sidebar-bg-secondary)', color: '#fff', borderColor: 'rgba(255,255,255,0.15)' }}
             value={activeDb ?? ''}
-            onChange={e => setActiveDb(e.target.value)}
+            onChange={e => {
+              const db = e.target.value
+              setActiveDb(db)
+              setActiveDoc(null); setPage(1); setHighlightChunkId(null)
+              updateClassicUrl({ db, documentId: null, pdfPage: null, chunkId: null })
+            }}
           >
             {databases.map(d => <option key={d.filename} value={d.filename}>{d.filename}</option>)}
           </select>
@@ -326,10 +372,10 @@ export default function LibraryView() {
         <div style={{ padding: 24, flex: 1 }}>
           {/* Onglets */}
           <div role="tablist" style={{ display: 'flex', gap: 8, marginBottom: 20, flexWrap: 'wrap' }}>
-            <TabBtn active={tab === 'explore'} onClick={() => setTab('explore')} icon="fa-book-open" label={t('library.documents')} />
-            <TabBtn active={tab === 'scans'} onClick={() => setTab('scans')} icon="fa-images" label={t('library.scans_gallery')} />
-            <TabBtn active={tab === 'search'} onClick={() => setTab('search')} icon="fa-magnifying-glass" label={t('library.search_studio')} />
-            <TabBtn active={tab === 'ask'} onClick={() => setTab('ask')} icon="fa-comments" label={t('library.ask_studio')} />
+            <TabBtn active={tab === 'explore'} onClick={() => selectTab('explore')} icon="fa-book-open" label={t('library.documents')} />
+            <TabBtn active={tab === 'scans'} onClick={() => selectTab('scans')} icon="fa-images" label={t('library.scans_gallery')} />
+            <TabBtn active={tab === 'search'} onClick={() => selectTab('search')} icon="fa-magnifying-glass" label={t('library.search_studio')} />
+            <TabBtn active={tab === 'ask'} onClick={() => selectTab('ask')} icon="fa-comments" label={t('library.ask_studio')} />
           </div>
 
           <div className="workspace-tab" role="tabpanel">

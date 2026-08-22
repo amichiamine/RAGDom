@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Atom } from 'lucide-react'
 import type { CurriculumPayload } from '@/types'
 import { renderMarkdownWithKaTeX, type RenderOptions } from '@/lib/markdownKatex'
+import { useLanguage } from '@/contexts/LanguageContext'
 
 /**
  * SplashScreen télémétrique (Lot 10 · §5.2.1) — overlay plein écran affiché au
@@ -38,17 +39,18 @@ interface Props {
   onDone: () => void
 }
 
-function statusMessage(progress: number, index: number, total: number): string {
-  if (progress < 25) return '📋 جاري تهيئة المنهاج والتدرج السنوي الرسمي...'
-  if (progress < 50) return '📘 جاري تجميع الدروس والمخططات الهندسية...'
-  if (progress < 85) return `📝 جاري معالجة وفهرسة التمارين والحلول (${index} / ${total})...`
-  if (progress < 100) return '📑 جاري مطابقة الفروض والامتحانات الرسمية وسلالم التنقيط...'
-  return '✅ اكتملت التهيئة بنجاح! جاري فتح المستودع...'
+function statusMessage(progress: number, index: number, total: number, t: (key: string) => string): string {
+  if (progress < 25) return `📋 ${t('curriculum_ui.splash_prepare')}`
+  if (progress < 50) return `📘 ${t('curriculum_ui.splash_courses')}`
+  if (progress < 85) return `📝 ${t('curriculum_ui.splash_exercises')} (${index} / ${total})`
+  if (progress < 100) return `📑 ${t('curriculum_ui.splash_assessments')}`
+  return `✅ ${t('curriculum_ui.splash_done')}`
 }
 
 export default function SplashScreen({ curriculum, itemsToPreload, resolveAsset, onDone }: Props) {
+  const { t } = useLanguage()
   const [progress, setProgress] = useState(0)
-  const [status, setStatus] = useState(() => statusMessage(0, 0, itemsToPreload.length))
+  const [status, setStatus] = useState(() => statusMessage(0, 0, itemsToPreload.length, t))
   const [leaving, setLeaving] = useState(false)
 
   const rafRef = useRef<number | null>(null)
@@ -72,7 +74,7 @@ export default function SplashScreen({ curriculum, itemsToPreload, resolveAsset,
 
     if (total === 0) {
       setProgress(100)
-      setStatus(statusMessage(100, 0, 0))
+      setStatus(statusMessage(100, 0, 0, t))
       beginExit()
       return () => { if (rafRef.current) cancelAnimationFrame(rafRef.current) }
     }
@@ -89,7 +91,7 @@ export default function SplashScreen({ curriculum, itemsToPreload, resolveAsset,
 
       const pct = Math.min(100, Math.round((index / total) * 100))
       setProgress(pct)
-      setStatus(statusMessage(pct, index, total))
+      setStatus(statusMessage(pct, index, total, t))
 
       if (index < total) {
         rafRef.current = requestAnimationFrame(step)
@@ -105,12 +107,12 @@ export default function SplashScreen({ curriculum, itemsToPreload, resolveAsset,
   const g = curriculum.aggregates?.global
   const badges: { label: string; className: string }[] = g
     ? [
-        { label: `${g.programs} مقاطع`, className: 'splash-badge-success' },
-        { label: `${g.courses} دروس`, className: 'splash-badge-success' },
-        { label: `${g.exercises} تمرين`, className: 'splash-badge-success' },
-        { label: `${g.assessments} اختبار`, className: 'splash-badge-success' },
-        { label: `${g.page_scans} صفحة كتاب`, className: 'splash-badge-warning' },
-        { label: `${g.chapters} فصل`, className: 'splash-badge-info' },
+        { label: `${g.programs} ${t('curriculum_ui.programs')}`, className: 'splash-badge-success' },
+        { label: `${g.courses} ${t('curriculum_ui.courses')}`, className: 'splash-badge-success' },
+        { label: `${g.exercises} ${t('curriculum_ui.exercises')}`, className: 'splash-badge-success' },
+        { label: `${g.assessments} ${t('curriculum_ui.assessments')}`, className: 'splash-badge-success' },
+        { label: `${g.page_scans} ${t('validation.metrics.pages')}`, className: 'splash-badge-warning' },
+        { label: `${g.chapters} ${t('curriculum_ui.chapters')}`, className: 'splash-badge-info' },
       ]
     : []
 
@@ -122,8 +124,8 @@ export default function SplashScreen({ curriculum, itemsToPreload, resolveAsset,
         </div>
         <h3 className="splash-title">RAGDom Library</h3>
         <p className="splash-subtitle" dir="auto">
-          المستودع الوطني الرقمي —{' '}
-          <strong className="splash-accent-warning">قاعدة معتمدة</strong>
+          {t('curriculum_ui.tagline')} —{' '}
+          <strong className="splash-accent-warning">{t('db.active')}</strong>
         </p>
 
         <div className="splash-progress-track">

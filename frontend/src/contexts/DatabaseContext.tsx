@@ -22,7 +22,10 @@ export function DatabaseProvider({ children }: { children: ReactNode }) {
     try {
       const res = await api.system.getDatabases()
       setDatabases(res.databases)
-      if (!activeDb && res.databases.length > 0) setActiveDb(res.databases[0].filename)
+      setActiveDb(current => {
+        if (current && res.databases.some(database => database.filename === current)) return current
+        return res.databases[0]?.filename ?? null
+      })
     } catch (e) { console.error('[DatabaseContext] Erreur:', e) }
     finally { setIsLoading(false) }
   }

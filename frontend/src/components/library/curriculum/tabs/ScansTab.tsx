@@ -6,6 +6,7 @@ import { api } from '@/lib/api'
 import { useCurriculumBridge, HighlightTarget } from '@/contexts/CurriculumBridgeContext'
 import BridgeButton from '@/components/library/BridgeButton'
 import ImageModal from '../ImageModal'
+import { useLanguage } from '@/contexts/LanguageContext'
 
 interface Props {
   curriculum: CurriculumPayload
@@ -52,6 +53,7 @@ function useColumnCount(): number {
 }
 
 export default function ScansTab({ curriculum, activeDb, documentId, manifest }: Props) {
+  const { t } = useLanguage()
   const bridge = useCurriculumBridge()
   const { trimFilter } = bridge
   const [category, setCategory] = useState<ScanCategory>('all')
@@ -192,7 +194,7 @@ export default function ScansTab({ curriculum, activeDb, documentId, manifest }:
     <div>
       <div className="d-flex-header">
         <div>
-          <h4 className="tab-title"><Images size={20} style={{ color: 'var(--warning)' }} /> المستودع البصري الشامل للوثائق والمسوح الرسمية ({totalCount} وثيقة)</h4>
+          <h4 className="tab-title"><Images size={20} style={{ color: 'var(--warning)' }} /> {t('curriculum_ui.scans_heading')} ({totalCount})</h4>
           <small className="text-muted" dir="auto">معاينة صفحات الكتاب المدرسي ({textbookCount} ص) + مسوح ووثائق الفروض والامتحانات الرسمية ({evalCount} وثيقة)</small>
         </div>
         <div className="d-flex" style={{ gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -208,7 +210,7 @@ export default function ScansTab({ curriculum, activeDb, documentId, manifest }:
 
       {items.length === 0 && (
         <div className="content-box" style={{ textAlign: 'center', color: 'var(--text-muted)' }} dir="auto">
-          لا توجد وثائق مطابقة للمعايير الحالية.
+          {t('curriculum_ui.no_matches')}
         </div>
       )}
 
