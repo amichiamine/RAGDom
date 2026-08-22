@@ -1,3 +1,15 @@
+# 2026-08-22 — V5 : composition didactique + familles paramétriques + curriculum auto
+
+- **curriculum_builder.py** (nouveau, zéro LLM) : curriculum généré automatiquement au
+  finalize (RAGDOM_AUTO_CURRICULUM) + route POST /api/curriculum/build. Idempotent,
+  non-destructif (source:auto), Mode Repli préservé. Live : Matrice 360° activée
+  automatiquement (40 programmes / 8 exercices / 13 corrigés agrégés).
+- **Familles paramétriques** number_line + decimal_grid : paramètres VLM validés
+  strictement, redessin SVG natif (ParametricFigures.tsx), comparateur + badge d'état.
+- **Cadres didactiques** : bandeau titré coloré par sémantique, badges, pied explicatif,
+  variante inline, cadre minimal pour crops non qualifiés.
+- pytest 94 passés (+21 nets), tsc 0, build vert, bases republiées avec curriculum.
+
 # 2026-08-22 — V4.4 : explosion CV-first (zéro LLM) + hygiène LaTeX
 
 - **frame_segmenter.py** (nouveau) : segmentation locale CPU des cadres pleine page

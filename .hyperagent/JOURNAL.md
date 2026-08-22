@@ -1,5 +1,36 @@
 # JOURNAL des passes (le plus récent en premier)
 
+## 2026-08-22 20:15 — V5 : composition didactique + familles paramétriques + CURRICULUM AUTO
+- **CURRICULUM AUTOMATIQUE (zéro LLM)** : nouveau curriculum_builder.py — peuple
+  terms/programs/assessments/content_links depuis TOC L1 + chunks classés +
+  documents typés sujets. Idempotent, NON-DESTRUCTIF (marqueur {"source":"auto"}
+  dans les JSON libres — les lignes CurriculumStudio survivent), rien créé sur un
+  document sans structure (Mode Repli préservé). Câblé au finalize
+  (RAGDOM_AUTO_CURRICULUM, défaut true) + route admin POST /api/curriculum/build.
+  EXÉCUTÉ SUR LE LIVE : official-books {lessons:40, solutions:13} et sources
+  {lessons:15, exercises:7, solutions:7} → curriculum_available=true, l'onglet
+  Matrice 360° S'ACTIVE AUTOMATIQUEMENT (vérifié navigateur + après reboot).
+- **FAMILLES PARAMÉTRIQUES (§12 étendu)** : number_line (min/max/step/points/
+  segments) et decimal_grid (rows/cols/cells couleurs fermées) — le qualifieur
+  VLM sort des PARAMÈTRES validés strictement, le front redessine en SVG natif
+  toujours net (ParametricFigures.tsx, chiffres LTR, dixièmes colonne-major,
+  comparateur + badge d'état). Production de données au fil des requalifications
+  (quotas) ; renderers prêts et testés.
+- **COMPOSITION DIDACTIQUE** : chaque artefact = cadre titré (bandeau coloré par
+  la sémantique : demonstration=indigo, illustration=cyan, exercise_support=ambre),
+  badges famille/état/sémantique, pied explicatif anti-doublon, variante inline,
+  cadre minimal pour crops non qualifiés. VÉRIFIÉ LIVE : 47 cadres rendus dans la
+  galerie, 0 erreur console.
+- Qualité : pytest 94 passés (+21 nets : 11 curriculum_builder + 11 qualifier
+  paramétrique, retranchés recouvrements) / 11 échecs sandbox préexistants ;
+  tsc strict 0 ; build Vite vert ; bases republiées (curriculum inclus) +
+  redeploy clearCache — curriculum_available=true confirmé APRÈS reboot.
+- Limites honnêtes : terme unique synthétique (aucun marqueur de trimestre
+  exploitable dans le corpus) ; course_exercise per-term faible (1) sur cette
+  base (contrainte du contrat _curriculum_aggregates) ; 0 assessment sur ces
+  bases (documents sources en doc_type=unknown — typage des sujets à venir) ;
+  variante inline des cadres pas encore branchée dans le flux du cours.
+
 ## 2026-08-22 19:20 — V4.4 : EXPLOSION CV-FIRST (zéro LLM) + hygiène LaTeX — TOUS les cadres explosés
 - **Constat utilisateur validé** : « les mêmes quotas suffisaient à l'autre moteur » —
   exact. Le goulot n'était pas le quota mais NOTRE patron d'appel (image pleine page
