@@ -73,9 +73,7 @@ def health() -> dict:
             conn = db.get_connection(name)
             validation_failed += conn.execute("SELECT COUNT(*) FROM validation_runs"
                                               " WHERE status='FAILED'").fetchone()[0]
-            for table in ("curriculum_programs", "assessments", "content_links"):
-                curriculum_ambiguities += conn.execute(
-                    "SELECT COUNT(*) FROM %s WHERE document_id IS NULL" % table).fetchone()[0]
+            curriculum_ambiguities += db.curriculum_ambiguity_count(conn)
             conn.close()
         except Exception:
             validation_failed += 1

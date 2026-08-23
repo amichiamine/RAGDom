@@ -574,6 +574,9 @@ def test_curriculum_legacy_ambiguity_and_cross_document_guards():
     conn.execute("INSERT INTO content_links"
                  " (id,link_type,from_id,to_id,page_number,metadata_json,document_id)"
                  " VALUES ('legacy-link','program_term','legacy-program','legacy-null',2,'{}',NULL)")
+    conn.execute("INSERT INTO content_links"
+                 " (id,link_type,from_id,to_id,page_number,metadata_json,document_id)"
+                 " VALUES ('global-link','course_exercise','d1-c1','d2-c1',1,'{}',NULL)")
     conn.commit(); conn.close()
     ambiguous = client.post("/api/curriculum/programs?db=" + TEST_DB,
                             json={"term_id": "d2-term", "seq_index": 1, "title": "x"})
@@ -590,6 +593,8 @@ def test_curriculum_legacy_ambiguity_and_cross_document_guards():
                         " WHERE id='legacy-program'").fetchone()[0] == "d1"
     assert conn.execute("SELECT document_id FROM content_links"
                         " WHERE id='legacy-link'").fetchone()[0] == "d1"
+    assert conn.execute("SELECT document_id FROM content_links"
+                        " WHERE id='global-link'").fetchone()[0] is None
     # Shared/empty terms may stay global without degrading an otherwise valid base.
     assert conn.execute("SELECT document_id FROM curriculum_terms"
                         " WHERE id='legacy-null'").fetchone()[0] == "d1"

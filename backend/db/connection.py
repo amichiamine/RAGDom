@@ -369,12 +369,21 @@ def _repair_legacy_curriculum_scope(conn: sqlite3.Connection) -> int:
             conn.execute("UPDATE curriculum_terms SET document_id=? WHERE id=?", (owners.pop(), term_id))
 
     conn.commit()
-    ambiguous = 0
-    # NULL terms may be deliberate cross-document containers; actionable ambiguity
-    # is limited to rows that must own a document to be processed or promoted.
-    for table in ("curriculum_programs", "assessments", "content_links"):
-        ambiguous += conn.execute("SELECT COUNT(*) FROM %s WHERE document_id IS NULL" % table).fetchone()[0]
+    ambiguous = sum(conn.execute(
+        "SELECT COUNT(*) FROM %s WHERE document_id IS NULL" % table).fetchone()[0]
+        for table in ("curriculum_programs", "assessments"))
+    # NULL terms and cross-document links are legitimate global curriculum rows.
+    # A NULL link is actionable only when neither endpoint can be resolved at all.
+    for from_id, to_id in conn.execute(
+            "SELECT from_id, to_id FROM content_links WHERE document_id IS NULL").fetchall():
+        if not (entity_owners(from_id) | entity_owners(to_id)):
+            ambiguous += 1
     return ambiguous
+
+
+def curriculum_ambiguity_count(conn: sqlite3.Connection) -> int:
+    """Return only actionable unowned rows; cross-document/global rows are valid."""
+    return _repair_legacy_curriculum_scope(conn)
 
 
 def _hardened_schema_present(conn: sqlite3.Connection) -> bool:
