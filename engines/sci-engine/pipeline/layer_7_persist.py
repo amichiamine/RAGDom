@@ -113,11 +113,11 @@ def run(ctx: dict) -> dict:
                            interpolation=cv2.INTER_AREA)
         conn.execute(
             "INSERT INTO page_scans (id, document_id, page_number, width_px, height_px, dpi, image_webp, thumb_webp)"
-            " VALUES (?,?,?,?,?,300,?,?) ON CONFLICT(document_id, page_number) DO UPDATE SET"
-            " width_px=excluded.width_px, height_px=excluded.height_px,"
+            " VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(document_id, page_number) DO UPDATE SET"
+            " width_px=excluded.width_px, height_px=excluded.height_px, dpi=excluded.dpi,"
             " image_webp=excluded.image_webp, thumb_webp=excluded.thumb_webp",
             (str(uuid.uuid4()), doc_id, page_number, ctx["width_px"], ctx["height_px"],
-             image_webp, _webp(thumb, 70)),
+             int(ctx.get("dpi", 300)), image_webp, _webp(thumb, 70)),
         )
 
         # ── TOC (page 1 : outlines natifs) ──

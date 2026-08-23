@@ -97,7 +97,8 @@ def test_page_scan_binary_headers():
                           params={"db": TEST_DB, "document_id": _DOC_ID, "page": 1})
     assert response.status_code == 200
     assert response.headers["content-type"] == "image/webp"
-    assert int(response.headers["x-scan-width"]) > 2000
+    minimum_width = 1000 if os.environ.get("RAGDOM_LOW_MEMORY", "false").lower() == "true" else 2000
+    assert int(response.headers["x-scan-width"]) > minimum_width
     assert len(response.content) > 1000
     thumb = client.get("/api/library/page-scan",
                        params={"db": TEST_DB, "document_id": _DOC_ID, "page": 1, "thumb": True})
@@ -232,7 +233,8 @@ def test_page_scans_manifest():
     # La page 2 a été purgée par test_purge_dry_run_then_page → il reste les pages 1 et 3.
     assert {d["page_number"] for d in data} == {1, 3}
     first = data[0]
-    assert first["width"] > 2000 and first["has_thumb"] is True
+    minimum_width = 1000 if os.environ.get("RAGDOM_LOW_MEMORY", "false").lower() == "true" else 2000
+    assert first["width"] > minimum_width and first["has_thumb"] is True
     assert first["exercises_count"] >= 0 and "chapter_title" in first
     scoped = client.get("/api/library/page-scans",
                         params={"db": TEST_DB, "document_id": _DOC_ID}).json()["data"]

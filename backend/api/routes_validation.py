@@ -4,6 +4,7 @@ import base64
 import hashlib
 import json
 import os
+import sqlite3
 import threading
 import time
 import uuid
@@ -521,6 +522,11 @@ def _monitor_execution(db_name: str, run_id: str) -> None:
                 conn = _conn(db_name)
             except HTTPException:
                 return  # official test/runtime database removed while monitor exits
+            except sqlite3.OperationalError as exc:
+                if "locked" not in str(exc).lower():
+                    raise
+                time.sleep(0.1)
+                continue
             try:
                 try:
                     run = _run(conn, run_id)

@@ -32,7 +32,7 @@ def run(ctx: dict) -> dict:
     started = time.perf_counter()
     page = ctx["_fitz"]["page"]
     doc = ctx["_fitz"]["doc"]
-    scale = 300.0 / 72.0  # coordonnées PDF pt → pixels 300 DPI (référentiel page_scans)
+    scale = float(ctx.get("dpi", 300)) / 72.0  # coordonnées PDF pt → pixels du scan courant
 
     layout_blocks = []
     if ctx["is_native_vector"]:

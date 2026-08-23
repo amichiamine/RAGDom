@@ -93,11 +93,14 @@ def test_all_pages_ready(pipeline_run):
 
 # ── V3.5 Base Autonome : page_scans complets ──────────────────
 def test_page_scans_persisted(pipeline_run):
-    rows = _q(pipeline_run, "SELECT page_number, width_px, height_px, LENGTH(image_webp),"
+    rows = _q(pipeline_run, "SELECT page_number, width_px, height_px, dpi, LENGTH(image_webp),"
                             " LENGTH(thumb_webp) FROM page_scans ORDER BY page_number")
     assert len(rows) == 3
-    for page, width, height, img_len, thumb_len in rows:
-        assert width > 2000 and height > 3000  # 300 DPI A4
+    low_memory = os.environ.get("RAGDOM_LOW_MEMORY", "false").lower() == "true"
+    for page, width, height, dpi, img_len, thumb_len in rows:
+        assert dpi == (150 if low_memory else 300)
+        assert width > (1000 if low_memory else 2000)
+        assert height > (1500 if low_memory else 3000)
         assert img_len > 1000 and thumb_len > 200
 
 

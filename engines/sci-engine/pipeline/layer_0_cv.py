@@ -34,8 +34,11 @@ def run(ctx: dict) -> dict:
         ctx.update(status="INVALID_SOURCE", error="Ouverture impossible : %s" % exc)
         return ctx
 
-    # 1. Pixmap 300 DPI en mémoire tampon (jamais le PDF entier).
-    matrix = fitz.Matrix(300 / 72, 300 / 72)
+    # 1. Pixmap page-only. Render Free uses 150 DPI to keep all temporary
+    # arrays below the 512 Mo process ceiling; local/default fidelity stays 300.
+    low_memory = os.environ.get("RAGDOM_LOW_MEMORY", "false").lower() == "true"
+    dpi = 150 if low_memory else 300
+    matrix = fitz.Matrix(dpi / 72, dpi / 72)
     pixmap = page.get_pixmap(matrix=matrix, colorspace=fitz.csRGB, alpha=False)
     img = np.frombuffer(pixmap.samples, dtype=np.uint8).reshape(pixmap.height, pixmap.width, 3)
     gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
@@ -46,7 +49,7 @@ def run(ctx: dict) -> dict:
     # 3. Détection d'angle & rotation inverse (deskew sur copie réduite = rapide).
     deskew_angle = 0.0
     is_native_vector = len(page.get_text("text").strip()) > 40
-    if not is_native_vector:  # inutile de redresser un rendu vectoriel natif
+    if not is_native_vector and not low_memory:  # deskew ONNX/arrays deferred on 512 Mo
         try:
             from deskew import determine_skew
             small = cv2.resize(gray, None, fx=0.25, fy=0.25, interpolation=cv2.INTER_AREA)
@@ -65,13 +68,16 @@ def run(ctx: dict) -> dict:
     #    persisté dans page_scans reste l'image restaurée couleur).
     binarized = gray
     if not is_native_vector:
-        try:
-            from skimage.filters import threshold_sauvola
-            clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8)).apply(gray)
-            thresh = threshold_sauvola(clahe, window_size=25)
-            binarized = ((clahe > thresh) * 255).astype(np.uint8)
-        except Exception:  # noqa: BLE001 — repli binarisation Otsu
+        if low_memory:
             _, binarized = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        else:
+            try:
+                from skimage.filters import threshold_sauvola
+                clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8)).apply(gray)
+                thresh = threshold_sauvola(clahe, window_size=25)
+                binarized = ((clahe > thresh) * 255).astype(np.uint8)
+            except Exception:  # noqa: BLE001 — repli binarisation Otsu
+                _, binarized = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
 
     ctx.update(
         status="SUCCESS",
@@ -79,6 +85,7 @@ def run(ctx: dict) -> dict:
         blur_variance=round(blur_variance, 2),
         deskew_angle=round(deskew_angle, 2),
         is_native_vector=is_native_vector,
+        dpi=dpi,
         width_px=int(img.shape[1]),
         height_px=int(img.shape[0]),
         restored_rgb=img,           # np.ndarray RGB — persisté en WebP par la Couche 7

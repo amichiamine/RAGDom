@@ -37,14 +37,42 @@ def test_low_memory_loads_only_required_ocr(monkeypatch):
     monkeypatch.setitem(sys.modules, "rapid_latex_ocr", types.SimpleNamespace(LatexOCR=Latex))
     monkeypatch.setitem(sys.modules, "rapid_table", types.SimpleNamespace(RapidTable=Table))
     monkeypatch.setenv("RAGDOM_LOW_MEMORY", "true")
+    monkeypatch.setenv("RAGDOM_LOW_MEMORY_OCR", "false")
     monkeypatch.delenv("RAGDOM_OFFLINE", raising=False)
 
     engines = layer._get_engines(need_ocr=True, need_latex=True, need_table=True)
-    assert engines["ocr"] is not None
+    assert engines["ocr"] is None
     assert engines["latex"] is None and engines["table"] is None
-    assert calls == {"ocr": 1, "latex": 0, "table": 0}
+    assert calls == {"ocr": 0, "latex": 0, "table": 0}
+
+    monkeypatch.setenv("RAGDOM_LOW_MEMORY_OCR", "true")
+    engines = layer._get_engines(need_ocr=True)
+    assert engines["ocr"] is not None and calls["ocr"] == 1
     layer._get_engines(need_ocr=True)
     assert calls["ocr"] == 1  # singleton, no duplicate model allocation
+
+
+def test_low_memory_raster_uses_150_dpi_without_heavy_sauvola(tmp_path, monkeypatch):
+    import fitz
+
+    layer = _load("layer_0_cv.py", "lowmem_layer0")
+    pdf = tmp_path / "scan.pdf"
+    document = fitz.open()
+    document.new_page(width=595, height=842)
+    document.save(pdf)
+    document.close()
+    monkeypatch.setenv("RAGDOM_LOW_MEMORY", "true")
+    context = {
+        "job": {"id": "job", "page_number": 1},
+        "document": {"id": "doc", "source_path": str(pdf)},
+        "config": {"pipeline_set_dir": str(tmp_path / "pipeline")},
+    }
+    result = layer.run(context)
+    try:
+        assert result["status"] == "SUCCESS" and result["dpi"] == 150
+        assert result["width_px"] < 1500 and result["height_px"] < 2000
+    finally:
+        result["_fitz"]["doc"].close()
 
 
 def test_low_memory_skips_layout_and_auto_full_page_vlm(monkeypatch):

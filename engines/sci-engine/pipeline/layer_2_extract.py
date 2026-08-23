@@ -27,7 +27,8 @@ def _get_engines(need_ocr=False, need_latex=False, need_table=False):
     tried = _engines["tried"]
     offline = os.environ.get("RAGDOM_OFFLINE", "false").lower() == "true"
     low_memory = os.environ.get("RAGDOM_LOW_MEMORY", "false").lower() == "true"
-    if need_ocr and "ocr" not in tried:
+    allow_low_memory_ocr = os.environ.get("RAGDOM_LOW_MEMORY_OCR", "true").lower() == "true"
+    if need_ocr and (not low_memory or allow_low_memory_ocr) and "ocr" not in tried:
         tried.add("ocr")
         try:
             from rapidocr_onnxruntime import RapidOCR  # modèles PP-OCRv4 embarqués (pip)
@@ -284,6 +285,8 @@ def run(ctx: dict) -> dict:
                 content_markdown = "\n".join(str(line[1]) for line in result)
         if not content_markdown:
             content_markdown = ""  # page image sans texte détecté : chunk vide filtré en couche 3
+            if os.environ.get("RAGDOM_LOW_MEMORY", "false").lower() == "true":
+                engine_used = "ImageOnly-LowMemory"
 
     # ── Tier 2 (D3-B) : OCR de page entière par VLM — page SCANNÉE : toujours
     # tenté (RapidOCR sans modèle adapté = repli hors-ligne) ; page native :

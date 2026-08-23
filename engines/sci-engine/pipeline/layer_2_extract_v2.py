@@ -125,6 +125,8 @@ def run(ctx: dict) -> dict:
                 content_markdown = "\n".join(str(line[1]) for line in result)
         if not content_markdown:
             content_markdown = ""
+            if os.environ.get("RAGDOM_LOW_MEMORY", "false").lower() == "true":
+                engine_used = "ImageOnly-LowMemory+p%d" % workers
 
     # ── Formules inline du markdown (identique v1, séquentiel — regex pure) ──
     artifacts = []
