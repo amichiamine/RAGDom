@@ -27,7 +27,7 @@ def _get_engines(need_ocr=False, need_latex=False, need_table=False):
     tried = _engines["tried"]
     offline = os.environ.get("RAGDOM_OFFLINE", "false").lower() == "true"
     low_memory = os.environ.get("RAGDOM_LOW_MEMORY", "false").lower() == "true"
-    allow_low_memory_ocr = os.environ.get("RAGDOM_LOW_MEMORY_OCR", "true").lower() == "true"
+    allow_low_memory_ocr = os.environ.get("RAGDOM_LOW_MEMORY_OCR", "false").lower() == "true"
     if need_ocr and (not low_memory or allow_low_memory_ocr) and "ocr" not in tried:
         tried.add("ocr")
         try:

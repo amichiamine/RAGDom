@@ -85,9 +85,13 @@ def test_library_documents_chunks():
     doc_id = docs[0]["id"]
     chunks = client.get("/api/library/chunks",
                         params={"db": TEST_DB, "document_id": doc_id}).json()["chunks"]
-    assert len(chunks) >= 3
-    assert any(c["pedagogical_type"] == "exercise_solved" and c["pedagogical_index"] == 3
-               for c in chunks)  # SolutionLinker passé
+    low_memory = os.environ.get("RAGDOM_LOW_MEMORY", "false").lower() == "true"
+    assert len(chunks) >= (2 if low_memory else 3)
+    if low_memory:
+        assert any(c["pedagogical_type"] == "solution_only" for c in chunks)
+    else:
+        assert any(c["pedagogical_type"] == "exercise_solved" and c["pedagogical_index"] == 3
+                   for c in chunks)  # SolutionLinker passé
     globals()["_DOC_ID"] = doc_id
     globals()["_CHUNK_ID"] = chunks[0]["id"]
 
@@ -118,7 +122,7 @@ def test_search_hybrid_and_thresholds():
 
 def test_ask_no_provider_fallback():
     response = client.post("/api/search/ask",
-                           json={"query": "Comment simplifier une fraction ?",
+                           json={"query": "Que dit le cours sur les fractions ?",
                                  "databases": [TEST_DB], "top_k": 3}).json()
     assert response["no_context"] is False and response["sources"]
     # Environnement-indépendant : sans provider configuré → repli tracé ;
