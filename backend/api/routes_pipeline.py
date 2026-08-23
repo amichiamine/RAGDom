@@ -83,7 +83,7 @@ def _register_document(db_name: str, source_path: str) -> dict:
     try:
         row = conn.execute("SELECT id, total_pages FROM documents WHERE source_path=?", (real,)).fetchone()
         if row:
-            return {"id": row[0], "total_pages": row[1]}
+            return {"id": row[0], "total_pages": row[1], "exists": True}
         import fitz
         pdf = fitz.open(real)
         total_pages = pdf.page_count
@@ -97,7 +97,7 @@ def _register_document(db_name: str, source_path: str) -> dict:
              total_pages, os.path.getsize(real), meta["doc_source"], meta["academic_level"],
              meta["domain_tags_json"]))
         conn.commit()
-        return {"id": doc_id, "total_pages": total_pages}
+        return {"id": doc_id, "total_pages": total_pages, "exists": False}
     finally:
         conn.close()
 
@@ -185,11 +185,20 @@ def start(body: StartBody):
             os.path.join(real, "x.pdf"), config.SOURCES_DIR)["db_name"]
         db.require_official_mutation_target(folder_db)
         batches, total = [], 0
+        reused_any = False
         for name in sorted(os.listdir(real)):
             if not name.lower().endswith(".pdf"):
                 continue
             pdf_path = os.path.join(real, name)
             doc = _register_document(folder_db, pdf_path)
+            if doc.get("exists"):
+                # Anti-double-ingestion : document déjà présent → reprocess scopé
+                # (réutilise l'ID existant, purge UNIQUEMENT ce document, ré-ingère).
+                result = _reprocess_existing_document(folder_db, doc["id"], pdf_path)
+                batches.extend(result["batch_ids"])
+                total += result["pages_total"]
+                reused_any = True
+                continue
             batch = orchestrator.enqueue_batch(folder_db, doc["id"], pdf_path, "document",
                                                1, doc["total_pages"])
             batches.append(batch["batch_id"])
@@ -198,15 +207,26 @@ def start(body: StartBody):
             raise HTTPException(404, "Aucun PDF dans le dossier")
         _launch(folder_db)
         return {"batch_id": batches[0], "batch_ids": batches, "status": "QUEUED",
-                "pages_total": total, "target_db": folder_db}
+                "pages_total": total, "target_db": folder_db,
+                "reused_existing_document": reused_any}
     db_name = body.target_db or extract_document_metadata(real, config.SOURCES_DIR)["db_name"]
     db.require_official_mutation_target(db_name)
     doc = _register_document(db_name, real)
+    if doc.get("exists"):
+        # Anti-double-ingestion (mode document) : source_path déjà ingéré → reprocess
+        # scopé du document existant plutôt qu'un doublon. Réutilise l'ID existant.
+        result = _reprocess_existing_document(db_name, doc["id"], real)
+        _launch(db_name)
+        return {"batch_id": result["batch_id"], "batch_ids": result["batch_ids"],
+                "status": "QUEUED", "pages_total": result["pages_total"],
+                "target_db": db_name, "reused_existing_document": True,
+                "reused_document_id": doc["id"], "purged": result["purged"]}
     page_start, page_end = _resolve_pages(body, db_name, doc)
     batch = orchestrator.enqueue_batch(db_name, doc["id"], real, body.mode, page_start, page_end)
     _launch(db_name)
     return {"batch_id": batch["batch_id"], "status": "QUEUED",
-            "pages_total": batch["pages_total"], "target_db": db_name}
+            "pages_total": batch["pages_total"], "target_db": db_name,
+            "reused_existing_document": False}
 
 
 def _launch(db_name: str) -> None:
@@ -352,6 +372,54 @@ def _purge_for_reprocess(conn, body: ReprocessBody, targets) -> dict:
                      " WHERE id IN (%s)" % ",".join("?" for _ in impacted_batches),
                      sorted(impacted_batches))
     return {"deleted": deleted, "stopped_batch_ids": sorted(impacted_batches)}
+
+
+def _reprocess_existing_document(db_name: str, document_id: str, source_path: str) -> dict:
+    """Reprocess scopé d'un document DÉJÀ ingéré (anti-double-ingestion §start).
+
+    Réutilise l'ID existant, purge UNIQUEMENT le périmètre de ce document (scope
+    ``document``) dans une seule ``BEGIN IMMEDIATE``, puis ré-enfile le document
+    complet. Aucun doublon de ligne ``documents`` : l'ID est conservé et la purge
+    scopée ne touche jamais les autres documents (ni les pages hors périmètre).
+    """
+    if not os.path.exists(source_path):
+        raise HTTPException(409, "PDF source absent de /sources/ — ré-exécution impossible")
+    body = ReprocessBody(db=db_name, scope="document", document_id=document_id)
+    conn = db.get_mutable_connection_or_http(db_name)
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            targets = resolve_scope(conn, body.scope, body.document_id, body.toc_id,
+                                    body.page, body.page_start, body.page_end, body.pages)
+        except ScopeResolutionError as exc:
+            raise HTTPException(exc.status_code, str(exc))
+        purge_result = _purge_for_reprocess(conn, body, targets)
+        batches = []
+        for target in targets:
+            groups = []
+            for selected in target.pages:
+                if not groups or selected != groups[-1][-1] + 1:
+                    groups.append([selected])
+                else:
+                    groups[-1].append(selected)
+            for group in groups:
+                batch = orchestrator.enqueue_batch(
+                    db_name, target.document_id, source_path, body.scope,
+                    group[0], group[-1], conn=conn, commit=False, emit=False)
+                batches.append(batch)
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+    for batch in batches:
+        orchestrator._emit("queue_update", {"queue_length": batch["pages_total"] -
+                                             batch["skipped_ready"] - batch["skipped_active"],
+                                             "batch_id": batch["batch_id"]})
+    return {"purged": purge_result.get("deleted"), "batch_id": batches[0]["batch_id"] if batches else None,
+            "batch_ids": [b["batch_id"] for b in batches],
+            "pages_total": sum(b["pages_total"] for b in batches)}
 
 
 @router.post("/reprocess", status_code=202)

@@ -40,6 +40,50 @@ def documents(db_name: str = Query(alias="db"), page: int = 1, limit: int = Quer
         conn.close()
 
 
+@router.delete("/documents/{document_id}")
+def delete_document(document_id: str, db_name: str = Query(alias="db")):
+    """Suppression transactionnelle d'UN document (ligne + descendance via cascades).
+
+    Garde-fous :
+      • base officielle uniquement (get_mutable_connection_or_http refuse les
+        copies validation_test_ — jamais de mutation générique sur sandbox) ;
+      • refus 409 si un batch est encore actif sur ce document (jobs QUEUED /
+        transitoires) — aucune suppression pendant une ingestion en cours.
+    Les descendants porteurs d'ON DELETE CASCADE (toc, chunks, artefacts, scans,
+    benchmarks, curriculum, validation) tombent avec la ligne. pipeline_jobs et
+    ses ingestion_batches orphelins sont nettoyés explicitement (pas de FK
+    document_id sur ces tables) dans la même transaction.
+    """
+    conn = db.get_mutable_connection_or_http(db_name)
+    try:
+        active = conn.execute(
+            "SELECT 1 FROM pipeline_jobs WHERE document_id=? AND status IN"
+            " ('QUEUED','PROCESSING_CV','SEGMENTING','EXTRACTING','LINTING','VLM_RECOVERY','INDEXED')"
+            " LIMIT 1", (document_id,)).fetchone()
+        if active:
+            raise HTTPException(409, "Un batch est en cours sur ce document — suppression refusée")
+        if conn.execute("SELECT 1 FROM documents WHERE id=?", (document_id,)).fetchone() is None:
+            raise HTTPException(404, "Document introuvable")
+        conn.execute("BEGIN IMMEDIATE")
+        batch_ids = [r[0] for r in conn.execute(
+            "SELECT DISTINCT batch_id FROM pipeline_jobs WHERE document_id=? AND batch_id IS NOT NULL",
+            (document_id,)).fetchall()]
+        conn.execute("DELETE FROM pipeline_jobs WHERE document_id=?", (document_id,))
+        if batch_ids:
+            conn.execute("DELETE FROM ingestion_batches WHERE id IN (%s)"
+                         " AND NOT EXISTS (SELECT 1 FROM pipeline_jobs j WHERE j.batch_id=ingestion_batches.id)"
+                         % ",".join("?" for _ in batch_ids), batch_ids)
+        # La ligne documents + descendance FKs disparaissent via ON DELETE CASCADE.
+        conn.execute("DELETE FROM documents WHERE id=?", (document_id,))
+        conn.commit()
+        return {"deleted": True, "document_id": document_id}
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
 @router.get("/toc")
 def toc(db_name: str = Query(alias="db"), document_id: str = Query(...)):
     conn = _conn(db_name)
