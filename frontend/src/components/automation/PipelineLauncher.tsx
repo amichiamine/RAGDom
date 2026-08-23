@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { api } from '@/lib/api'
-import type { SourceNode, SourceFile, DatabaseInfo, Document, TocNode, PipelineQueueState } from '@/types'
+import type { SourceNode, SourceFile, DatabaseInfo, Document, TocNode, PipelineQueueState, BatchLaunch } from '@/types'
 import { useLanguage } from '@/contexts/LanguageContext'
 import { useToast } from '@/components/common/Toast'
 import { Spinner, ErrorBanner } from '@/components/common/Feedback'
@@ -10,7 +10,7 @@ interface Props {
   activeDb: string | null
   running: boolean
   /** Ajoute des pages au suivi live existant (AutomationView) + passe running=true. */
-  onBatchStarted: (pagesTotal: number) => void
+  onBatchStarted: (launch: BatchLaunch) => void
   onStop: () => void
   /** Rafraîchit bases + documents après un lancement. */
   onChanged: () => void
@@ -87,7 +87,7 @@ export default function PipelineLauncher({ databases, activeDb, running, onBatch
 type ToastApi = ReturnType<typeof useToast>
 
 // ═══════════════════ Volet 1 : Lancer une ingestion ═══════════════════
-function IngestPanel({ onBatchStarted, onChanged, toast }: { onBatchStarted: (n: number) => void; onChanged: () => void; toast: ToastApi }) {
+function IngestPanel({ onBatchStarted, onChanged, toast }: { onBatchStarted: (l: BatchLaunch) => void; onChanged: () => void; toast: ToastApi }) {
   const { t } = useLanguage()
   const [tree, setTree] = useState<SourceNode[]>([])
   const [loading, setLoading] = useState(true)
@@ -120,8 +120,16 @@ function IngestPanel({ onBatchStarted, onChanged, toast }: { onBatchStarted: (n:
             ...(mode === 'page_range' ? { page_start: Number(pageStart) || 1, page_end: Number(pageEnd) || Number(pageStart) || 1 } : {}),
           }
       const res = await api.pipeline.start(payload)
-      toast.success(`${t('launcher.launched')} — batch ${res.batch_id} · ${res.pages_total} ${t('pipeline.pages')} → ${res.target_db}`)
-      onBatchStarted(res.pages_total)
+      if (res.reused_existing_document) {
+        toast.info(t('launcher.reused_existing'))
+      } else {
+        toast.success(`${t('launcher.launched')} — batch ${res.batch_id} · ${res.pages_total} ${t('pipeline.pages')} → ${res.target_db}`)
+      }
+      onBatchStarted({
+        pagesTotal: res.pages_total,
+        batchIds: res.batch_ids ?? (res.batch_id ? [res.batch_id] : []),
+        reusedExistingDocument: res.reused_existing_document,
+      })
       onChanged()
     } catch (e) { toast.error(e instanceof Error ? e.message : t('common.error_generic')) }
     finally { setBusy(false) }
@@ -230,7 +238,7 @@ function PickerNode({ node, depth, selection, onSelect }: { node: SourceNode; de
 }
 
 // ═══════════════════ Volet 2 : Ré-exécuter (reprocess) ═══════════════════
-function ReprocessPanel({ databases, activeDb, onBatchStarted, onChanged, toast }: { databases: DatabaseInfo[]; activeDb: string | null; onBatchStarted: (n: number) => void; onChanged: () => void; toast: ToastApi }) {
+function ReprocessPanel({ databases, activeDb, onBatchStarted, onChanged, toast }: { databases: DatabaseInfo[]; activeDb: string | null; onBatchStarted: (l: BatchLaunch) => void; onChanged: () => void; toast: ToastApi }) {
   const { t } = useLanguage()
   const [db, setDb] = useState<string>(activeDb ?? databases[0]?.filename ?? '')
   const [documents, setDocuments] = useState<Document[]>([])
@@ -282,7 +290,10 @@ function ReprocessPanel({ databases, activeDb, onBatchStarted, onChanged, toast 
         ...(scope === 'chapter' ? { toc_id: tocId } : {}),
       })
       toast.success(`${t('launcher.reprocessed')} — batch ${res.batch_id} · ${t('pipeline.pages')} ${res.page_start}→${res.page_end} (${res.pages_total})`)
-      onBatchStarted(res.pages_total)
+      onBatchStarted({
+        pagesTotal: res.pages_total,
+        batchIds: res.batch_ids ?? (res.batch_id ? [res.batch_id] : []),
+      })
       onChanged()
     } catch (e) { toast.error(e instanceof Error ? e.message : t('common.error_generic')) }
     finally { setBusy(false) }

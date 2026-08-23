@@ -5,7 +5,7 @@ import { api } from '@/lib/api'
 import { useDatabase } from '@/contexts/DatabaseContext'
 import { useLanguage } from '@/contexts/LanguageContext'
 import { useToast } from '@/components/common/Toast'
-import type { SystemHealth, Document, PipelineSSEEvent, PipelineStatus } from '@/types'
+import type { SystemHealth, Document, PipelineSSEEvent, PipelineStatus, BatchLaunch } from '@/types'
 import TopNav from '@/components/layout/TopNav'
 import VectorEngineAlert from '@/components/automation/VectorEngineAlert'
 import PipelineSteps from '@/components/automation/PipelineSteps'
@@ -25,6 +25,13 @@ import ArtifactImportModal from '@/components/admin/ArtifactImportModal'
 import { FilePlus2, Rocket, Activity, FolderOpen, BrainCircuit, SlidersHorizontal, Layers, ShieldCheck } from 'lucide-react'
 import { formatBytes, formatNumber } from '@/lib/utils'
 import { loginPathFor } from '@/lib/authNavigation'
+import {
+  eventBelongsToActiveBatch,
+  recordPageCompletion,
+  sseConnectionState,
+  freshRunCounters,
+  type MonitorConnection,
+} from '@/lib/pipelineMonitor'
 
 type TabKey = 'ingestion' | 'monitoring' | 'validation' | 'contents' | 'documents' | 'providers' | 'settings'
 const TAB_ORDER: TabKey[] = ['ingestion', 'monitoring', 'validation', 'contents', 'documents', 'providers', 'settings']
@@ -94,6 +101,13 @@ export default function AutomationView() {
   const [latencies, setLatencies] = useState<number[]>([])
   const [pagesDone, setPagesDone] = useState(0)
   const [pagesTotal, setPagesTotal] = useState(0)
+  // Suivi corrélé par batch : on ne compte que les événements des batchs lancés
+  // depuis cette session, et on déduplique les pages terminées (READY→INDEXED).
+  // Référence (pas d'état) pour ne jamais recréer le EventSource à chaque lot.
+  const activeBatchIdsRef = useRef<Set<string>>(new Set())
+  const seenPageCompletionsRef = useRef<Set<string>>(new Set())
+  const [reusedNotice, setReusedNotice] = useState<string | null>(null)
+  const [connection, setConnection] = useState<MonitorConnection>('connected')
   const esRef = useRef<EventSource | null>(null)
 
   // ── Health (polling 5s) ──
@@ -129,12 +143,16 @@ export default function AutomationView() {
   useEffect(loadQuarantineCount, [loadQuarantineCount])
 
   // ── SSE : une seule connexion, fermée au démontage ──
+  // Corrélation par batch_id : on ignore les événements de batchs étrangers
+  // (autre base, autre session) tant qu'un lot de cette session est suivi.
   useEffect(() => {
     const es = api.pipeline.createStream()
     esRef.current = es
+    setConnection('connected')
     const onMsg = (ev: MessageEvent) => {
       let data: PipelineSSEEvent
       try { data = JSON.parse(ev.data) } catch { return }
+      if (!eventBelongsToActiveBatch(data, activeBatchIdsRef.current)) return
       switch (data.type) {
         case 'page_update': {
           setRunning(true)
@@ -142,18 +160,26 @@ export default function AutomationView() {
           if (typeof data.latency_ms === 'number') setLatencies(prev => [...prev.slice(-9), data.latency_ms as number])
           if (data.line) setLines(prev => [...prev.slice(-999), data.line as string])
           else if (data.page_number) setLines(prev => [...prev.slice(-999), `[page ${data.page_number}] ${data.status ?? ''}`])
-          setPagesDone(prev => prev + (data.status === 'READY' || data.status === 'INDEXED' ? 1 : 0))
+          // Déduplication : READY puis INDEXED ne compte qu'une fois.
+          if (recordPageCompletion(seenPageCompletionsRef.current, data)) setPagesDone(prev => prev + 1)
+          if (data.reused_existing_document) setReusedNotice(t('launcher.reused_existing'))
           break
         }
-        case 'queue_update':
+        case 'queue_update': {
           if (typeof data.queue_length === 'number') setLines(prev => [...prev.slice(-999), `[queue] ${data.queue_length}`])
+          if (typeof data.skipped_ready === 'number' && data.skipped_ready > 0) {
+            setLines(prev => [...prev.slice(-999), `[skip] ${data.skipped_ready} ${t('launcher.skipped_ready')}`])
+          }
           break
-        case 'job_complete':
+        }
+        case 'job_complete': {
           setRunning(false)
           setLines(prev => [...prev.slice(-999), `[done] pages=${data.pages_indexed ?? 0} artifacts=${data.artifacts_extracted ?? 0}`])
-          if (data.success !== false) toast.success('job_complete')
+          if (data.reused_existing_document) setReusedNotice(t('launcher.reused_existing'))
+          if (data.success !== false) toast.success(t('launcher.job_complete'))
           loadDocs(); refresh()
           break
+        }
         case 'error':
           setLines(prev => [...prev.slice(-999), `[error] ${data.error ?? ''} ${data.details ?? ''}`])
           toast.error(data.error ?? t('common.error_generic'))
@@ -161,7 +187,11 @@ export default function AutomationView() {
       }
     }
     es.addEventListener('message', onMsg)
-    es.onerror = () => { /* EventSource retente automatiquement ; on garde l'UI vivante */ }
+    es.addEventListener('open', () => setConnection('connected'))
+    es.onerror = () => {
+      // EventSource retente automatiquement : on expose l'état de reconnexion.
+      setConnection(sseConnectionState(es.readyState))
+    }
     return () => { es.removeEventListener('message', onMsg); es.close(); esRef.current = null }
   }, [loadDocs, refresh, toast, t])
 
@@ -173,12 +203,22 @@ export default function AutomationView() {
     } catch (e) { toast.error(e instanceof Error ? e.message : t('common.error_generic')) }
   }
 
-  // ── Un lancement depuis Ingestion bascule automatiquement sur Suivi ──
-  const onBatchStarted = useCallback((total: number) => {
-    setPagesTotal(prev => prev + total)
-    setRunning(true)
+  // ── Un lancement bascule automatiquement sur Suivi, corrélé par batch_id ──
+  const onBatchStarted = useCallback((launch: BatchLaunch) => {
+    // Nouveau lancement = nouveau suivi : compteurs remis à zéro, événements
+    // étrangers ignorés (corrélation par batch_id), dédup recommencée.
+    const counters = freshRunCounters()
+    setLines(counters.lines)
+    setRunning(counters.running)
+    setCurrentStatus(counters.currentStatus)
+    setLatencies(counters.latencies)
+    setPagesDone(counters.pagesDone)
+    setPagesTotal(launch.pagesTotal)
+    seenPageCompletionsRef.current = new Set()
+    activeBatchIdsRef.current = new Set(launch.batchIds ?? [])
+    setReusedNotice(launch.reusedExistingDocument ? t('launcher.reused_existing') : null)
     setActiveTab('monitoring')
-  }, [setActiveTab])
+  }, [setActiveTab, t])
 
   // ── ETA & Débit (moyenne mobile des latences page_update) ──
   const eta = useMemo(() => {
@@ -303,6 +343,21 @@ export default function AutomationView() {
         {/* ─────────────────── ONGLET SUIVI ─────────────────── */}
         {activeTab === 'monitoring' && (
           <div className="workspace-tab">
+            {/* Notification anti-doublon (pas une erreur) */}
+            {reusedNotice && (
+              <div className="auto-card" style={{ borderColor: 'var(--info)', borderStyle: 'dashed' }}>
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                  <i className="fa-solid fa-circle-info" style={{ color: 'var(--info)' }} />
+                  <strong>{reusedNotice}</strong>
+                </span>
+              </div>
+            )}
+
+            {/* État de connexion SSE */}
+            <div className="auto-card" style={{ padding: '10px 14px' }}>
+              <ConnectionBadge state={connection} />
+            </div>
+
             {/* ETA & Débit (pendant un batch) */}
             {eta && (
               <div className="auto-card">
@@ -358,7 +413,7 @@ export default function AutomationView() {
           <div className="workspace-tab">
             {/* Documents sources ingérés par base */}
             {activeDb && <SourceDocumentsTable db={activeDb} documents={documents} onIngested={loadDocs}
-              onBatchStarted={onBatchStarted} />}
+              onDeleted={() => { loadDocs(); refresh() }} onBatchStarted={onBatchStarted} />}
 
             {/* Import d'actif Tier 3 (§7.11) */}
             {activeDb && (
@@ -427,6 +482,20 @@ export default function AutomationView() {
         </div>
       </footer>
     </div>
+  )
+}
+
+function ConnectionBadge({ state }: { state: MonitorConnection }) {
+  const { t } = useLanguage()
+  const meta = {
+    connected: { cls: 'badge-success', icon: 'fa-circle-check', key: 'automation.conn_connected' },
+    reconnecting: { cls: 'badge-warning', icon: 'fa-arrows-rotate', key: 'automation.conn_reconnecting' },
+    disconnected: { cls: 'badge-danger', icon: 'fa-plug-circle-xmark', key: 'automation.conn_disconnected' },
+  }[state]
+  return (
+    <span className={`badge ${meta.cls}`} role="status">
+      <i className={`fa-solid ${meta.icon}`} /> {t(meta.key)}
+    </span>
   )
 }
 

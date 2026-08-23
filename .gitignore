@@ -4,6 +4,7 @@ dist/
 venv/
 __pycache__/
 *.pyc
+*.tsbuildinfo
 data/
 *.sqlite
 *.sqlite-wal

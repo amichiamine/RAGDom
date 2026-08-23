@@ -1,7 +1,9 @@
 import { useEffect, useState, useMemo, FormEvent } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { api } from '@/lib/api'
+import { api, getAdminToken } from '@/lib/api'
+import type { AuthState } from '@/types'
 import { safePostAuthPath } from '@/lib/authNavigation'
+import { classifySession } from '@/lib/session'
 import { useLanguage } from '@/contexts/LanguageContext'
 import { Spinner } from '@/components/common/Feedback'
 
@@ -24,6 +26,8 @@ export default function LoginView() {
   const [checking, setChecking] = useState(true)
   const [setupMode, setSetupMode] = useState(false)
   const [needsInitToken, setNeedsInitToken] = useState(false)
+  // Post-reboot : le compte admin a disparu (base éphémère) mais le jeton env demeure.
+  const [postReboot, setPostReboot] = useState(false)
 
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
@@ -43,6 +47,10 @@ export default function LoginView() {
         setSetupMode(me.setup_required)
         // Le serveur annonce d'AVANCE si le jeton d'initialisation est exigé (web).
         if ((me as { init_token_required?: boolean }).init_token_required) setNeedsInitToken(true)
+        // Post-reboot : setup_required de retour → le compte admin a disparu, PAS le
+        // jeton env (RAGDOM_AUTH_TOKEN). Afficher un guidage non bloquant.
+        const guidance = classifySession(me as AuthState, Boolean(getAdminToken()))
+        if (guidance.action === 'recreate_admin') setPostReboot(true)
       })
       .catch(() => { if (!cancelled) setSetupMode(false) })
       .finally(() => { if (!cancelled) setChecking(false) })
@@ -106,6 +114,13 @@ export default function LoginView() {
         <div className="auth-logo"><i className="fa-solid fa-shield-halved" /></div>
         <h1 className="auth-title">{title}</h1>
         <p className="auth-subtitle">{subtitle}</p>
+
+        {postReboot && setupMode && (
+          <div className="auth-error" role="status" style={{ background: 'rgba(59,130,246,0.1)', borderColor: 'rgba(59,130,246,0.4)', color: 'var(--text-heading)' }}>
+            <i className="fa-solid fa-rotate-left" />
+            <span>{t('auth.post_reboot_setup')}</span>
+          </div>
+        )}
 
         <div className="auth-field">
           <label className="auth-label" htmlFor="auth-username">{t('auth.username')}</label>
