@@ -171,9 +171,12 @@ def _official_page(conn, document_id: str, page_number: int) -> dict:
 
 
 def _toc_tree(conn, document_id: str) -> List[dict]:
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(document_toc)").fetchall()}
+    parent_expr = "parent_id" if "parent_id" in columns else "NULL AS parent_id"
     rows = conn.execute(
-        "SELECT id, parent_id, level, title, page_start, page_end FROM document_toc"
-        " WHERE document_id=? ORDER BY page_start, level", (document_id,)).fetchall()
+        "SELECT id, %s, level, title, page_start, page_end FROM document_toc"
+        " WHERE document_id=? ORDER BY page_start, level" % parent_expr,
+        (document_id,)).fetchall()
     nodes = {row[0]: {"id": row[0], "parent_id": row[1], "level": row[2], "title": row[3],
                       "page_start": row[4], "page_end": row[5], "children": []} for row in rows}
     roots = []
