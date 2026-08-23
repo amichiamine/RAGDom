@@ -234,8 +234,7 @@ def sources_delete(rel_path: str = Query(...)):
 @router.get("/databases/{filename}/export")
 def database_export(filename: str):
     """Téléchargement du .sqlite autonome (wal_checkpoint TRUNCATE préalable — §7.6)."""
-    if db.is_validation_working_db(filename):
-        raise HTTPException(404, "Copie de validation non exportable")
+    db.require_official_mutation_target(filename)
     path = db.sanitize_db_name(filename)
     if not os.path.exists(path):
         raise HTTPException(404, "Base introuvable")
@@ -250,8 +249,8 @@ class DuplicateBody(BaseModel):
 
 @router.post("/databases/{filename}/duplicate")
 def database_duplicate(filename: str, body: DuplicateBody):
-    if db.is_validation_working_db(filename) or db.is_validation_working_db(body.new_name):
-        raise HTTPException(400, "Namespace validation_test_ réservé")
+    db.require_official_mutation_target(filename)
+    db.require_official_mutation_target(body.new_name)
     src = db.sanitize_db_name(filename)
     dst = db.sanitize_db_name(body.new_name)
     if not os.path.exists(src):
@@ -270,8 +269,7 @@ class DeleteDbBody(BaseModel):
 
 @router.delete("/databases/{filename}")
 def database_delete(filename: str, body: DeleteDbBody):
-    if db.is_validation_working_db(filename):
-        raise HTTPException(404, "Copie de validation gérée uniquement par son run")
+    db.require_official_mutation_target(filename)
     if body.confirm != filename:
         raise HTTPException(400, "confirm doit être le nom exact de la base (double garde-fou)")
     current = orch.orchestrator.current_job

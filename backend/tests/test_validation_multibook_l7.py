@@ -333,8 +333,10 @@ def test_validation_get_poll_recovers_completed_batch_state(multibook_corpus, mo
                        params={"db": TEST_DB}).status_code == 200
 
 
-def test_validation_cancel_targets_only_working_batches(multibook_corpus, monkeypatch):
+def test_validation_cancel_terminalizes_all_active_working_jobs_and_prevents_recovery(
+        multibook_corpus, monkeypatch):
     from api import routes_pipeline, routes_validation
+    from core.orchestrator import PipelineOrchestrator
     response = client.post("/api/validation/runs", json={"db": TEST_DB, "scope": {
         "scope_type": "page_range", "document_id": "science-fr-native",
         "page_start": 1, "page_end": 2}})
@@ -345,17 +347,37 @@ def test_validation_cancel_targets_only_working_batches(multibook_corpus, monkey
     monkeypatch.setattr(routes_pipeline, "_launch", original_launch)
     assert executed.status_code == 202
     batch_ids = executed.json()["batch_ids"]
+
+    working = db.get_connection(created["working_db_filename"])
+    working.execute("UPDATE pipeline_jobs SET status='PROCESSING_CV' WHERE page_number=1"
+                    " AND batch_id=?", (batch_ids[0],))
+    working.execute("UPDATE pipeline_jobs SET status='INDEXED' WHERE page_number=2"
+                    " AND batch_id=?", (batch_ids[0],))
+    working.execute("INSERT INTO ingestion_batches"
+                    " (id,source_path,target_db,mode,status,pages_total)"
+                    " VALUES ('other-active','/tmp/other.pdf',?,'document','RUNNING',1)",
+                    (created["working_db_filename"],))
+    working.execute("INSERT INTO pipeline_jobs"
+                    " (id,document_id,page_number,status,batch_id)"
+                    " VALUES ('other-job','without-toc',1,'LINTING','other-active')")
+    working.commit(); working.close()
+
     cancelled = client.post("/api/validation/runs/%s/cancel" % created["id"], params={"db": TEST_DB})
     assert cancelled.status_code == 200
+    assert cancelled.json()["removed_active_jobs"] == 3
+    assert cancelled.json()["removed_queued_jobs"] == 3
     working = db.get_connection(created["working_db_filename"])
     try:
-        marks = ",".join("?" for _ in batch_ids)
-        assert working.execute("SELECT COUNT(*) FROM pipeline_jobs WHERE batch_id IN (%s)" % marks,
-                               batch_ids).fetchone()[0] == 0
-        assert working.execute("SELECT COUNT(*) FROM ingestion_batches WHERE id IN (%s)"
-                               " AND status='STOPPED'" % marks, batch_ids).fetchone()[0] == len(batch_ids)
+        marks = ",".join("?" for _ in routes_validation._ACTIVE_JOB_STATES)
+        assert working.execute("SELECT COUNT(*) FROM pipeline_jobs WHERE status IN (%s)" % marks,
+                               routes_validation._ACTIVE_JOB_STATES).fetchone()[0] == 0
+        assert working.execute("SELECT COUNT(*) FROM ingestion_batches"
+                               " WHERE status IN ('QUEUED','RUNNING')").fetchone()[0] == 0
     finally:
         working.close()
+    assert PipelineOrchestrator().recover(created["working_db_filename"]) == 0
+    assert client.post("/api/validation/runs/%s/execute" % created["id"],
+                       params={"db": TEST_DB}).status_code == 409
     assert _poll_run(created["id"])["status"] == "CANCELLED"
     with routes_validation._EXECUTION_MONITORS_LOCK:
         routes_validation._EXECUTION_MONITORS.pop(created["id"], None)

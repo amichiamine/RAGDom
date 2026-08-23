@@ -354,7 +354,7 @@ class ChunkPatch(BaseModel):
 @router.put("/chunks/{chunk_id}")
 def update_chunk(chunk_id: str, patch: ChunkPatch, db_name: str = Query(alias="db")):
     """Correction humaine (tech_specs §4.5) : re-lint → re-embed → update → FTS/vec par triggers."""
-    conn = _conn(db_name)
+    conn = db.get_mutable_connection_or_http(db_name)
     try:
         row = conn.execute("SELECT content_markdown, document_id FROM document_chunks WHERE id=?",
                            (chunk_id,)).fetchone()
@@ -407,7 +407,7 @@ class ArtifactPatch(BaseModel):
 
 @router.put("/artifacts/{artifact_id}")
 def update_artifact(artifact_id: str, patch: ArtifactPatch, db_name: str = Query(alias="db")):
-    conn = _conn(db_name)
+    conn = db.get_mutable_connection_or_http(db_name)
     try:
         if conn.execute("SELECT 1 FROM scientific_artifacts WHERE id=?", (artifact_id,)).fetchone() is None:
             raise HTTPException(404, "Artefact introuvable")
@@ -445,7 +445,7 @@ async def import_artifact(db_name: str = Query(alias="db"), file: UploadFile = F
     payload = await file.read()
     if len(payload) > 50 * 1024 * 1024:
         raise HTTPException(413, "Fichier > 50 Mo")
-    conn = _conn(db_name)
+    conn = db.get_mutable_connection_or_http(db_name)
     try:
         is_text = artifact_type in _TEXT_TYPES
         conn.execute(

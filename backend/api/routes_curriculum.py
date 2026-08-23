@@ -84,7 +84,7 @@ def build(body: BuildBody):
         builder = engine_registry.load_layer(manifest["id"], "curriculum_builder")
     except FileNotFoundError:
         raise HTTPException(400, "curriculum_builder absent du moteur %s" % manifest["id"])
-    conn = db.get_connection_or_http(body.db)
+    conn = db.get_mutable_connection_or_http(body.db)
     try:
         counts = builder.build_curriculum(conn, body.document_id)
         return {"built": True, "document_id": body.document_id, "counts": counts}
@@ -111,7 +111,7 @@ def import_curriculum(body: ImportBody, db_name: str = Query(alias="db")):
     """Import structuré, remplacé par document sauf opt-in explicite global."""
     if body.mode == "replace" and not body.document_id and not body.replace_all:
         raise HTTPException(400, "document_id ou replace_all=true requis pour replace")
-    conn = db.get_connection_or_http(db_name)
+    conn = db.get_mutable_connection_or_http(db_name)
     try:
         if body.document_id and not conn.execute("SELECT 1 FROM documents WHERE id=?",
                                                  (body.document_id,)).fetchone():
@@ -179,7 +179,7 @@ def create_item(kind: str, payload: dict, db_name: str = Query(alias="db")):
     if unknown:
         raise HTTPException(422, "Champs inconnus : %s" % ", ".join(sorted(unknown)))
     item_id = payload.get("id") or str(uuid.uuid4())
-    conn = db.get_connection_or_http(db_name)
+    conn = db.get_mutable_connection_or_http(db_name)
     try:
         _validate_document_refs(conn, kind, payload)
         values = [payload.get(col) for col in columns]
@@ -204,7 +204,7 @@ def update_item(kind: str, item_id: str, payload: dict, db_name: str = Query(ali
             args.append(payload[col])
     if not sets:
         raise HTTPException(400, "Aucun champ à mettre à jour")
-    conn = db.get_connection_or_http(db_name)
+    conn = db.get_mutable_connection_or_http(db_name)
     try:
         row = conn.execute("SELECT %s FROM %s WHERE id=?" % (", ".join(columns), table),
                            (item_id,)).fetchone()
@@ -225,7 +225,7 @@ def update_item(kind: str, item_id: str, payload: dict, db_name: str = Query(ali
 @router.delete("/{kind}/{item_id}")
 def delete_item(kind: str, item_id: str, db_name: str = Query(alias="db")):
     table, _ = _table(kind)
-    conn = db.get_connection_or_http(db_name)
+    conn = db.get_mutable_connection_or_http(db_name)
     try:
         cur = conn.execute("DELETE FROM %s WHERE id=?" % table, (item_id,))
         conn.commit()

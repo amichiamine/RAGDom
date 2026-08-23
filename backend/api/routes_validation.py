@@ -161,6 +161,26 @@ def _official_page(conn, document_id: str, page_number: int) -> dict:
             "chunks": chunks, "artifacts": artifacts}
 
 
+def _promoted_page(conn, document_id: str, page_number: int) -> dict:
+    """Canonical image of every page-scoped row replaced during acceptance."""
+    page_scan = _rows(
+        conn,
+        "SELECT id, document_id, page_number, width_px, height_px, dpi, image_webp, thumb_webp, created_at"
+        " FROM page_scans WHERE document_id=? AND page_number=? ORDER BY id",
+        (document_id, page_number),
+    )
+    benchmarks = _rows(
+        conn,
+        "SELECT id, document_id, page_number, engine_used, vlm_provider_used, fallback_triggered,"
+        " linter_errors_json, execution_time_ms, ram_peak_mb, confidence_score, blur_score, deskew_angle,"
+        " validation_run_id, created_at FROM processing_benchmarks"
+        " WHERE document_id=? AND page_number=? ORDER BY id",
+        (document_id, page_number),
+    )
+    return {"page": _official_page(conn, document_id, page_number),
+            "page_scans": page_scan, "processing_benchmarks": benchmarks}
+
+
 def _event(conn, run_id: str, event_type: str, payload=None, page_number=None,
            document_id=None) -> None:
     if document_id is None and page_number is not None:
@@ -267,14 +287,16 @@ def create_run(body: RunCreateDTO):
         for target in targets:
             for page_number in target.pages:
                 payload = _official_page(snapshot_conn, target.document_id, page_number)
-                if _payload_sha256(_official_page(conn, target.document_id, page_number)) != _payload_sha256(payload):
+                promoted_payload = _promoted_page(snapshot_conn, target.document_id, page_number)
+                if _payload_sha256(_promoted_page(conn, target.document_id, page_number)) != \
+                        _payload_sha256(promoted_payload):
                     raise HTTPException(409, "Base officielle modifiée pendant la création du run; réessayez")
                 encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True)
                 conn.execute("INSERT INTO validation_run_pages (id, run_id, document_id, page_number,"
                              " status, baseline_json, working_json, baseline_hash)"
                              " VALUES (?,?,?,?, 'PENDING', ?,?,?)",
                              (str(uuid.uuid4()), run_id, target.document_id, page_number, encoded, encoded,
-                              _payload_sha256(payload)))
+                              _payload_sha256(promoted_payload)))
         # Mirror only the run identity into the sandbox so provenance foreign keys
         # (artifacts/benchmarks) remain valid there. Official lifecycle state stays
         # authoritative in the official database.
@@ -479,6 +501,8 @@ def execute_run(run_id: str, db_name: str = Query(alias="db")):
     try:
         official.execute("BEGIN IMMEDIATE")
         run = _run(official, run_id)
+        if run["stored_status"] in ("ACCEPTED", "REJECTED", "CANCELLED"):
+            raise HTTPException(409, "Run terminal non réexécutable")
         if run["execution_status"] not in ("CREATED", "BLOCKED", "FAILED"):
             raise HTTPException(409, "Ce run est déjà exécuté ou en cours")
         filename = run.get("working_db_filename")
@@ -773,7 +797,18 @@ def _assert_human_edits_preserved(baseline: dict, working: dict) -> None:
     for collection in ("chunks", "artifacts"):
         working_by_id = {item.get("id"): item for item in working.get(collection, [])}
         for item in baseline.get(collection, []):
-            if item.get("is_human_edited") and working_by_id.get(item.get("id")) != item:
+            if not item.get("is_human_edited"):
+                continue
+            candidate = working_by_id.get(item.get("id"))
+            expected = item
+            if collection == "artifacts" and candidate is not None:
+                # validation_run_id is acceptance provenance, not human content. It
+                # is injected in the sandbox after validation and must not make an
+                # otherwise byte-for-byte preserved human artifact fail acceptance.
+                expected = {key: value for key, value in item.items() if key != "validation_run_id"}
+                candidate = {key: value for key, value in candidate.items()
+                             if key != "validation_run_id"}
+            if candidate != expected:
                 raise HTTPException(409, "Édition humaine protégée : %s" % item.get("id"))
 
 
@@ -966,8 +1001,15 @@ def accept_run(run_id: str, db_name: str = Query(alias="db")):
             if json.loads(staged) != working_payload:
                 conn.execute("UPDATE validation_run_pages SET working_json=?, updated_at=CURRENT_TIMESTAMP"
                              " WHERE id=?", (json.dumps(working_payload, ensure_ascii=False, sort_keys=True), page_id))
-            current_hash = _payload_sha256(_official_page(conn, document_id, page_number))
-            expected_hash = baseline_hash or _payload_sha256(baseline_payload)
+            # Current runs hash every page-scoped row promoted by acceptance.
+            # Legacy rows have no baseline_hash and retain the historical logical
+            # page comparison instead of being rejected by a mismatched payload shape.
+            if baseline_hash:
+                current_hash = _payload_sha256(_promoted_page(conn, document_id, page_number))
+                expected_hash = baseline_hash
+            else:
+                current_hash = _payload_sha256(_official_page(conn, document_id, page_number))
+                expected_hash = _payload_sha256(baseline_payload)
             if current_hash != expected_hash:
                 raise HTTPException(409, "Données officielles modifiées depuis la création du run")
             _assert_human_edits_preserved(baseline_payload, working_payload)
@@ -1035,24 +1077,30 @@ def cancel_run(run_id: str, db_name: str = Query(alias="db")):
         filename = run.get("working_db_filename")
         batch_ids = _batch_ids(run)
         removed_jobs = 0
-        if filename and os.path.exists(_working_db_path(filename)) and batch_ids:
+        if filename and os.path.exists(_working_db_path(filename)):
             working = db.get_connection(filename)
-            marks = ",".join("?" for _ in batch_ids)
+            # The sandbox is dedicated to this run. Remove every resumable state,
+            # including a page that was mid-layer when cancellation won the race.
+            # PipelineOrchestrator.recover() can therefore never resurrect it after
+            # a process restart. READY/QUARANTINE/INVALID_SOURCE history is retained.
+            marks = ",".join("?" for _ in _ACTIVE_JOB_STATES)
             removed_jobs = working.execute(
-                "DELETE FROM pipeline_jobs WHERE batch_id IN (%s) AND status='QUEUED'" % marks,
-                batch_ids).rowcount
+                "DELETE FROM pipeline_jobs WHERE status IN (%s)" % marks,
+                _ACTIVE_JOB_STATES).rowcount
             working.execute("UPDATE ingestion_batches SET status='STOPPED', updated_at=CURRENT_TIMESTAMP"
-                            " WHERE id IN (%s) AND status IN ('QUEUED','RUNNING')" % marks, batch_ids)
+                            " WHERE status IN ('QUEUED','RUNNING')")
             working.commit()
         conn.execute("UPDATE validation_run_pages SET status='CANCELLED', updated_at=CURRENT_TIMESTAMP"
                      " WHERE run_id=? AND status NOT IN ('ACCEPTED','REJECTED')", (run_id,))
         conn.execute("UPDATE validation_runs SET status='CANCELLED', execution_status='CANCELLED',"
                      " updated_at=CURRENT_TIMESTAMP WHERE id=?", (run_id,))
         _event(conn, run_id, "run.cancelled", {"batch_ids": batch_ids,
-                                                "removed_queued_jobs": removed_jobs})
+                                                "removed_active_jobs": removed_jobs})
         conn.commit()
         return {"cancelled": True, "run_id": run_id, "batch_ids": batch_ids,
-                "removed_queued_jobs": removed_jobs, "official_mutated": False}
+                "removed_active_jobs": removed_jobs,
+                "removed_queued_jobs": removed_jobs,  # compatibilité client historique
+                "official_mutated": False}
     finally:
         if working is not None:
             working.close()
