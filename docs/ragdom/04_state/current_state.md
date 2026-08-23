@@ -1,7 +1,7 @@
 # État Actuel du Projet RAGDom
 
-**Phase :** Exécution end-to-end du Studio de validation sur `feat/validation-execution` : chaque run possède une copie SQLite physique isolée, exécute réellement reprocess/pipeline, expose progression/erreur et ne publie le scope qu'à l'acceptation.
-**Date de mise à jour :** 2026-08-22
+**Phase :** Correctifs release finaux intégrés sur `feat/validation-integration` : exécution réelle sur copie SQLite, inspection complète, publication durcie et frontend prêt au push/déploiement/recette live.
+**Date de mise à jour :** 2026-08-23
 
 > **Mémoire de reprise :** `.hyperagent/` à la racine du dépôt sert de mémoire de
 > reprise inter-sessions (état d'avancement, décisions, points de reprise). À
@@ -10,14 +10,15 @@
 ## OPÉRATIONNEL SUR LA BRANCHE D'INTÉGRATION (preuves rejouées)
 - [x] Backend complet : noyau agnostique, sci-engine, **8 routeurs / 82 opérations** (`auth 4 · curriculum 7 · library 13 · llm 10 · pipeline 12 · search 3 · system 15 · validation 18`).
 - [x] **Studio de validation end-to-end** : `create_run` produit par `Connection.backup` une copie `validation_test_<run>.sqlite`; `/execute` lance le reprocess/pipeline complet uniquement dans cette copie, avec batches/jobs/pages/events et polling restart-safe.
-- [x] **Décision run-level** : reject supprime DB/WAL/SHM; accept contrôle hash optimiste et éditions humaines puis promeut transactionnellement uniquement les pages du scope depuis la copie physique avant suppression.
-- [x] **Migration 007** : colonnes additives/idempotentes copie/opération/batch(s)/état/progression/erreur/dates; copies confinées, masquées de la découverte et non exportables.
-- [x] **États et erreurs réels** : `CREATED/QUEUED/RUNNING/COMPLETED/BLOCKED/FAILED/CANCELLED`; source PDF absente explicitement bloquée sans mutation officielle; requalification `run_id` redirigée vers la copie seulement après completion.
+- [x] **Décision run-level** : reject supprime DB/WAL/SHM; accept contrôle le hash canonique de toutes les lignes promues — scans et benchmarks inclus — ainsi que les éditions humaines, puis promeut transactionnellement uniquement les pages du scope. Toute modification officielle concurrente ferme en 409 sans écrasement.
+- [x] **Migration 007** : colonnes additives/idempotentes copie/opération/batch(s)/état/progression/erreur/dates et index; copies confinées dans le namespace `validation_test_`, masquées de la découverte/health, non exportables/duplicables et refusées par les mutations génériques.
+- [x] **États et erreurs réels** : `CREATED/QUEUED/RUNNING/COMPLETED/BLOCKED/FAILED/CANCELLED`; source PDF absente explicitement bloquée sans mutation officielle. Cancel supprime les jobs reprenables, stoppe les batchs, empêche recovery et toute nouvelle exécution du run.
+- [x] **Requalification isolée** : avec `run_id`, une mutation est autorisée uniquement sur la working DB d'un run `COMPLETED`, bornée à ses pages puis resynchronisée dans `working_json`; jamais sur l'officielle.
 - [x] **Curriculum multi-document** : build isolé/non destructif entre livres, import et CRUD scopés, données legacy ambiguës signalées plutôt qu'attribuées silencieusement.
 - [x] **Embedding compatible** : FastEmbed MiniLM-L12-v2, pooling `mean`, 384d normalisées et contrat complet; profil absent/incompatible/multiple bloque le vectoriel, aucune réindexation silencieuse.
-- [x] **UI Validation Studio** : builder/preview, scope selector, runs paginés/deep-linkés, inspecteur/diff, restaurations et confirmation. Suivi du run ouvert par polling ciblé 5 s, aucun SSE Validation dédié. Readonly : contrôles désactivés et API masquée en 404.
+- [x] **UI Validation Studio** : builder/preview, scope selector, runs paginés/deep-linkés, scans et artefacts baseline/working, TOC/curriculum/benchmarks de working DB, restaurations et confirmation. TOC legacy sans `parent_id` compatible; deep-link `db/run/doc/page` préservé après auth. Polling ciblé 5 s, aucun SSE Validation dédié. Readonly : contrôles désactivés et API masquée en 404.
 - [x] **Recherche hybride V5.1** : seuil BM25 et seuil vectoriel appliqués avant rangs/RRF, rang FTS unique par chunk, ordre stable.
-- [x] **Qualité** : pytest **154/154** normal et **154/154** avec `RAGDOM_LOW_MEMORY=true`; Vitest **13/13**; TypeScript/build Vite **8.2.2** verts; `npm audit` **0 vulnérabilité**. Les E2E Validation désactivent tout LLM/VLM externe.
+- [x] **Qualité finale** : pytest **160/160** normal et **160/160** avec `RAGDOM_LOW_MEMORY=true`; Vitest **17/17**; TypeScript/build Vite **8.2.2** verts (**3 711 modules**); `npm audit` **0 vulnérabilité**. Les E2E Validation désactivent tout LLM/VLM externe.
 - [x] **Lot 1 sprint** : GET /library/page-scans (manifeste galerie), agrégats curriculum
       (per_term + global en SQL), filtres chunks (pedagogical_type/page_start/page_end/toc_id)
 - [x] **Frontend pixel-perfect COMPLET (vagues A/B/C/D + audit croisé)** :
@@ -42,15 +43,13 @@
       → seed DATABASES_DIR), RAGDOM_LOW_MEMORY (BM25 seul ≤512 Mo), RAGDOM_SEED_LLM_KEYS
 
 ## RESTE À FAIRE (machine cible uniquement)
-1. ~~npm install + tsc + vite build~~ **REJOUÉ sur la branche d'intégration** : TypeScript strict 0 erreur, build Vite 8.2.2 OK (3 709 modules), Vitest 13/13 et npm audit 0 vulnérabilité.
-2. Recette visuelle pixel-perfect sur base 2G réelle (checklist Lot 11 du sprint) + modèles
-   rapid-*/fastembed au 1er run (RAGDOM_OFFLINE=false).
-3. Reliquat mineur PARTIE 8 hors Studio : tests navigateur Playwright, toggle densité,
-   sélection en masse, Inspecteur de Cycle de Vie. Les tests unitaires Vitest sont présents et verts (13/13).
+1. ~~npm install + tsc + vite build~~ **REJOUÉ sur la branche d'intégration** : TypeScript strict 0 erreur, build Vite 8.2.2 OK (**3 711 modules**), Vitest **17/17** et npm audit **0 vulnérabilité**.
+2. Push de `feat/validation-integration`, déploiement, puis recette live pixel-perfect du Studio sur base multi-livres réelle (checklist Lot 11 du sprint) + modèles rapid-*/fastembed au 1er run (`RAGDOM_OFFLINE=false`).
+3. Reliquat mineur PARTIE 8 hors Studio : tests navigateur Playwright, toggle densité, sélection en masse, Inspecteur de Cycle de Vie. Les tests unitaires Vitest sont présents et verts (**17/17**).
 4. Chiffrement des clés LLM au repos (reliquat Web-Ready indépendant du Studio).
 
 ## Prochaine Action Prioritaire
-Recette visuelle finale du Studio sur base multi-livres réelle, puis intégration de `feat/validation-integration`. Le socle automatisé est vert : backend 149/149 dans les deux modes, frontend 13/13, build et audit verts.
+**Push → déploiement → recette live.** L'intégration de `feat/validation-integration` est terminée et le socle automatisé final est vert : backend **160/160** dans les deux modes, frontend **17/17**, build Vite 8.2.2 (**3 711 modules**) et audit npm à zéro.
 
 
 **MAJ 2026-08-21 (V3.8)** : modèle LLM par clé (active_model), POST /pipeline/reprocess (ré-exécution scopée), PipelineLauncher UI (lancer/ré-exécuter/stop/file), SourcesManager avec dossiers imbriqués + upload ciblé, 3 écarts d'audit Library corrigés. 53/53 tests, tsc/build verts.

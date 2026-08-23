@@ -1468,16 +1468,19 @@ Le routeur réel expose 18 opérations :
 - `POST /runs/{run_id}/accept`, `POST /runs/{run_id}/reject`, `POST /runs/{run_id}/cancel` ;
 - `POST /embeddings/profiles`, `POST /embeddings/assign`, `GET /embeddings/diagnostic`.
 
-Un run capture pour chaque `(document_id,page_number)` un `baseline_json`, son `baseline_hash` et un `working_json` séparé. Création, édition de copie, snapshot, restauration, diff, rejet et annulation renvoient ou garantissent `official_mutated:false`. Les snapshots publiquement créables sont **logiques uniquement** : la base sait stocker la valeur historique `physical`, mais l'API la refuse car la restauration ne sait restaurer sans risque que `working_json`.
+Un run capture pour chaque `(document_id,page_number)` un `baseline_json`, son `baseline_hash` et un `working_json` séparé. `POST /runs` crée par `Connection.backup` une base `validation_test_<run>.sqlite`; `/execute` exécute réellement reprocess/pipeline, jobs, scans, artefacts et benchmarks dans cette seule copie. Création, édition de copie, snapshot, restauration, diff, rejet et annulation renvoient ou garantissent `official_mutated:false`. Les snapshots publiquement créables sont **logiques uniquement** : la base sait stocker la valeur historique `physical`, mais l'API la refuse car la restauration ne sait restaurer sans risque que `working_json`.
 
-`accept` et `reject` sont des décisions **au niveau du run entier**. L'acceptation ouvre `BEGIN IMMEDIATE`, recalcule chaque hash officiel, protège toute ligne `is_human_edited`, valide l'image finale et toutes les références TOC/chunks/artefacts/curriculum cross-document avant le premier DELETE/UPDATE, puis publie atomiquement toutes les pages. Toute concurrence sur l'officiel, référence invalide ou tentative de modifier un run terminal échoue fermée.
+Le détail d'une page sert le scan et le binaire d'un artefact depuis la version `baseline` ou `working` demandée; son `working_inspection` lit TOC, curriculum et benchmarks directement dans la working DB. `_toc_tree` détecte la présence de `parent_id` avec `PRAGMA table_info` et projette `NULL AS parent_id` sur les TOC legacy.
 
-### **16.3 Migrations 005 et 006**
+`accept` et `reject` sont des décisions **au niveau du run entier**. L'acceptation ouvre `BEGIN IMMEDIATE`, recalcule pour les runs courants un hash canonique couvrant toutes les lignes promues (`document_chunks`, `scientific_artifacts`, `page_scans`, `processing_benchmarks`), protège toute ligne `is_human_edited`, valide l'image finale et toutes les références TOC/chunks/artefacts/curriculum cross-document avant le premier DELETE/UPDATE, puis publie atomiquement toutes les pages. Une modification officielle concurrente d'un scan ou benchmark provoque un 409 et reste intacte; les anciens runs sans `baseline_hash` conservent la comparaison logique legacy. Toute concurrence sur l'officiel, référence invalide ou tentative de modifier un run terminal échoue fermée.
+
+### **16.3 Migrations 005, 006 et 007**
 
 - **005 — validation_studio** : ajoute la provenance `validation_run_id` aux benchmarks/artefacts, l'ownership `document_id` aux terms/programs/links, et crée `validation_runs`, `validation_run_pages`, `validation_events`, `validation_snapshots`, `embedding_profiles`, `document_embedding_profiles` et leurs index.
 - **006 — hardening** : ajoute `assessments.document_id`, `validation_events.document_id`, `validation_run_pages.baseline_hash` et l'index unique partiel `uq_jobs_active_page` empêchant deux jobs actifs pour la même page.
+- **007 — validation_execution** : ajoute de façon additive `validation_runs.working_db_filename`, `operation`, `batch_id`, `batch_ids_json`, `execution_status`, `progress_current`, `progress_total`, `error_log`, `started_at`, `completed_at`, l'index `idx_validation_runs_execution_status` et l'unicité partielle `uq_validation_runs_working_db`.
 
-Le migrateur rejoue 005/006 de façon reprenable, tolère seulement les colonnes déjà présentes, vérifie le schéma durci après migration et ne déclare la version qu'après succès. Le backfill d'ownership curriculum n'est automatique que pour une base mono-document ; en multi-document, les NULL ambigus restent signalés au lieu d'être attribués arbitrairement.
+Le migrateur rejoue 005/006/007 de façon reprenable et idempotente, tolère seulement les colonnes déjà présentes, vérifie le schéma durci après migration et ne déclare la version qu'après succès. Le backfill d'ownership curriculum n'est automatique que pour une base mono-document ; en multi-document, les NULL ambigus restent signalés au lieu d'être attribués arbitrairement.
 
 ### **16.4 Curriculum multi-document et embeddings compatibles**
 
@@ -1487,10 +1490,14 @@ Le profil de requête/vectorisation compatible est contractuel : `sentence-trans
 
 ### **16.5 Readonly, sécurité et limites**
 
-Toutes les routes Validation sont administratives. `RAGDOM_READONLY=true` les masque en 404 via `AccessPolicyMiddleware`; lorsqu'une authentification admin est activée, session ou Bearer valide requis. Le nom de base passe par le résolveur anti-traversal existant et les DTO Pydantic interdisent les champs supplémentaires.
+Toutes les routes Validation sont administratives. `RAGDOM_READONLY=true` les masque en 404 via `AccessPolicyMiddleware`; lorsqu'une authentification admin est activée, session ou Bearer valide requis. Le frontend encode avant login le deep-link interne complet dans `next` et n'autorise au retour que `/`, `/library` ou `/automation` avec leurs query/hash; origine externe, chemin protocol-relative, antislash ou route inconnue retombe sur `/automation`. Le nom de base passe par le résolveur anti-traversal existant et les DTO Pydantic interdisent les champs supplémentaires.
 
-Limite assumée : `POST /api/pipeline/requalify-artifacts` avec `run_id` accepte le filtrage en `dry_run`, mais une requalification mutante renvoie **409** (`Requalification avec run_id non stagée`) tant que le qualifier ne sait pas écrire exclusivement dans les artefacts de staging de `working_json`. Il ne contourne jamais l'isolation en mutant l'officiel.
+Le préfixe `validation_test_` constitue un namespace réservé : les copies sont exclues des listings de bases, du health et de la découverte des sources; export et duplication sont refusés; toutes les mutations génériques library/curriculum/pipeline passent par `get_mutable_connection_or_http` et répondent 403 sur une working DB. Les mutations de copie autorisées passent exclusivement par `/api/validation`.
+
+`cancel` supprime dans la working DB tous les `pipeline_jobs` aux états actifs/reprenables et marque les batchs `QUEUED/RUNNING` en `STOPPED`, avant de terminaliser run/pages en `CANCELLED`. `PipelineOrchestrator.recover()` ne trouve alors rien à reprendre et `/execute` répond 409 sur ce run.
+
+Limite de requalification : `POST /api/pipeline/requalify-artifacts` **mutant** avec `run_id` est autorisé uniquement sur la working DB physique isolée d'un run `COMPLETED`. La route résout le run depuis l'officielle, ouvre ensuite sa copie `validation_test_`, filtre aux `(document_id,page_number)` du run et resynchronise `working_json`; elle n'écrit jamais la requalification dans l'officielle. Run non terminé/terminal ou copie absente/non isolée → **409**.
 
 ### **16.6 Preuves de qualité**
 
-État vérifié sur `feat/validation-integration` : pytest **149/149** en mode normal et **149/149** avec `RAGDOM_LOW_MEMORY=true`; Vitest **13/13**; build TypeScript strict + Vite **8.2.2** vert; `react-router-dom` **7.18.2**; `npm audit` **0 vulnérabilité**.
+État final vérifié sur `feat/validation-integration` : pytest **160/160** en mode normal et **160/160** avec `RAGDOM_LOW_MEMORY=true`; Vitest **17/17**; build TypeScript strict + Vite **8.2.2** vert (**3 711 modules**); `react-router-dom` **7.18.2**; `npm audit` **0 vulnérabilité**.

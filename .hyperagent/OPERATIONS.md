@@ -4,17 +4,20 @@
 - `npm run dev` À LA RACINE : lance backend (venv auto-détecté, port libre auto)
   + frontend Vite (concurrently, scripts/dev-backend.mjs). Modes : --setup, --pytest.
 - Backend seul : cd backend && python main.py (chemins auto-déduits, .env pré-rempli).
-- Tests backend : `cd backend && python -m pytest tests/ -q --ignore=tests/bench_ram_100p.py` → **154/154** attendus; rejouer aussi avec `RAGDOM_LOW_MEMORY=true` → **154/154**.
-- Frontend : `cd frontend && npm test` → **13/13**; `npm run build` (TypeScript strict + Vite **8.2.2**) ; `npm audit` → **0 vulnérabilité**. React Router DOM est verrouillé en **7.18.2**.
+- Tests backend : `cd backend && python -m pytest tests/ -q --ignore=tests/bench_ram_100p.py` → **160/160**; rejouer aussi avec `RAGDOM_LOW_MEMORY=true` → **160/160**.
+- Frontend : `cd frontend && npm test` → **17/17**; `npm run build` → TypeScript strict + Vite **8.2.2**, **3 711 modules**; `npm audit` → **0 vulnérabilité**. React Router DOM est verrouillé en **7.18.2**.
 
 ## Exploitation du Studio de validation
 - Le Studio est dans Automation. Toujours faire `POST /api/validation/resolve-scope` avant `POST /api/validation/runs`; les scopes API sont `base`, `document`, `toc|chapter|course|title`, `page`, `page_range`, `page_selection` (l'UI traduit `database`→`base` et `selection`→`page_selection`).
 - `POST /runs` crée une copie physique `validation_test_<run>.sqlite` par `Connection.backup`; appeler ensuite `POST /runs/{id}/execute`. Le pipeline complet et ses batches/jobs tournent uniquement sur cette copie, jamais sur l'officielle.
-- Le détail expose `CREATED/QUEUED/RUNNING/COMPLETED/BLOCKED/FAILED`, progression, opération, batch(s), copie et erreur. `BLOCKED` signifie notamment PDF source officiel absent; aucun contenu officiel n'a alors changé.
-- `accept` et `reject` s'appliquent au **run entier**. Reject supprime copie/WAL/SHM; accept vérifie hash et éditions humaines, promeut transactionnellement le scope depuis la copie, puis la supprime.
-- Le frontend suit seulement le run ouvert par polling toutes les 5 s; GET détail réconcilie aussi un batch après restart. Aucun SSE Validation dédié.
+- Le détail expose `CREATED/QUEUED/RUNNING/COMPLETED/BLOCKED/FAILED/CANCELLED`, progression, opération, batch(s), copie et erreur. `BLOCKED` signifie notamment PDF source officiel absent; aucun contenu officiel n'a alors changé.
+- `accept` et `reject` s'appliquent au **run entier**. Reject supprime copie/WAL/SHM; accept vérifie le hash de toutes les lignes promues — scans et benchmarks inclus — et les éditions humaines, promeut transactionnellement le scope depuis la copie, puis la supprime.
+- L'inspecteur sert les scans/binaires d'artefacts baseline ou working depuis la base demandée et lit TOC/curriculum/benchmarks dans la working DB. Les bases legacy dont `document_toc` n'a pas `parent_id` restent compatibles.
+- Le frontend suit seulement le run ouvert par polling toutes les 5 s; GET détail réconcilie aussi un batch après restart. Aucun SSE Validation dédié. Après authentification, le paramètre `next` interne restaure le deep-link `db/run/doc/page`; aucune URL externe n'est acceptée.
 - En `RAGDOM_READONLY=true`, les routes Validation sont administratives et renvoient 404.
-- Une requalification avec `run_id` n'est mutante que pour un run `COMPLETED`; elle est redirigée vers sa copie physique puis resynchronisée. Toute autre situation retourne 409.
+- `cancel` supprime de la copie tous les jobs dans un état reprenable et stoppe les batchs actifs : recovery retourne 0, et le run `CANCELLED` ne peut pas être ré-exécuté.
+- Une requalification **mutante** avec `run_id` n'est autorisée que sur la working DB physique d'un run `COMPLETED`; l'API ouvre cette copie, borne aux pages du run, puis resynchronise `working_json`. Elle ne cible jamais la base officielle. Toute autre situation retourne 409.
+- Le namespace `validation_test_` est réservé : caché des listings/health, non exportable/duplicable et interdit aux mutations génériques; passer exclusivement par `/api/validation`.
 
 ## Skills Hyperagent (credentials chiffrés côté plateforme)
 - **render-ragdom** (RENDER_API_KEY) : FetchSkillScripts puis RunWithCredentials.

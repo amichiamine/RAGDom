@@ -7,16 +7,16 @@
 
 ---
 
-## 2026-08-22 — Studio de validation final
+## 2026-08-23 — Correctifs release finaux du Studio de validation
 
-- Ajout du routeur admin `/api/validation` : résolution non mutante des scopes universels (`base` multi-documents, document, TOC et alias chapter/course/title, page, plage, sélection), runs et copies de travail document/page, snapshots logiques/restauration, diffs page/run, rapports, benchmarks et diagnostics embeddings.
-- Publication sécurisée : baseline SHA-256, copies isolées, protection `is_human_edited`, validation globale des références/owners cross-document, acceptation atomique et rejet au **niveau run**. Aucun accept/reject page par page.
-- Migrations additives 005/006 : tables Validation, provenance benchmark/artefact, ownership curriculum multi-document (terms/programs/assessments/links), profils embeddings, `baseline_hash`, événements documentés et unicité des jobs actifs par page.
-- Profil FastEmbed compatible durci : MiniLM-L12-v2 multilingue, pooling **mean**, 384 dimensions normalisées et contrat complet; profils manquants/incompatibles ou multiples refusés sans réindexation silencieuse.
-- UI Studio intégrée à Automation : preview, deep-links db/run/document/page, liste/pagination, inspecteur et diff, restauration, confirmation d'acceptation, readonly. Suivi par polling ciblé 5 s, **pas de SSE Validation dédié**.
-- Sécurité : DTO stricts, sanitisation de base, contrôle des scopes et owners, auth admin; toutes les routes Validation sont masquées en 404 en readonly.
-- Limite honnête : requalification mutante avec `run_id` refusée en 409 tant que les artefacts de staging ne sont pas opérés dans la copie de travail; `dry_run` possible.
-- Dépendances et qualité corrigées : Vite **8.2.2**, React Router DOM **7.18.2**, Vitest **13/13**, `npm audit` **0 vulnérabilité**, pytest **149/149** normal et **149/149** faible mémoire.
+- Migration additive/idempotente **007** finalisée : working DB, opération, batch(s), état/progression, erreur, dates et index; `/runs` crée par `Connection.backup` une copie `validation_test_<run>.sqlite` et `/execute` lance réellement le pipeline uniquement dans cette copie.
+- Inspecteur complété : scans et binaires d'artefacts baseline/working servis depuis la bonne base; TOC, curriculum et benchmarks lus dans la working DB; compatibilité des TOC legacy sans `parent_id`.
+- Publication durcie : le hash optimiste couvre toutes les lignes promues, y compris `page_scans` et `processing_benchmarks`; toute modification officielle concurrente ferme l'acceptation en 409 sans écrasement. Accept/reject restent atomiques au **niveau run**.
+- Annulation rendue non reprenable : suppression des jobs actifs/reprenables de la copie, arrêt des batchs, recovery à zéro et nouveau `/execute` refusé pour le run `CANCELLED`.
+- Namespace `validation_test_` protégé : copies masquées de la découverte/health, non exportables/duplicables et refusées par les mutations génériques library/curriculum/pipeline; seules les routes Validation les pilotent.
+- Requalification `run_id` corrigée : la mutation est autorisée uniquement sur la working DB physique d'un run `COMPLETED`, bornée à ses pages et suivie d'une resynchronisation de `working_json`; elle n'écrit jamais dans l'officielle.
+- Auth frontend corrigée : le deep-link Validation `db/run/doc/page` avec query/hash survit au login via un `next` interne validé; toute destination externe ou inconnue retombe sur `/automation`.
+- Preuves finales : pytest **160/160** normal et **160/160** faible mémoire; Vitest **17/17**; build TypeScript strict + Vite **8.2.2** vert (**3 711 modules**); React Router DOM **7.18.2**; `npm audit` **0 vulnérabilité**.
 
 ## 2026-08-22 — V5.1 : fusion RRF filtrée par canal
 

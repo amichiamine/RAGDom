@@ -1541,7 +1541,7 @@ Le Studio vit dans `AutomationView` et reçoit `databases`, `activeDb` et `healt
 - `ScopeSelector` : base, document, niveau, TOC, page/plage/sélection ;
 - `ValidationRunsPanel` : liste, pagination client, détail, progression, pages, décisions ;
 - `ValidationDiffView` : diff chunks/artefacts avant/après ;
-- `ValidationInspector` : copie de travail enrichie avec TOC, curriculum, benchmarks et liens vers les écrans sources.
+- `ValidationInspector` : comparaison réelle des scans et binaires d'artefacts baseline/working, plus TOC, curriculum et benchmarks lus dans la working DB, avec liens vers les écrans sources; les TOC legacy sans `parent_id` restent affichables.
 
 Le client `api.validation` adapte strictement le contrat backend : `database`→`base`, `selection`→`page_selection`; preview via `/resolve-scope`; runs/pages/snapshots/diffs/accept/reject/cancel via `/api/validation`. Un run de scope `base` peut contenir plusieurs documents ; les clés et deep-links incluent alors `document_id` pour désambiguïser la page.
 
@@ -1549,18 +1549,19 @@ Le client `api.validation` adapte strictement le contrat backend : `database`→
 
 1. Choisir une base puis un scope universel ; charger documents et TOC réels.
 2. Exécuter la prévisualisation non mutante et afficher nombre de pages/cibles.
-3. Lancer un run isolé : le builder enchaîne `POST /runs` puis `POST /runs/{id}/execute`, ouvre sa première `(document,page)` et conserve `db`, `run`, `document`, `page` dans l'URL. Le pipeline réel tourne uniquement sur la copie SQLite physique du run.
-4. Inspecter baseline/copie, diff chunks/artefacts, TOC/curriculum/benchmarks ; restaurer une page ou tout le run depuis la baseline/snapshot logique.
-5. Accepter ou rejeter **le run entier**. Il n'existe pas de décision accept/reject au niveau page. L'acceptation exige une modale récapitulant base, scope, pages et cibles.
+3. Lancer un run isolé : le builder enchaîne `POST /runs` puis `POST /runs/{id}/execute`, ouvre sa première `(document,page)` et conserve `db`, `run`, `doc`, `page` dans l'URL. Le pipeline réel tourne uniquement sur la copie SQLite physique du run.
+4. Inspecter baseline/copie, diff chunks/artefacts, scans et binaires baseline/working, TOC/curriculum/benchmarks issus de la working DB ; restaurer une page ou tout le run depuis la baseline/snapshot logique.
+5. Accepter ou rejeter **le run entier**. Il n'existe pas de décision accept/reject au niveau page. L'acceptation exige une modale récapitulant base, scope, pages et cibles; son contrôle optimiste couvre aussi scans et benchmarks promus.
+6. Annuler supprime tous les jobs actifs/reprenables de la copie et stoppe ses batchs. L'UI traite `CANCELLED` comme terminal : ni recovery ni nouveau `/execute` ne peuvent reprendre ce run.
 
 ### **9.3 Suivi, readonly et erreurs**
 
 `routes_validation.py` ne fournit aucun SSE. L'UI effectue donc un **polling ciblé toutes les 5 secondes du seul run deep-linké**, arrêté dès qu'il devient terminal. Le rafraîchissement manuel recharge liste, run et page ; le SSE `/api/pipeline/stream` n'est pas utilisé comme substitut Validation.
 
-En `readonly`, aucun appel Validation n'est lancé : liste et détail sont vidés, preview/lancement/restauration/annulation/acceptation/rejet sont désactivés, et un état explicite est affiché. Cette UI reflète la politique serveur : toutes les routes Validation sont administratives et masquées en 404 par le middleware readonly.
+En `readonly`, aucun appel Validation n'est lancé : liste et détail sont vidés, preview/lancement/restauration/annulation/acceptation/rejet sont désactivés, et un état explicite est affiché. Cette UI reflète la politique serveur : toutes les routes Validation sont administratives et masquées en 404 par le middleware readonly. En mode authentifié, le login conserve le deep-link Validation complet dans un `next` interne validé (query et hash inclus); les URLs externes, protocol-relative, avec antislash ou routes inconnues sont rejetées au profit de `/automation`.
 
-Les erreurs 400/404/409 sont montrées inline et en toast. Le panneau affiche les états réels `CREATED/QUEUED/RUNNING/COMPLETED/BLOCKED/FAILED`, la progression serveur, le batch, la disponibilité de la copie et `error_log`. `BLOCKED` explique explicitement qu'un PDF source officiel est absent et qu'aucune donnée officielle n'a changé. Accept/reject ne sont proposés qu'après `COMPLETED`; un run bloqué/échoué peut être rejeté pour supprimer proprement sa copie.
+Les erreurs 400/404/409 sont montrées inline et en toast. Le panneau affiche les états réels `CREATED/QUEUED/RUNNING/COMPLETED/BLOCKED/FAILED/CANCELLED`, la progression serveur, le batch, la disponibilité de la copie et `error_log`. `BLOCKED` explique explicitement qu'un PDF source officiel est absent et qu'aucune donnée officielle n'a changé. Accept/reject ne sont proposés qu'après `COMPLETED`; un run bloqué/échoué peut être rejeté pour supprimer proprement sa copie. Une requalification mutante `run_id` n'agit que sur la working DB d'un run `COMPLETED`, jamais sur l'officielle.
 
 ### **9.4 Dépendances et preuves**
 
-Stack réellement verrouillée : React 19, TypeScript strict, **Vite 8.2.2**, `react-router-dom` **7.18.2**, Vitest 4.1.11. Preuves rejouées : **13/13 tests Vitest**, build Vite vert (3709 modules), `npm audit` **0 vulnérabilité** ; backend associé **154/154 pytest** en modes normal et faible mémoire.
+Stack réellement verrouillée : React 19, TypeScript strict, **Vite 8.2.2**, `react-router-dom` **7.18.2**, Vitest 4.1.11. Preuves finales rejouées : **17/17 tests Vitest**, build Vite vert (**3 711 modules**), `npm audit` **0 vulnérabilité** ; backend associé **160/160 pytest** en modes normal et faible mémoire.

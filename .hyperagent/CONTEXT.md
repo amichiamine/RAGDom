@@ -1,4 +1,4 @@
-# CONTEXT — État complet du projet RAGDom (MAJ 2026-08-22 — Studio de validation final)
+# CONTEXT — État complet du projet RAGDom (MAJ 2026-08-23 — correctifs release intégrés)
 
 ## Identité du projet
 Bibliothèque numérique scientifique **local-first** + version web complète.
@@ -27,10 +27,11 @@ Cible locale utilisateur : Windows, c:\xampp\htdocs\RAGDom, `npm run dev` racine
   DATABASES_DIR au démarrage (main.py). La bibliothèque live renaît pré-chargée.
 
 ## État fonctionnel (tout VÉRIFIÉ en exécution réelle)
-- **Studio de validation final** : scopes universels et multi-documents, routeur `/api/validation`, runs isolés, copies de travail, snapshots logiques, diffs, rapports et décisions accept/reject au niveau run. Migrations 005/006, curriculum multi-document et profils FastEmbed `mean` 384d compatibles intégrés.
-- Sécurité : résolution stricte avant mutation, DTO sans champs supplémentaires, DB sanitisée, ownership cross-document contrôlé, éditions humaines et baseline protégées, acceptation atomique; readonly masque Validation en 404. Suivi UI par polling ciblé 5 s, pas de SSE Validation dédié.
-- Limite : une requalification mutante avec `run_id` renvoie 409 faute de staging des artefacts; elle ne touche jamais les tables officielles par contournement.
-- 149/149 tests pytest verts en mode normal ET faible mémoire ; Vitest 13/13 ; TypeScript/build Vite 8.2.2 verts ; npm audit 0 vulnérabilité.
+- **Studio de validation final** : scopes universels et multi-documents, routeur `/api/validation`, runs isolés, snapshots logiques, diffs, rapports et décisions accept/reject au niveau run. Les migrations additives/idempotentes 005/006/**007** couvrent notamment la copie SQLite, l'opération, les batchs, les états/progrès, les erreurs et les dates; `/execute` lance réellement le pipeline sur `validation_test_<run>.sqlite`, jamais sur l'officielle.
+- **Inspecteur et navigation** : scans et binaires d'artefacts baseline/working sont servis depuis la bonne base; TOC, curriculum et benchmarks sont lus dans la working DB. Les deep-links Validation `db/run/doc/page` survivent à l'authentification via un `next` interne validé; les TOC legacy sans `parent_id` restent inspectables.
+- **Sécurité release** : résolution stricte avant mutation, DTO sans champs supplémentaires, DB sanitisée, ownership cross-document contrôlé, éditions humaines protégées et acceptation atomique. Le hash optimiste couvre aussi les scans et benchmarks promus. Le namespace `validation_test_` est masqué des listings/health et interdit aux mutations, exports et duplications génériques; seules les routes Validation pilotent ses copies. Readonly masque Validation en 404.
+- **Exécution terminale** : l'annulation supprime tous les jobs reprenables de la copie et stoppe ses batchs; un run `CANCELLED` ne peut être ni repris par recovery ni ré-exécuté. Une requalification **mutante** avec `run_id` n'est permise que sur la working DB physique d'un run `COMPLETED`, puis resynchronise `working_json`; elle ne mute jamais l'officielle.
+- **Preuves finales release** : pytest **160/160** en mode normal ET **160/160** avec `RAGDOM_LOW_MEMORY=true`; Vitest **17/17**; TypeScript/build Vite **8.2.2** vert (**3 711 modules**); `npm audit` **0 vulnérabilité**.
 - Recherche RRF V5.1 : chaque canal BM25/vectoriel est filtré par son seuil avant fusion ; rangs FTS uniques par chunk et déterministes.
 - Ingestion réelle 230/230 pages : sommaire 45 entrées (dérivé des titres),
   613 formules LaTeX, 230 scans WebP, corrections typées, réponse Gemini réelle

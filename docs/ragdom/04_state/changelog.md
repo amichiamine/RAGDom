@@ -1,9 +1,12 @@
-# 2026-08-23 — Validation end-to-end sur copie SQLite physique
+# 2026-08-23 — Correctifs release finaux Validation
 
-- Migration 007 additive/idempotente : working DB, opération, batchs, état/progression, erreur et dates d'exécution.
-- `create_run` utilise `Connection.backup`; `/execute` lance le vrai pipeline sur `validation_test_<run>.sqlite` uniquement, avec polling et reprise.
-- Accept scoped transactionnel depuis la copie; reject supprime DB/WAL/SHM; source absente → BLOCKED explicite; cancel cible uniquement les batchs de la copie.
-- UI create→execute, progression/états/erreurs réels; tests temporaires sans LLM/VLM externe.
+- Migration **007** additive/idempotente : working DB, opération, batch(s), état/progression, erreur, dates et index. `create_run` utilise `Connection.backup`; `/execute` lance le vrai pipeline uniquement sur `validation_test_<run>.sqlite`.
+- Inspecteur complet : scans/binaires d'artefacts baseline et working depuis leur base, TOC/curriculum/benchmarks depuis la working DB; TOC legacy sans `parent_id` compatible.
+- Accept scoped transactionnel : hash canonique étendu aux scans et benchmarks promus, conflits officiels fermés en 409; reject supprime DB/WAL/SHM; source absente → `BLOCKED` explicite.
+- Cancel non reprenable : jobs actifs/reprenables supprimés de la copie, batchs stoppés, recovery nul, nouveau `/execute` refusé.
+- Namespace `validation_test_` masqué et protégé des exports, duplications et mutations génériques. Requalification mutante `run_id` seulement sur la working DB d'un run `COMPLETED`, jamais sur l'officielle.
+- Auth : deep-links internes Validation conservés après login; destinations externes/inconnues refusées.
+- Preuves finales : pytest **160/160** normal et faible mémoire, Vitest **17/17**, build Vite **8.2.2** vert (**3 711 modules**), `npm audit` **0 vulnérabilité**.
 
 # 2026-08-22 — Studio de validation final
 
@@ -12,8 +15,8 @@
 - Migrations 005/006 : schéma Validation, provenance, ownership curriculum terms/programs/assessments/links, `baseline_hash`, événements document/page et unicité des jobs actifs.
 - Curriculum multi-livres non destructif et profil FastEmbed compatible MiniLM-L12-v2 / pooling **mean** / 384d normalisées, sans réindexation silencieuse.
 - UI Automation : builder/preview, scopes, deep-links, liste/pagination, inspecteur/diff, restauration et confirmation. Polling ciblé toutes les 5 s; aucun SSE Validation dédié. Readonly : UI désactivée et routes masquées en 404.
-- Limite : requalification mutante avec `run_id` = 409 faute de staging des artefacts de copie de travail; `dry_run` reste autorisé.
-- Qualité : pytest **149/149** normal + **149/149** faible mémoire, Vitest **13/13**, build Vite **8.2.2** vert, React Router DOM **7.18.2**, `npm audit` **0 vulnérabilité**.
+- Correctif release ultérieur : la requalification mutante avec `run_id` est autorisée exclusivement sur la working DB isolée d'un run `COMPLETED`, puis resynchronisée; jamais sur l'officielle.
+- Qualité finale de clôture : pytest **160/160** normal + **160/160** faible mémoire, Vitest **17/17**, build Vite **8.2.2** vert (**3 711 modules**), React Router DOM **7.18.2**, `npm audit` **0 vulnérabilité**.
 
 # 2026-08-22 — V5.1 : fusion RRF filtrée par canal
 
