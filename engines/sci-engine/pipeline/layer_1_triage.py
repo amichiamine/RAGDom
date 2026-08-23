@@ -17,7 +17,8 @@ def _get_layout_engine():
     if _layout_engine["tried"]:
         return _layout_engine["engine"]
     _layout_engine["tried"] = True
-    if os.environ.get("RAGDOM_OFFLINE", "false").lower() == "true":
+    if (os.environ.get("RAGDOM_OFFLINE", "false").lower() == "true"
+            or os.environ.get("RAGDOM_LOW_MEMORY", "false").lower() == "true"):
         return None
     try:
         from rapid_layout import RapidLayout

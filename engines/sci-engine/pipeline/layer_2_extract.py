@@ -14,7 +14,7 @@ import uuid
 
 import cv2
 
-_engines = {"tried": False, "ocr": None, "latex": None, "table": None}
+_engines = {"tried": set(), "ocr": None, "latex": None, "table": None}
 _FORMULA_RE = re.compile(r"\$\$(.+?)\$\$|\$([^$\n]{2,200})\$", re.S)
 _FIGURE_MARKER_RE = re.compile(r"^[ \t]*\[\[FIGURE:(\d+)\]\][ \t]*$", re.M)
 # Seuil « cadre quasi-pleine-page » : au-delà, un crop n'est NI qualifié NI ancré
@@ -22,22 +22,29 @@ _FIGURE_MARKER_RE = re.compile(r"^[ \t]*\[\[FIGURE:(\d+)\]\][ \t]*$", re.M)
 _AREA_RATIO_MAX = 0.70
 
 
-def _get_engines():
-    if _engines["tried"]:
-        return _engines
-    _engines["tried"] = True
+def _get_engines(need_ocr=False, need_latex=False, need_table=False):
+    """Load only engines required by this page; never preload the full ONNX stack."""
+    tried = _engines["tried"]
     offline = os.environ.get("RAGDOM_OFFLINE", "false").lower() == "true"
-    try:
-        from rapidocr_onnxruntime import RapidOCR  # modèles PP-OCRv4 embarqués (pip)
-        _engines["ocr"] = RapidOCR()
-    except Exception:  # noqa: BLE001
-        _engines["ocr"] = None
-    if not offline:
+    low_memory = os.environ.get("RAGDOM_LOW_MEMORY", "false").lower() == "true"
+    if need_ocr and "ocr" not in tried:
+        tried.add("ocr")
+        try:
+            from rapidocr_onnxruntime import RapidOCR  # modèles PP-OCRv4 embarqués (pip)
+            _engines["ocr"] = RapidOCR()
+        except Exception:  # noqa: BLE001
+            _engines["ocr"] = None
+    # LaTeX/table models are optional refiners. On 512 Mo they are deliberately
+    # skipped; the crop is preserved for later targeted requalification.
+    if need_latex and not offline and not low_memory and "latex" not in tried:
+        tried.add("latex")
         try:
             from rapid_latex_ocr import LatexOCR
             _engines["latex"] = LatexOCR()
         except Exception:  # noqa: BLE001 — Tier 2 (VLM) prendra le relais
             _engines["latex"] = None
+    if need_table and not offline and not low_memory and "table" not in tried:
+        tried.add("table")
         try:
             from rapid_table import RapidTable
             _engines["table"] = RapidTable()
@@ -92,8 +99,12 @@ def _maybe_vlm_page_ocr(ctx: dict, current_text: str):
     Tier 1 est illisible. Rotation de clés/providers gérée par le noyau
     (llm.key_manager.generate) ; aucun provider joignable → None (repli Tier 1,
     le pipeline ne s'arrête jamais ici). Désactivable : RAGDOM_VLM_PAGE_OCR=false."""
-    if os.environ.get("RAGDOM_VLM_PAGE_OCR", "auto").lower() == "false":
+    vlm_mode = os.environ.get("RAGDOM_VLM_PAGE_OCR", "auto").lower()
+    if vlm_mode == "false":
         return None
+    if (os.environ.get("RAGDOM_LOW_MEMORY", "false").lower() == "true"
+            and vlm_mode != "true"):
+        return None  # 512 Mo : évite l'image pleine page/base64 ; opt-in explicite seulement
     if not _looks_unreadable(current_text):
         return None
     try:
@@ -246,7 +257,10 @@ def _anchor_artifacts(markdown: str, artifacts: list, height_px: int) -> str:
 
 def run(ctx: dict) -> dict:
     started = time.perf_counter()
-    engines = _get_engines()
+    block_types = {block.get("type") for block in ctx.get("layout_blocks", [])}
+    engines = _get_engines(need_ocr=not ctx["is_native_vector"],
+                           need_latex=(not ctx["is_native_vector"] and "formula" in block_types),
+                           need_table=(not ctx["is_native_vector"] and "table" in block_types))
     page = ctx["_fitz"]["page"]
     doc = ctx["_fitz"]["doc"]
     page_number = ctx["job"]["page_number"]

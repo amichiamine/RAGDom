@@ -99,7 +99,10 @@ def _process_block(ctx, block, engines):
 def run(ctx: dict) -> dict:
     started = time.perf_counter()
     workers = max(2, min(3, config.RAGDOM_INTRA_PAGE_WORKERS))
-    engines = _v1._get_engines()
+    block_types = {block.get("type") for block in ctx.get("layout_blocks", [])}
+    engines = _v1._get_engines(need_ocr=not ctx["is_native_vector"],
+                               need_latex=(not ctx["is_native_vector"] and "formula" in block_types),
+                               need_table=(not ctx["is_native_vector"] and "table" in block_types))
     page = ctx["_fitz"]["page"]
     doc = ctx["_fitz"]["doc"]
     page_number = ctx["job"]["page_number"]
