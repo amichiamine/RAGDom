@@ -4,7 +4,7 @@
 - `npm run dev` À LA RACINE : lance backend (venv auto-détecté, port libre auto)
   + frontend Vite (concurrently, scripts/dev-backend.mjs). Modes : --setup, --pytest.
 - Backend seul : cd backend && python main.py (chemins auto-déduits, .env pré-rempli).
-- Tests backend : `cd backend && python -m pytest tests/ -q --ignore=tests/bench_ram_100p.py` → **164/164**; rejouer aussi avec `RAGDOM_LOW_MEMORY=true` → **164/164**.
+- Tests backend : `cd backend && python -m pytest tests/ -q --ignore=tests/bench_ram_100p.py` → **165/165**; rejouer aussi avec `RAGDOM_LOW_MEMORY=true` → **165/165**.
 - Frontend : `cd frontend && npm test` → **17/17**; `npm run build` → TypeScript strict + Vite **8.2.2**, **3 711 modules**; `npm audit` → **0 vulnérabilité**. React Router DOM est verrouillé en **7.18.2**.
 
 ## Exploitation du Studio de validation
@@ -57,7 +57,7 @@ au build Docker (déjà câblé pour corpus-1am-v1) → databases_publiees/.
   Le listing des modèles peut réussir alors que `generateContent` renvoie 403 :
   tester la GÉNÉRATION, jamais seulement le listing.
 - pkill/pgrep avec motif de sa propre commande = suicide shell → kill par PID.
-- Render FREE : 512 Mo → `RAGDOM_LOW_MEMORY=true` obligatoire. Les moteurs RapidOCR/LaTeX/Table sont lazy; rapid-layout, rapid-latex-ocr et rapid-table ne sont pas préchargés, RapidOCR ne l'est que pour une page scannée. `RAGDOM_VLM_PAGE_OCR=auto` est désactivé dans ce mode; utiliser `true` seulement comme opt-in explicite. Les crops/images restent conservés pour requalification. Deux recettes live antérieures au hotfix ont provoqué un restart Render juste après le lancement de la page 1.
+- Render FREE : 512 Mo → `RAGDOM_LOW_MEMORY=true` obligatoire. Le scan passe alors de 300 à **150 DPI**; deskew, Sauvola, rapid-layout, rapid-latex-ocr et rapid-table sont sautés. RapidOCR reste activé par défaut : seul moteur ONNX, il n'est chargé que pour une page scannée; le désactiver au besoin avec `RAGDOM_LOW_MEMORY_OCR=false`. Une page native ne charge aucun OCR. `RAGDOM_VLM_PAGE_OCR=auto` est désactivé dans ce mode; utiliser `true` seulement comme opt-in explicite. `page_scans` persiste le DPI réel. Deux recettes live antérieures au durcissement ont provoqué un restart Render juste après le lancement de la page 1; la prochaine recette doit confirmer un run page 1 sans restart.
 - google-genai : version PyPI réelle = 0.8.0 (0.8.3 n'existe pas).
 - Dockerfile python:3.11-slim : PAS de curl par défaut (installé désormais).
 - Les listes de modèles Gemini contiennent des modèles 404 (dépréciés nouveaux

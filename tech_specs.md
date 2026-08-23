@@ -148,7 +148,7 @@ CREATE TABLE IF NOT EXISTS scientific_artifacts (
     render_config_json TEXT,                  -- Config du renderer frontend ex: {"renderer":"katex"}
     caption            TEXT,                  -- Légende/description textuelle
     searchable_text    TEXT NOT NULL,         -- Texte indexable FTS5 (caption + raw_data simplifié)
-    bounding_box_json  TEXT,                  -- {"x0":120,"y0":340,"x1":280,"y1":370} coordonnées 300 DPI
+    bounding_box_json  TEXT,                  -- pixels dans le référentiel dpi de page_scans (150 ou 300)
     is_human_edited    INTEGER DEFAULT 0,     -- V3.2 : corrigé/importé manuellement — protégé des purges et ré-ingestions
     updated_at         DATETIME,              -- V3.5 : dernière correction/import manuel
     created_at         DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -171,9 +171,9 @@ CREATE TABLE IF NOT EXISTS page_scans (
     id           TEXT PRIMARY KEY,
     document_id  TEXT NOT NULL,
     page_number  INTEGER NOT NULL,
-    width_px     INTEGER NOT NULL,       -- dimensions du scan 300 DPI
+    width_px     INTEGER NOT NULL,       -- dimensions du scan au dpi réellement utilisé
     height_px    INTEGER NOT NULL,       -- (base de la conversion BBox → CSS %)
-    dpi          INTEGER DEFAULT 300,
+    dpi          INTEGER DEFAULT 300,    -- 300 normal; 150 sous RAGDOM_LOW_MEMORY=true
     image_webp   BLOB NOT NULL,          -- scan pleine résolution (rendu, overlay diff, modale HD)
     thumb_webp   BLOB,                   -- vignette ~256px (galeries virtualisées, previews)
     created_at   DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -425,6 +425,7 @@ L'agent ne doit **pas inventer** de structures DTO/JSON. Chaque couche du pipeli
   "blur_variance": 142.5,
   "deskew_angle": -1.2,
   "is_native_vector": true,
+  "dpi": 300,
   "width_px": 2480,
   "height_px": 3508,
   "restored_image_ptr": "memory://0x7f3a2b1c",
@@ -436,7 +437,7 @@ L'agent ne doit **pas inventer** de structures DTO/JSON. Chaque couche du pipeli
 - Si `status == "INVALID_SOURCE"` → Le pipeline s'arrête pour ce document, met à jour `pipeline_jobs.status = 'INVALID_SOURCE'`, et passe au document suivant dans la queue.
 - Si `status == "FAILED"` → Incrémente `retry_count`. Si `retry_count >= 3` → passe à `QUARANTINE`.
 - `restored_image_ptr` est un pointeur mémoire natif (PyMuPDF Pixmap). Ne jamais le sérialiser sur disque.
-- **(V3.5)** `width_px`/`height_px` sont les dimensions du scan restauré 300 DPI : la Couche 7 les persiste dans `page_scans` avec l'encodage WebP du Pixmap (`image_webp`) et sa vignette (`thumb_webp`) — c'est la source unique des dimensions pour la conversion BBox → CSS %.
+- **(V3.5, mode 512 Mo final)** `dpi` vaut **300** en mode normal et **150** uniquement avec `RAGDOM_LOW_MEMORY=true`. `width_px`/`height_px` sont les dimensions du scan à ce DPI réel; la Couche 7 persiste les trois valeurs dans `page_scans` avec l'encodage WebP du Pixmap (`image_webp`) et sa vignette (`thumb_webp`). Les BBox utilisent le même référentiel, source unique de la conversion BBox → CSS %.
 
 ### **2.2 Couche 1 → Couche 2 : TriageResult (BBoxes)**
 
@@ -638,12 +639,12 @@ Extension du contrat D3-B : au-delà de la réparation VLM par bloc (Couche 5), 
 
 * **Déclenchement :**
   * **Mode normal :** sur les pages scannées (non natives), l'OCR VLM est tenté en mode `auto` après RapidOCR; sur les pages natives vectorielles, il n'est tenté que si le texte extrait est jugé illisible par la gate qualité générique (`_looks_unreadable`) — cas des polices non-Unicode. La gate ne se déclenche jamais sur du texte arabe/latin sain (détection : longueur, ratio de tokens ultra-courts, mots longs sans voyelles, seuil arabe ≥ 0.3 = lisible).
-  * **Mode 512 Mo (`RAGDOM_LOW_MEMORY=true`) :** le mode `auto` est désactivé pour éviter l'encodage/base64 d'une image pleine page. L'OCR VLM de page entière n'est autorisé que par l'opt-in explicite `RAGDOM_VLM_PAGE_OCR=true`; `false` le désactive dans tous les modes.
+  * **Mode Render 512 Mo (`RAGDOM_LOW_MEMORY=true`) :** le scan passe de **300 à 150 DPI uniquement dans ce mode**. Deskew et Sauvola sont sautés (binarisation Otsu légère), comme rapid-layout, rapid-latex-ocr et rapid-table. Le mode VLM `auto` est désactivé pour éviter l'encodage/base64 d'une image pleine page; l'OCR VLM n'est autorisé que par l'opt-in explicite `RAGDOM_VLM_PAGE_OCR=true`.
 * **Sortie :** transcription **Markdown fidèle + LaTeX** (`$...$` / `$$...$$`), titres `##/###`, texte arabe exact (RTL préservé), tableaux Markdown, numéros d'exercices conservés (prompt `_VLM_OCR_PROMPT`).
 * **Provider vision :** appel `llm.key_manager.generate(prompt, image_b64=...)` — le noyau gère la **rotation de clés/providers** (priorité croissante, 429/403 → clé suivante, 401 → désactivation, 5xx → backoff). Le provider retenu est tracé dans `ctx["vlm"]["page_ocr_provider"]`. Aucun provider joignable → `None` : **repli sur le Tier 1**, le pipeline ne s'arrête jamais.
 * **Repli hors-ligne et conservation :** RapidOCR (modèles PP-OCRv4 embarqués dans le paquet) reste le premier extracteur des scans; le VLM ne fait que le **surclasser** quand il répond. Les crops/images des formules et tableaux non raffinés sont toujours conservés (`raw_binary`, `needs_vlm`) pour une requalification ciblée ultérieure.
-* **Cycle de vie des moteurs :** RapidOCR, rapid-latex-ocr et rapid-table sont des singletons chargés à la demande selon les besoins réels de la page, jamais tous préchargés. Avec `RAGDOM_LOW_MEMORY=true`, rapid-layout, rapid-latex-ocr et rapid-table sont sautés; RapidOCR n'est instancié que lorsque la page est scannée.
-* **Flag :** `RAGDOM_VLM_PAGE_OCR` — `auto` (défaut : comportement normal, mais désactivé si `RAGDOM_LOW_MEMORY=true`) | `false` (Tier 1 seul partout) | `true` (opt-in explicite, y compris sur 512 Mo). Le moteur retenu est reporté dans `engine_used` (`VLM-OCR` en cas de succès).
+* **Cycle de vie des moteurs en 512 Mo :** RapidOCR reste activé par défaut et devient le **seul moteur ONNX chargé**, uniquement lorsqu'une page est scannée. `RAGDOM_LOW_MEMORY_OCR=false` le désactive. Une page native utilise son texte vectoriel sans charger aucun OCR. `page_scans` persiste le DPI réellement utilisé (150 ou 300), et les BBox sont calculées dans ce même référentiel.
+* **Flags :** `RAGDOM_VLM_PAGE_OCR` — `auto` (défaut normal, neutralisé si `RAGDOM_LOW_MEMORY=true`) | `false` (Tier 1 seul partout) | `true` (opt-in explicite, y compris sur 512 Mo). `RAGDOM_LOW_MEMORY_OCR` — `true` par défaut; `false` désactive RapidOCR uniquement dans le profil faible mémoire. Le moteur retenu est reporté dans `engine_used` (`VLM-OCR` en cas de succès).
 
 ---
 
@@ -1029,12 +1030,13 @@ RAGDOM_READONLY=false   # true = mode consultation : les routes d'ADMINISTRATION
 RAGDOM_AUTH_TOKEN=      # Jeton d'administration (Palier 3). Si défini, les routes admin exigent « Authorization: Bearer <jeton> ». Vide = aucun contrôle (local nominal).
 RAGDOM_ALLOW_REVEAL=true   # Autorise la révélation en clair des clés LLM (/api/llm/keys/{id}/reveal). DOIT être false sur tout déploiement web.
 RAGDOM_ASK_RATE_PER_MIN=0   # Quota /api/search/ask par IP et par minute (0 = désactivé, défaut local ; >0 → 429 au-delà).
-RAGDOM_LOW_MEMORY=false   # true (≤512 Mo) : BM25 seul; rapid-layout/rapid-latex-ocr/rapid-table non préchargés; RapidOCR seulement sur page scannée; VLM pleine page auto désactivé.
+RAGDOM_LOW_MEMORY=false   # true (≤512 Mo) : scan 150 DPI; BM25 seul; deskew/Sauvola/rapid-layout/rapid-latex-ocr/rapid-table sautés; VLM pleine page auto désactivé.
+RAGDOM_LOW_MEMORY_OCR=true   # Profil 512 Mo : RapidOCR reste le seul moteur ONNX, chargé seulement sur page scannée; false le désactive. Page native : aucun OCR.
 RAGDOM_SEED_LLM_KEYS=   # Seed IDEMPOTENT au démarrage (disque éphémère). Entrées séparées par virgules/retours ligne : « provider:clé » ou « provider:clé:modèle ». Toute entrée absente est insérée dans llm_keys et son provider activé. JAMAIS de vraie clé dans le dépôt.
 RAGDOM_PUBLISHED_DBS=  # Dossier des bases pré-ingérées à installer au démarrage (défaut : {racine}/databases_publiees). Chaque .sqlite absent de DATABASES_DIR y est copié (bibliothèque pré-chargée à chaque réveil).
 ```
 
-**Sémantique exacte (source : `backend/config.py`, `backend/.env`, `backend/main.py`, `backend/db/connection.py`, `backend/core/orchestrator.py` et pipeline sci-engine) — (MAJ 2026-08-23) :** `RAGDOM_READONLY`, `RAGDOM_ALLOW_REVEAL` et `RAGDOM_LOW_MEMORY` sont booléens (`"true"` insensible à la casse). `RAGDOM_AUTH_TOKEN` vide vaut `None` (pas de contrôle). `RAGDOM_ASK_RATE_PER_MIN` et `RAGDOM_INTRA_PAGE_WORKERS` sont des entiers (ce dernier borné à `[1, 3]`). `RAGDOM_VLM_PAGE_OCR` : `false` désactive, `auto` suit la gate normale mais est neutralisé avec `RAGDOM_LOW_MEMORY=true`, et seul `true` traverse explicitement ce garde-fou low-memory. `RAGDOM_SEED_LLM_KEYS` est relu à chaque `init_config_db()` (seed idempotent). `RAGDOM_PUBLISHED_DBS` est lu au lifespan `main.py` (copie non destructive : jamais d'écrasement d'une base déjà présente). `RAGDOM_TOC_INCREMENTAL_EVERY` est un entier lu directement par l'orchestrateur (`_maybe_build_toc_incremental`) — défaut `10`, `≤ 0` désactive la construction incrémentale (le sommaire de repli n'est alors construit qu'au finalize) ; valeur non entière → repli sur `10`.
+**Sémantique exacte (source : `backend/config.py`, `backend/.env`, `backend/main.py`, `backend/db/connection.py`, `backend/core/orchestrator.py` et pipeline sci-engine) — (MAJ 2026-08-23) :** `RAGDOM_READONLY`, `RAGDOM_ALLOW_REVEAL` et `RAGDOM_LOW_MEMORY` sont booléens (`"true"` insensible à la casse). En faible mémoire, le rendu est 150 DPI contre 300 normalement et `page_scans.dpi` reçoit la valeur effective. `RAGDOM_LOW_MEMORY_OCR` est lu directement par la Couche 2 : toute valeur autre que `"true"` désactive RapidOCR dans ce profil; par défaut il reste le seul moteur ONNX chargé, uniquement sur page scannée, tandis qu'une page native ne charge aucun OCR. `RAGDOM_AUTH_TOKEN` vide vaut `None` (pas de contrôle). `RAGDOM_ASK_RATE_PER_MIN` et `RAGDOM_INTRA_PAGE_WORKERS` sont des entiers (ce dernier borné à `[1, 3]`). `RAGDOM_VLM_PAGE_OCR` : `false` désactive, `auto` suit la gate normale mais est neutralisé avec `RAGDOM_LOW_MEMORY=true`, et seul `true` traverse explicitement ce garde-fou low-memory. `RAGDOM_SEED_LLM_KEYS` est relu à chaque `init_config_db()` (seed idempotent). `RAGDOM_PUBLISHED_DBS` est lu au lifespan `main.py` (copie non destructive : jamais d'écrasement d'une base déjà présente). `RAGDOM_TOC_INCREMENTAL_EVERY` est un entier lu directement par l'orchestrateur (`_maybe_build_toc_incremental`) — défaut `10`, `≤ 0` désactive la construction incrémentale (le sommaire de repli n'est alors construit qu'au finalize) ; valeur non entière → repli sur `10`.
 
 **Équivalence v1/v2 de la Couche 2 (Phase 6 / D4-B — MAJ 2026-08-22, source : `engines/sci-engine/pipeline/layer_2_extract_v2.py`) :** lorsque `RAGDOM_INTRA_PAGE_WORKERS ≥ 2`, l'orchestrateur charge la variante parallèle `layer_2_extract_v2`. Cette variante produit des sorties **strictement équivalentes** à la v1 séquentielle : après le pool de blocs (parallélisé, ordre déterministe), elle exécute la **MÊME qualification VLM séquentielle** et le **MÊME ancrage in-situ** que la v1 en réutilisant directement ses helpers (`_v1._vlm_qualifier`, `_v1._apply_qualification`, `_v1._anchor_artifacts`, seuil `_v1._AREA_RATIO_MAX`) — aucune logique moteur dupliquée, exclusion identique des cadres > 0,70 d'`area_ratio`, `raw_binary` intouché, aucun arrêt de pipeline. Cf. Blueprint §5.2.
 
@@ -1187,7 +1189,7 @@ vers `/sources/`, `/pipeline-set/` ni aucun asset disque n'est autorisé à la l
 - **Texte du flux** : `document_chunks.content_markdown` (Markdown + LaTeX `$…$` / `$$…$$`).
 - **Sommaire hiérarchique** : `document_toc` (arbre `parent_id` / `level` 1→3).
 - **Scans de pages** : `page_scans` (`image_webp` pleine résolution BLOB + `thumb_webp`
-  vignette + `width_px` / `height_px` / `dpi`), pré-requis de la conversion BBox → CSS %.
+  vignette + `width_px` / `height_px` / `dpi` réel : 300 normal, 150 faible mémoire), pré-requis de la conversion BBox → CSS %.
 - **Artefacts** : `scientific_artifacts` portant, pour CHAQUE artefact :
   - `raw_data` : payload textuel **structuré** (LaTeX, SVG, Markdown, SMILES, Mermaid,
     JSON Plotly…) — peut être `NULL` ;
@@ -1195,7 +1197,7 @@ vers `/sources/`, `/pipeline-set/` ni aucun asset disque n'est autorisé à la l
     modifiée ni supprimée par une requalification ;
   - `render_config_json` : configuration du renderer (§12) ;
   - `caption` : légende textuelle ;
-  - `bounding_box_json` : dict `{"x0","y0","x1","y1"}` en pixels du scan (300 DPI).
+  - `bounding_box_json` : dict `{"x0","y0","x1","y1"}` en pixels du scan, dans le référentiel `page_scans.dpi` réel (150 ou 300).
 - **Recherche plein-texte** : table FTS5 `search_index` (peuplée par triggers).
 - **Recherche vectorielle** : `vec_chunks` (sqlite-vec) **si présente** ; son absence est
   un état valide (repli BM25, §1 Règle Conditionnelle) — le consommateur ne doit jamais
@@ -1501,4 +1503,4 @@ Limite de requalification : `POST /api/pipeline/requalify-artifacts` **mutant** 
 
 ### **16.6 Preuves de qualité**
 
-État final vérifié sur `feat/validation-integration` après le hotfix faible mémoire : pytest **164/164** en mode normal et **164/164** avec `RAGDOM_LOW_MEMORY=true`; Vitest **17/17**; build TypeScript strict + Vite **8.2.2** vert (**3 711 modules**); `react-router-dom` **7.18.2**; `npm audit` **0 vulnérabilité**. Le correctif répond à deux recettes live ayant provoqué un restart Render après le lancement de la page 1.
+État final vérifié sur `feat/validation-integration` après le durcissement Render 512 Mo : pytest **165/165** en mode normal et **165/165** avec `RAGDOM_LOW_MEMORY=true`; Vitest **17/17**; build TypeScript strict + Vite **8.2.2** vert (**3 711 modules**); `react-router-dom` **7.18.2**; `npm audit` **0 vulnérabilité**. Le correctif répond à deux recettes live ayant provoqué un restart Render après le lancement de la page 1; la prochaine recette doit confirmer un run de la page 1 sans restart.

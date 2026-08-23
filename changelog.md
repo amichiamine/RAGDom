@@ -7,12 +7,13 @@
 
 ---
 
-## 2026-08-23 — Hotfix final faible mémoire
+## 2026-08-23 — Mode Render 512 Mo final
 
-- RapidOCR, rapid-latex-ocr et rapid-table sont chargés à la demande selon les besoins de la page. Avec `RAGDOM_LOW_MEMORY=true`, rapid-layout, rapid-latex-ocr et rapid-table ne sont pas préchargés; RapidOCR est instancié uniquement pour une page scannée.
-- L'OCR VLM de page entière en mode `auto` est neutralisé sur 512 Mo; seul l'opt-in explicite `RAGDOM_VLM_PAGE_OCR=true` le réactive. Les crops/images non raffinés restent conservés pour requalification ultérieure.
-- Cause opérationnelle : deux recettes live ont provoqué un restart Render après le lancement de la page 1 avant ce hotfix.
-- Preuves finales : pytest **164/164** normal et **164/164** faible mémoire; Vitest **17/17**; `npm audit` **0 vulnérabilité**.
+- Sous `RAGDOM_LOW_MEMORY=true` uniquement, le scan passe de **300 à 150 DPI**; deskew, Sauvola, rapid-layout, rapid-latex-ocr et rapid-table sont sautés.
+- RapidOCR reste activé par défaut : il est le **seul moteur ONNX chargé**, uniquement pour une page scannée, et peut être désactivé avec `RAGDOM_LOW_MEMORY_OCR=false`. Une page native ne charge aucun OCR.
+- L'OCR VLM de page entière en mode `auto` est neutralisé sur 512 Mo; seul l'opt-in explicite `RAGDOM_VLM_PAGE_OCR=true` le réactive. `page_scans` persiste le DPI réel (150 ou 300), et les crops/images non raffinés restent conservés pour requalification ultérieure.
+- Cause opérationnelle : **deux recettes live** ont provoqué un restart Render après le lancement de la page 1 avant ce durcissement. La prochaine recette doit confirmer un run de la page 1 sans restart.
+- Preuves finales : pytest **165/165** normal et **165/165** faible mémoire; Vitest **17/17**; `npm audit` **0 vulnérabilité**.
 
 ## 2026-08-23 — Correctifs release finaux du Studio de validation
 

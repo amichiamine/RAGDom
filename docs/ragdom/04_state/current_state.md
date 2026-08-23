@@ -1,6 +1,6 @@
 # État Actuel du Projet RAGDom
 
-**Phase :** Hotfix final faible mémoire intégré sur `feat/validation-integration`, documentation de clôture et preuves finales à jour.
+**Phase :** Mode Render 512 Mo final intégré sur `feat/validation-integration`, documentation de clôture et preuves finales à jour.
 **Date de mise à jour :** 2026-08-23
 
 > **Mémoire de reprise :** `.hyperagent/` à la racine du dépôt sert de mémoire de
@@ -19,8 +19,8 @@
 - [x] **Embedding compatible** : FastEmbed MiniLM-L12-v2, pooling `mean`, 384d normalisées et contrat complet; profil absent/incompatible/multiple bloque le vectoriel, aucune réindexation silencieuse.
 - [x] **UI Validation Studio** : builder/preview, scope selector, runs paginés/deep-linkés, scans et artefacts baseline/working, TOC/curriculum/benchmarks de working DB, restaurations et confirmation. TOC legacy sans `parent_id` compatible; deep-link `db/run/doc/page` préservé après auth. Polling ciblé 5 s, aucun SSE Validation dédié. Readonly : contrôles désactivés et API masquée en 404.
 - [x] **Recherche hybride V5.1** : seuil BM25 et seuil vectoriel appliqués avant rangs/RRF, rang FTS unique par chunk, ordre stable.
-- [x] **Hotfix 512 Mo** : RapidOCR/LaTeX/Table sont chargés à la demande. Avec `RAGDOM_LOW_MEMORY=true`, rapid-layout, rapid-latex-ocr et rapid-table ne sont pas préchargés; RapidOCR seulement sur page scannée; VLM page entière `auto` désactivé, avec opt-in explicite `RAGDOM_VLM_PAGE_OCR=true`. Les crops/images restent conservés pour requalification. Deux recettes live avaient redémarré Render après le lancement de la page 1 avant ce correctif.
-- [x] **Qualité finale** : pytest **164/164** normal et **164/164** avec `RAGDOM_LOW_MEMORY=true`; Vitest **17/17**; TypeScript/build Vite **8.2.2** verts (**3 711 modules**); `npm audit` **0 vulnérabilité**. Les E2E Validation désactivent tout LLM/VLM externe.
+- [x] **Mode Render 512 Mo final** : avec `RAGDOM_LOW_MEMORY=true`, le scan passe seul de 300 à **150 DPI**; deskew, Sauvola, rapid-layout, rapid-latex-ocr et rapid-table sont sautés. RapidOCR reste activé par défaut et devient le seul moteur ONNX chargé, uniquement sur page scannée; `RAGDOM_LOW_MEMORY_OCR=false` le désactive. Une page native ne charge aucun OCR. VLM page entière `auto` désactivé, avec opt-in explicite `RAGDOM_VLM_PAGE_OCR=true`; `page_scans` persiste le DPI réel. Deux recettes live avaient redémarré Render après le lancement de la page 1 avant ce durcissement.
+- [x] **Qualité finale** : pytest **165/165** normal et **165/165** avec `RAGDOM_LOW_MEMORY=true`; Vitest **17/17**; TypeScript/build Vite **8.2.2** verts (**3 711 modules**); `npm audit` **0 vulnérabilité**. Les E2E Validation désactivent tout LLM/VLM externe.
 - [x] **Lot 1 sprint** : GET /library/page-scans (manifeste galerie), agrégats curriculum
       (per_term + global en SQL), filtres chunks (pedagogical_type/page_start/page_end/toc_id)
 - [x] **Frontend pixel-perfect COMPLET (vagues A/B/C/D + audit croisé)** :
@@ -46,12 +46,12 @@
 
 ## RESTE À FAIRE (machine cible uniquement)
 1. ~~npm install + tsc + vite build~~ **REJOUÉ sur la branche d'intégration** : TypeScript strict 0 erreur, build Vite 8.2.2 OK (**3 711 modules**), Vitest **17/17** et npm audit **0 vulnérabilité**.
-2. Push de `feat/validation-integration`, déploiement, puis recette live pixel-perfect du Studio sur base multi-livres réelle (checklist Lot 11 du sprint) + modèles rapid-*/fastembed au 1er run (`RAGDOM_OFFLINE=false`).
+2. Push de `feat/validation-integration`, déploiement, puis recette live pixel-perfect du Studio sur base multi-livres réelle (checklist Lot 11 du sprint). La première vérification obligatoire est un run de la page 1 sous 512 Mo sans restart Render; RapidOCR doit rester l'unique modèle ONNX chargé sur cette page scannée.
 3. Reliquat mineur PARTIE 8 hors Studio : tests navigateur Playwright, toggle densité, sélection en masse, Inspecteur de Cycle de Vie. Les tests unitaires Vitest sont présents et verts (**17/17**).
 4. Chiffrement des clés LLM au repos (reliquat Web-Ready indépendant du Studio).
 
 ## Prochaine Action Prioritaire
-**Push → déploiement → recette live.** L'intégration de `feat/validation-integration` et le hotfix faible mémoire sont terminés : backend **164/164** dans les deux modes, frontend **17/17**, build Vite 8.2.2 (**3 711 modules**) et audit npm à zéro.
+**Push → déploiement → recette live.** L'intégration de `feat/validation-integration` et le mode Render 512 Mo final sont terminés : backend **165/165** dans les deux modes, frontend **17/17**, build Vite 8.2.2 (**3 711 modules**) et audit npm à zéro. La recette doit d'abord confirmer un run de la page 1 sans restart.
 
 
 **MAJ 2026-08-21 (V3.8)** : modèle LLM par clé (active_model), POST /pipeline/reprocess (ré-exécution scopée), PipelineLauncher UI (lancer/ré-exécuter/stop/file), SourcesManager avec dossiers imbriqués + upload ciblé, 3 écarts d'audit Library corrigés. 53/53 tests, tsc/build verts.
