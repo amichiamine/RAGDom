@@ -32,7 +32,15 @@
   (client_id gh CLI 178c6fc778ccc68e1d6a) — l'utilisateur autorise sur
   github.com/login/device, jeton en mémoire, purgé après usage.
 
-## Déploiement web
+## État de clôture production
+- Commit déployé : `6b298c5`; deploy Render live : `dep-da556kjncjis73fqv2pg`.
+- Health final : système `status=ok`; Validation `status=ok`, `ambiguities=0`, `failed=0`; sqlite-vec `ready`.
+- Recherche arabe réelle vérifiée avec `bm25_rank=1`. Library chargée sans erreur; le deep-link Automation passe par le login en conservant `next`.
+- Recette finale : run `b12b543c-45c7-4105-b9b7-71771c4a5f74`, page 1, `COMPLETED` 100 %, scan working image-only 150 DPI, diff disponible. Reject confirmé avec `official_mutated=false` et `working_db_deleted=true`; scan officiel inchangé à 2481×3509/300 DPI; bases et recherche intactes.
+- Preuves locales : pytest 165/165 normal et 165/165 faible mémoire; Vitest 17/17; `npm audit` 0.
+- **Studio prêt pour tests utilisateur.** Aucun déploiement supplémentaire n'est une action de clôture.
+
+## Déploiement web (pour une future évolution explicitement demandée)
 1. Push sur **main** uniquement.
 2. Redéployer : RunWithCredentials(render-ragdom, "python3 …/redeploy.py").
 3. VÉRIFIER live : /api/system/health, /api/system/databases, une recherche
@@ -49,6 +57,9 @@ au build Docker (déjà câblé pour corpus-1am-v1) → databases_publiees/.
   redéployer ; (b) les `key_id` des clés LLM CHANGENT à chaque boot (re-seed depuis
   RAGDOM_SEED_LLM_KEYS) et `active_model` est perdu → ne jamais mémoriser un key_id,
   toujours refaire `GET /api/llm/keys` ; la ré-auto-détection consomme du quota.
+  Tant que `ragdom_config.sqlite` reste éphémère, le **compte utilisateur doit aussi être
+  réinitialisé après chaque reboot Render**. Le jeton admin injecté par variable
+  d'environnement demeure disponible pour cette remise en état.
 - **`autoDeploy: yes` est MENSONGER côté API Render** : un push sur main ne
   déclenche AUCUN déploiement (vérifié — dernier deploy resté sur le commit
   précédent après push). Toujours déclencher via `POST /v1/services/{id}/deploys`.

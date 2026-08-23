@@ -1,4 +1,4 @@
-# CONTEXT — État complet du projet RAGDom (MAJ 2026-08-23 — correctifs release intégrés)
+# CONTEXT — État complet du projet RAGDom (MAJ 2026-08-23 — production clôturée)
 
 ## Identité du projet
 Bibliothèque numérique scientifique **local-first** + version web complète.
@@ -15,7 +15,9 @@ Cible locale utilisateur : Windows, c:\xampp\htdocs\RAGDom, `npm run dev` racine
   demande expresse ; contenu identique à main au gel).
 - LIVE : https://ragdom.onrender.com — service Render FREE Docker
   srv-da49300ae00c739urldg (owner tea-da491bn40ujc73d3q9b0, Francfort).
-  Autodeploy INOPÉRANT → redéploiement par API après chaque push (skill render-ragdom).
+  Production clôturée sur le commit déployé `6b298c5`, deploy Render
+  `dep-da556kjncjis73fqv2pg` **live**. Autodeploy INOPÉRANT → redéploiement par API
+  après chaque futur push demandé explicitement (skill render-ragdom).
   Disque ÉPHÉMÈRE 512 Mo RAM ; env : `RAGDOM_LOW_MEMORY=true` (recherche BM25 seule;
   scans 150 DPI; deskew/Sauvola/rapid-layout/rapid-latex-ocr/rapid-table sautés;
   RapidOCR désactivé par défaut, opt-in uniquement par `RAGDOM_LOW_MEMORY_OCR=true`;
@@ -30,6 +32,9 @@ Cible locale utilisateur : Windows, c:\xampp\htdocs\RAGDom, `npm run dev` racine
   DATABASES_DIR au démarrage (main.py). La bibliothèque live renaît pré-chargée.
 
 ## État fonctionnel (tout VÉRIFIÉ en exécution réelle)
+- **Clôture production** : commit `6b298c5` déployé via `dep-da556kjncjis73fqv2pg` et confirmé live. Health final `status=ok`, Validation `status=ok`, `ambiguities=0`, `failed=0`, sqlite-vec `ready`. Une recherche arabe réelle retourne le résultat attendu en `bm25_rank=1`. La Library charge sans erreur; le deep-link Automation redirige vers le login en conservant `next`.
+- **Recette live finale** : run `b12b543c-45c7-4105-b9b7-71771c4a5f74`, page 1, `COMPLETED` à **100 %**. La working DB contient un scan image-only à **150 DPI** et le diff est disponible. Le rejet a réussi avec `official_mutated=false` et `working_db_deleted=true`; le scan officiel reste **2481×3509 à 300 DPI**. Bases et recherche sont intactes. **Studio prêt pour tests utilisateur.**
+- **Persistance auth Render** : après chaque reboot Render, le compte utilisateur doit être réinitialisé tant que `ragdom_config.sqlite` reste éphémère. Le jeton admin fourni par l'environnement demeure disponible.
 - **Studio de validation final** : scopes universels et multi-documents, routeur `/api/validation`, runs isolés, snapshots logiques, diffs, rapports et décisions accept/reject au niveau run. Les migrations additives/idempotentes 005/006/**007** couvrent notamment la copie SQLite, l'opération, les batchs, les états/progrès, les erreurs et les dates; `/execute` lance réellement le pipeline sur `validation_test_<run>.sqlite`, jamais sur l'officielle.
 - **Inspecteur et navigation** : scans et binaires d'artefacts baseline/working sont servis depuis la bonne base; TOC, curriculum et benchmarks sont lus dans la working DB. Les deep-links Validation `db/run/doc/page` survivent à l'authentification via un `next` interne validé; les TOC legacy sans `parent_id` restent inspectables.
 - **Sécurité release** : résolution stricte avant mutation, DTO sans champs supplémentaires, DB sanitisée, ownership cross-document contrôlé, éditions humaines protégées et acceptation atomique. Le hash optimiste couvre aussi les scans et benchmarks promus. Le namespace `validation_test_` est masqué des listings/health et interdit aux mutations, exports et duplications génériques; seules les routes Validation pilotent ses copies. Readonly masque Validation en 404.

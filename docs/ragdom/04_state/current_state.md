@@ -1,13 +1,22 @@
 # État Actuel du Projet RAGDom
 
-**Phase :** Mode Render 512 Mo final intégré sur `feat/validation-integration`, documentation de clôture et preuves finales à jour.
+**Phase :** Production clôturée — commit `6b298c5`, deploy Render `dep-da556kjncjis73fqv2pg` live; Studio prêt pour tests utilisateur.
 **Date de mise à jour :** 2026-08-23
 
 > **Mémoire de reprise :** `.hyperagent/` à la racine du dépôt sert de mémoire de
 > reprise inter-sessions (état d'avancement, décisions, points de reprise). À
 > consulter au démarrage de toute session de travail.
 
-## OPÉRATIONNEL SUR LA BRANCHE D'INTÉGRATION (preuves rejouées)
+## PRODUCTION CLÔTURÉE (preuves live et locales)
+- [x] **Déploiement final** : commit `6b298c5`, deploy Render `dep-da556kjncjis73fqv2pg` live.
+- [x] **Health final** : système `status=ok`; Validation `status=ok`, `ambiguities=0`, `failed=0`; sqlite-vec `ready`.
+- [x] **Recherche/UI live** : recherche arabe réelle avec `bm25_rank=1`; Library chargée sans erreur; deep-link Automation redirigé vers le login en conservant `next`.
+- [x] **Recette Studio finale** : run `b12b543c-45c7-4105-b9b7-71771c4a5f74`, page 1, `COMPLETED` à **100 %**; scan working image-only **150 DPI** et diff disponible.
+- [x] **Isolation/rejet** : `official_mutated=false`, `working_db_deleted=true`; scan officiel toujours **2481×3509 à 300 DPI**; bases et recherche intactes.
+- [x] **Preuves locales** : pytest **165/165** normal et **165/165** faible mémoire; Vitest **17/17**; `npm audit` **0 vulnérabilité**.
+- [x] **Disponibilité** : Studio prêt pour tests utilisateur. Après reboot Render, le compte utilisateur doit être réinitialisé tant que `ragdom_config.sqlite` reste éphémère; le jeton admin d'environnement demeure.
+
+## OPÉRATIONNEL (preuves rejouées)
 - [x] Backend complet : noyau agnostique, sci-engine, **8 routeurs / 82 opérations** (`auth 4 · curriculum 7 · library 13 · llm 10 · pipeline 12 · search 3 · system 15 · validation 18`).
 - [x] **Studio de validation end-to-end** : `create_run` produit par `Connection.backup` une copie `validation_test_<run>.sqlite`; `/execute` lance le reprocess/pipeline complet uniquement dans cette copie, avec batches/jobs/pages/events et polling restart-safe.
 - [x] **Décision run-level** : reject supprime DB/WAL/SHM; accept contrôle le hash canonique de toutes les lignes promues — scans et benchmarks inclus — ainsi que les éditions humaines, puis promeut transactionnellement uniquement les pages du scope. Toute modification officielle concurrente ferme en 409 sans écrasement.

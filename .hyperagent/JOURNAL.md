@@ -1,5 +1,14 @@
 # JOURNAL des passes (le plus récent en premier)
 
+## 2026-08-23 — Clôture production du Studio
+- Le commit `6b298c5` est déployé et live via Render deploy `dep-da556kjncjis73fqv2pg`.
+- Health final : `status=ok`; Validation `status=ok`, `ambiguities=0`, `failed=0`; sqlite-vec `ready`. Une recherche arabe réelle a confirmé `bm25_rank=1`.
+- Vérification UI : Library chargée sans erreur; un deep-link Automation non authentifié redirige vers le login en conservant `next`.
+- Recette finale : run `b12b543c-45c7-4105-b9b7-71771c4a5f74`, page 1, `COMPLETED` à **100 %**; scan working image-only **150 DPI**; diff disponible.
+- Rejet validé : `official_mutated=false`, `working_db_deleted=true`. Le scan officiel est resté **2481×3509 à 300 DPI**; bases et recherche intactes.
+- Preuves locales de clôture : pytest **165/165** en mode normal et **165/165** en faible mémoire; Vitest **17/17**; `npm audit` **0 vulnérabilité**.
+- Limite d'exploitation : après un reboot Render, le compte utilisateur doit être réinitialisé tant que `ragdom_config.sqlite` est éphémère; le jeton admin d'environnement demeure. **Studio prêt pour tests utilisateur.**
+
 ## 2026-08-23 — Sémantique health du curriculum global
 - Les termes réellement globaux conservent intentionnellement `document_id = NULL`. Il en va de même pour les liens `course_exercise` et `course_program` réellement cross-document lorsque leurs deux endpoints existent et ont chacun un propriétaire valide distinct.
 - Ces lignes globales ne sont plus comptées dans `validation.curriculum_ambiguous_rows` et ne placent plus le health Validation en `warning`. Seuls les `curriculum_programs`/`assessments` sans propriétaire et les liens NULL dont les endpoints sont introuvables restent des ambiguïtés actionnables.
@@ -31,7 +40,7 @@
 - **Annulation** : cancel supprime tous les jobs actifs/reprenables de la working DB et stoppe ses batchs. Recovery ne peut pas ressusciter le run, et `/execute` refuse un run `CANCELLED`.
 - **Frontend/auth** : les deep-links Validation `db/run/doc/page` (query et hash inclus) sont conservés après login via un paramètre `next` limité aux routes internes sûres; les redirections externes ou inconnues retombent sur `/automation`.
 - **Qualité finale rejouée** : pytest **161/161** normal puis **161/161** avec `RAGDOM_LOW_MEMORY=true`; Vitest **17/17**; build TypeScript strict + Vite **8.2.2** vert (**3 711 modules**); React Router DOM **7.18.2**; `npm audit` **0 vulnérabilité**.
-- **Prochaine action** : push de `feat/validation-integration`, déploiement, puis recette live.
+- Cette étape historique est désormais clôturée par la recette production consignée en tête du journal.
 
 ## 2026-08-22 20:58 — V5.1 : seuils par canal avant fusion RRF
 - **Cause racine mesurée** : les 20 voisins vectoriels contribuaient tous au RRF,
