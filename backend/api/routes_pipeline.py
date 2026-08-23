@@ -28,7 +28,18 @@ _sse_queues: List[queue_module.Queue] = []
 _worker: dict = {"thread": None, "pending": [], "lock": threading.Lock()}
 
 
+_recent_logs: List[dict] = []
+_recent_logs_lock = threading.Lock()
+_MAX_RECENT_LOGS = 200
+
+
 def _broadcast(event: str, data: dict) -> None:
+    # Buffer tournant des derniers événements (pour hydrater un nouvel abonné SSE
+    # ou une reconnexion, évitant la console "vide" après rechargement de page).
+    with _recent_logs_lock:
+        _recent_logs.append({"event": event, "data": data, "t": time.time()})
+        if len(_recent_logs) > _MAX_RECENT_LOGS:
+            _recent_logs.pop(0)
     for q in list(_sse_queues):
         try:
             q.put_nowait((event, data))
@@ -1209,6 +1220,14 @@ def retry(body: RetryBody):
 async def stream():
     """SSE (Blueprint §7.4) : page_update / queue_update / job_complete / error."""
     q: queue_module.Queue = queue_module.Queue(maxsize=1000)
+    # Rejoue les derniers événements pour le nouvel abonné : la console ne s'ouvre
+    # plus vide après un rechargement de page ou un basculement tardif d'onglet.
+    with _recent_logs_lock:
+        for item in _recent_logs[-50:]:
+            try:
+                q.put_nowait((item["event"], item["data"]))
+            except queue_module.Full:
+                break
     _sse_queues.append(q)
 
     async def generator():

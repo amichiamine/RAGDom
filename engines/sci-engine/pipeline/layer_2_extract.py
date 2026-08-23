@@ -97,15 +97,12 @@ _VLM_OCR_PROMPT = (
 
 def _maybe_vlm_page_ocr(ctx: dict, current_text: str):
     """Tier 2 (contrat D3-B) : OCR de PAGE ENTIÈRE par VLM quand l'extraction
-    Tier 1 est illisible. Rotation de clés/providers gérée par le noyau
-    (llm.key_manager.generate) ; aucun provider joignable → None (repli Tier 1,
-    le pipeline ne s'arrête jamais ici). Désactivable : RAGDOM_VLM_PAGE_OCR=false."""
+    Tier 1 est illisible ou absente. Sur hébergement 512 Mo avec OCR local
+    désactivé, le VLM est la SEULE source de transcription du texte arabe —
+    il s'active donc automatiquement si des clés LLM sont configurées."""
     vlm_mode = os.environ.get("RAGDOM_VLM_PAGE_OCR", "auto").lower()
     if vlm_mode == "false":
         return None
-    if (os.environ.get("RAGDOM_LOW_MEMORY", "false").lower() == "true"
-            and vlm_mode != "true"):
-        return None  # 512 Mo : évite l'image pleine page/base64 ; opt-in explicite seulement
     if not _looks_unreadable(current_text):
         return None
     try:

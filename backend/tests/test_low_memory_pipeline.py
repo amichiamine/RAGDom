@@ -75,9 +75,8 @@ def test_low_memory_raster_uses_150_dpi_without_heavy_sauvola(tmp_path, monkeypa
         result["_fitz"]["doc"].close()
 
 
-def test_low_memory_skips_layout_and_auto_full_page_vlm(monkeypatch):
+def test_low_memory_skips_layout_engine(monkeypatch):
     triage = _load("layer_1_triage.py", "lowmem_layer1")
-    layer = _load("layer_2_extract.py", "lowmem_layer2_vlm")
     calls = {"layout": 0}
 
     class Layout:
@@ -86,19 +85,13 @@ def test_low_memory_skips_layout_and_auto_full_page_vlm(monkeypatch):
 
     monkeypatch.setitem(sys.modules, "rapid_layout", types.SimpleNamespace(RapidLayout=Layout))
     monkeypatch.setenv("RAGDOM_LOW_MEMORY", "true")
-    monkeypatch.setenv("RAGDOM_VLM_PAGE_OCR", "auto")
     monkeypatch.delenv("RAGDOM_OFFLINE", raising=False)
 
     assert triage._get_layout_engine() is None
     assert calls["layout"] == 0
-    assert layer._maybe_vlm_page_ocr({}, "") is None
 
 
-def test_explicit_vlm_opt_in_remains_distinct_from_auto(monkeypatch):
+def test_explicit_vlm_disable_respected(monkeypatch):
     layer = _load("layer_2_extract.py", "lowmem_layer2_optin")
-    monkeypatch.setenv("RAGDOM_LOW_MEMORY", "true")
     monkeypatch.setenv("RAGDOM_VLM_PAGE_OCR", "false")
-    assert layer._maybe_vlm_page_ocr({}, "") is None
-    # The true mode passes the low-memory guard; a missing image still returns safely.
-    monkeypatch.setenv("RAGDOM_VLM_PAGE_OCR", "true")
     assert layer._maybe_vlm_page_ocr({}, "") is None
