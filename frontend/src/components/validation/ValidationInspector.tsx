@@ -1,21 +1,21 @@
 import { useMemo, useState } from 'react'
 import { FileImage, Layers, Shapes, ListTree, GraduationCap, Gauge, CircleAlert } from 'lucide-react'
 import MarkdownContent from '@/components/common/MarkdownContent'
-import ArtifactRenderer from '@/components/library/ArtifactRenderer'
-import { api } from '@/lib/api'
+import { ValidationArtifact, ValidationScan } from './ValidationAssets'
 import { useLanguage } from '@/contexts/LanguageContext'
 import type { ValidationInspection } from '@/types'
 
 interface Props {
   inspection: ValidationInspection | null | undefined
+  runId: string
   db: string
-  documentId?: string
+  documentId: string
   pageNumber: number
 }
 
 type Tab = 'scan' | 'chunks' | 'artifacts' | 'toc' | 'curriculum' | 'benchmarks' | 'errors'
 
-export default function ValidationInspector({ inspection, db, documentId, pageNumber }: Props) {
+export default function ValidationInspector({ inspection, runId, db, documentId, pageNumber }: Props) {
   const { t } = useLanguage()
   const [active, setActive] = useState<Tab>('scan')
   const tabs = useMemo<Array<{ key: Tab; icon: typeof FileImage; count?: number }>>(() => [
@@ -37,7 +37,6 @@ export default function ValidationInspector({ inspection, db, documentId, pageNu
   }
 
   if (!inspection) return <p className="validation-empty">{t('validation.inspection.empty')}</p>
-  const scanUrl = documentId ? api.library.getPageScanUrl(db, documentId, pageNumber) : null
 
   return (
     <section aria-labelledby="validation-inspection-title">
@@ -51,14 +50,23 @@ export default function ValidationInspector({ inspection, db, documentId, pageNu
       </div>
 
       <div id="validation-inspection-panel" className="validation-inspection-panel" role="tabpanel" aria-labelledby={`validation-tab-${active}`} tabIndex={0}>
-        {active === 'scan' && (scanUrl
-          ? <img className="validation-scan" src={scanUrl} alt={`${t('library.scan')} ${pageNumber}`} loading="lazy" />
-          : <Empty />)}
+        {active === 'scan' && (
+          <ValidationScan
+            runId={runId}
+            db={db}
+            documentId={documentId}
+            pageNumber={pageNumber}
+            version="working"
+            alt={`${t('library.scan')} ${pageNumber}`}
+          />
+        )}
         {active === 'chunks' && (inspection.chunks.length
           ? <div className="validation-stack">{inspection.chunks.map(chunk => <article className="validation-content-card" key={chunk.id}><header><span className="badge badge-subtle">#{chunk.chunk_index}</span><span>{chunk.section_title ?? chunk.pedagogical_type ?? '—'}</span></header><MarkdownContent source={chunk.content_markdown} /></article>)}</div>
           : <Empty />)}
         {active === 'artifacts' && (inspection.artifacts.length
-          ? <div className="validation-artifact-grid">{inspection.artifacts.map(artifact => <ArtifactRenderer key={artifact.id} artifact={artifact} fallbackImageUrl={artifact.has_binary ? api.library.getArtifactBinaryUrl(db, artifact.id) : undefined} />)}</div>
+          ? <div className="validation-artifact-grid">{inspection.artifacts.map(artifact => (
+              <ValidationArtifact key={artifact.id} artifact={artifact} runId={runId} db={db} documentId={documentId} pageNumber={pageNumber} version="working" />
+            ))}</div>
           : <Empty />)}
         {active === 'toc' && (inspection.toc.length
           ? <div className="validation-stack">{inspection.toc.map(node => <article className="validation-content-card" key={node.id}><strong>{node.title}</strong><span className="badge badge-subtle">p.{node.page_start}{node.page_end ? `–${node.page_end}` : ''}</span></article>)}</div>
@@ -67,7 +75,7 @@ export default function ValidationInspector({ inspection, db, documentId, pageNu
           ? <dl className="validation-definition-list"><dt>{t('validation.inspection.terms')}</dt><dd>{inspection.curriculum.terms?.length ?? 0}</dd><dt>{t('validation.inspection.programs')}</dt><dd>{inspection.curriculum.programs?.length ?? 0}</dd><dt>{t('validation.inspection.assessments')}</dt><dd>{inspection.curriculum.assessments?.length ?? 0}</dd><dt>{t('validation.inspection.links')}</dt><dd>{inspection.curriculum.links?.length ?? 0}</dd></dl>
           : <Empty />)}
         {active === 'benchmarks' && (inspection.benchmarks.length
-          ? <div className="validation-table-wrap"><table className="data-table"><thead><tr><th>{t('library.page')}</th><th>{t('common.engine')}</th><th>{t('validation.metrics.latency')}</th><th>{t('validation.metrics.confidence')}</th><th>RAM</th></tr></thead><tbody>{inspection.benchmarks.map(row => <tr key={row.id}><td>{row.page_number}</td><td>{row.engine_used}</td><td>{row.execution_time_ms} ms</td><td>{row.confidence_score != null ? `${(row.confidence_score * 100).toFixed(1)}%` : '—'}</td><td>{row.ram_peak_mb ?? '—'}</td></tr>)}</tbody></table></div>
+          ? <div className="validation-table-wrap"><table className="data-table"><thead><tr><th>{t('library.page')}</th><th>{t('common.engine')}</th><th>{t('validation.metrics.latency')}</th><th>{t('validation.metrics.confidence')}</th><th>{t('validation.metrics.ram')}</th></tr></thead><tbody>{inspection.benchmarks.map(row => <tr key={row.id}><td>{row.page_number}</td><td>{row.engine_used}</td><td>{row.execution_time_ms} ms</td><td>{row.confidence_score != null ? `${(row.confidence_score * 100).toFixed(1)}%` : '—'}</td><td>{row.ram_peak_mb ?? '—'}</td></tr>)}</tbody></table></div>
           : <Empty />)}
         {active === 'errors' && (inspection.errors.length
           ? <div className="validation-stack">{inspection.errors.map((error, index) => <article className="validation-error-card" key={`${index}-${error.message}`}><strong>{t('status.error')}</strong><p>{error.message}</p></article>)}</div>

@@ -24,6 +24,21 @@ export function formatDate(iso: string | null | undefined): string {
   return d.toLocaleString()
 }
 
+const LANGUAGE_LOCALES = { ar: 'ar-DZ', fr: 'fr-FR', en: 'en-GB' } as const
+
+export function formatDateTime(iso: string | null | undefined, language: keyof typeof LANGUAGE_LOCALES): string {
+  if (!iso) return '—'
+  const normalized = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(iso)
+    ? `${iso.replace(' ', 'T')}Z`
+    : iso
+  const date = new Date(normalized)
+  if (Number.isNaN(date.getTime())) return iso
+  return new Intl.DateTimeFormat(LANGUAGE_LOCALES[language], {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  }).format(date)
+}
+
 // PARTIE 8.4 — teinte de domaine dérivée du nom (Zéro Dogme, aucune couleur codée en dur)
 export function domainHue(name: string): number {
   return [...name].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7) % 360

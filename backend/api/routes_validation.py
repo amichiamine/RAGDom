@@ -11,7 +11,7 @@ from typing import Any, Dict, List, Literal, Optional
 
 import config
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Response
 from pydantic import BaseModel, ConfigDict, Field
 
 from core.embedding_profile import (CURRENT_PROFILE, active_vector_profiles,
@@ -157,8 +157,59 @@ def _official_page(conn, document_id: str, page_number: int) -> dict:
                       " bounding_box_json, is_human_edited, validation_run_id, updated_at, created_at"
                       " FROM scientific_artifacts WHERE document_id=? AND page_number=? ORDER BY id",
                       (document_id, page_number))
+    scan = conn.execute(
+        "SELECT id, width_px, height_px, dpi, image_webp, thumb_webp, created_at"
+        " FROM page_scans WHERE document_id=? AND page_number=?",
+        (document_id, page_number)).fetchone()
+    page_scan = None if scan is None else {
+        "id": scan[0], "width_px": scan[1], "height_px": scan[2], "dpi": scan[3],
+        "has_image": scan[4] is not None, "has_thumb": scan[5] is not None,
+        "created_at": scan[6],
+    }
     return {"document_id": document_id, "page_number": page_number,
-            "chunks": chunks, "artifacts": artifacts}
+            "chunks": chunks, "artifacts": artifacts, "page_scan": page_scan}
+
+
+def _toc_tree(conn, document_id: str) -> List[dict]:
+    rows = conn.execute(
+        "SELECT id, parent_id, level, title, page_start, page_end FROM document_toc"
+        " WHERE document_id=? ORDER BY page_start, level", (document_id,)).fetchall()
+    nodes = {row[0]: {"id": row[0], "parent_id": row[1], "level": row[2], "title": row[3],
+                      "page_start": row[4], "page_end": row[5], "children": []} for row in rows}
+    roots = []
+    for node in nodes.values():
+        parent = nodes.get(node["parent_id"])
+        (parent["children"] if parent else roots).append(node)
+    return roots
+
+
+def _document_rows(conn, table: str, document_id: str) -> List[dict]:
+    columns = [row[1] for row in conn.execute("PRAGMA table_info(%s)" % table).fetchall()]
+    if not columns:
+        return []
+    if "document_id" in columns:
+        return _rows(conn, "SELECT * FROM %s WHERE document_id=? ORDER BY rowid" % table,
+                     (document_id,))
+    return []
+
+
+def _working_inspection(conn, document_id: str, page_number: int) -> dict:
+    return {
+        "toc": _toc_tree(conn, document_id),
+        "curriculum": {
+            "terms": _document_rows(conn, "curriculum_terms", document_id),
+            "programs": _document_rows(conn, "curriculum_programs", document_id),
+            "assessments": _document_rows(conn, "assessments", document_id),
+            "links": _document_rows(conn, "content_links", document_id),
+        },
+        "benchmarks": _rows(
+            conn,
+            "SELECT id, page_number, engine_used, vlm_provider_used, fallback_triggered,"
+            " execution_time_ms, ram_peak_mb, confidence_score, created_at"
+            " FROM processing_benchmarks WHERE document_id=? AND page_number=? ORDER BY created_at, id",
+            (document_id, page_number),
+        ),
+    }
 
 
 def _event(conn, run_id: str, event_type: str, payload=None, page_number=None,
@@ -581,35 +632,44 @@ def execute_run(run_id: str, db_name: str = Query(alias="db")):
 
 
 @router.get("/runs")
-def list_runs(db_name: str = Query(alias="db"), document_id: Optional[str] = None):
+def list_runs(db_name: str = Query(alias="db"), document_id: Optional[str] = None,
+              page: int = Query(1, ge=1), limit: int = Query(25, ge=1, le=100)):
     conn = _conn(db_name)
     try:
+        where = ""
+        args = []
+        if document_id:
+            where = (" WHERE EXISTS (SELECT 1 FROM validation_run_pages vp"
+                     " WHERE vp.run_id=r.id AND vp.document_id=?)")
+            args.append(document_id)
+        run_count = conn.execute("SELECT COUNT(*) FROM validation_runs r" + where, args).fetchone()[0]
         sql = ("SELECT r.id, r.document_id, r.scope_type, r.status, r.execution_status, r.label,"
                " r.working_db_filename, r.operation, r.batch_id, r.batch_ids_json,"
                " r.progress_current, r.progress_total, r.error_log, r.created_at, r.updated_at,"
-               " COUNT(p.id) FROM validation_runs r LEFT JOIN validation_run_pages p ON p.run_id=r.id")
-        args = []
-        if document_id:
-            sql += " WHERE EXISTS (SELECT 1 FROM validation_run_pages vp WHERE vp.run_id=r.id AND vp.document_id=?)"
-            args.append(document_id)
-        sql += " GROUP BY r.id ORDER BY r.created_at DESC"
+               " COUNT(p.id) FROM validation_runs r LEFT JOIN validation_run_pages p ON p.run_id=r.id" + where)
+        sql += " GROUP BY r.id ORDER BY r.created_at DESC, r.id DESC LIMIT ? OFFSET ?"
+        query_args = args + [limit, (page - 1) * limit]
         runs = []
-        for row in conn.execute(sql, args).fetchall():
+        for row in conn.execute(sql, query_args).fetchall():
             try:
                 batch_ids = json.loads(row[9] or "[]")
             except (TypeError, ValueError):
                 batch_ids = []
-            total = int(row[11] or 0)
+            progress_total = int(row[11] or 0)
             runs.append({"id": row[0], "document_id": row[1], "scope_type": row[2],
                          "status": _public_run_status(row[3], row[4]), "execution_status": row[4],
                          "label": row[5], "working_db_filename": row[6],
                          "working_db_exists": bool(row[6] and os.path.exists(_working_db_path(row[6]))),
                          "operation": row[7], "batch_id": row[8], "batch_ids": batch_ids,
-                         "progress_current": int(row[10] or 0), "progress_total": total,
-                         "progress_percent": round((int(row[10] or 0) / total) * 100, 2) if total else 0,
+                         "progress_current": int(row[10] or 0), "progress_total": progress_total,
+                         "progress_percent": round((int(row[10] or 0) / progress_total) * 100, 2)
+                         if progress_total else 0,
                          "error_log": row[12], "created_at": row[13], "updated_at": row[14],
                          "page_count": row[15]})
-        return {"runs": runs}
+        return {"runs": runs, "pagination": {
+            "page": page, "limit": limit, "total": run_count,
+            "total_pages": max(1, (run_count + limit - 1) // limit),
+        }}
     finally:
         conn.close()
 
@@ -633,12 +693,128 @@ def get_run(run_id: str, db_name: str = Query(alias="db")):
 def get_working_page(run_id: str, page_number: int, db_name: str = Query(alias="db"),
                      document_id: Optional[str] = None):
     conn = _conn(db_name)
+    working = None
     try:
+        run = _run(conn, run_id)
         row = _page_row(conn, run_id, page_number, document_id)
+        filename = run.get("working_db_filename")
+        inspection = None
+        if filename and os.path.exists(_working_db_path(filename)):
+            working = db.get_connection(filename)
+            inspection = _working_inspection(working, row[1], row[2])
         return {"id": row[0], "document_id": row[1], "page_number": row[2], "status": row[3],
                 "baseline": json.loads(row[4]), "working": json.loads(row[5]),
+                "working_inspection": inspection,
                 "error_log": row[6], "updated_at": row[7]}
     finally:
+        if working is not None:
+            working.close()
+        conn.close()
+
+
+def _payload_binary(payload: dict, field: str) -> Optional[bytes]:
+    value = payload.get(field)
+    if value is None:
+        return None
+    decoded = _decode(value)
+    return decoded if isinstance(decoded, bytes) else None
+
+
+@router.get("/runs/{run_id}/pages/{page_number}/scan")
+def validation_page_scan(run_id: str, page_number: int, db_name: str = Query(alias="db"),
+                         document_id: Optional[str] = None,
+                         version: Literal["baseline", "working"] = "working", thumb: bool = False):
+    conn = _conn(db_name)
+    working = None
+    try:
+        run = _run(conn, run_id)
+        row = _page_row(conn, run_id, page_number, document_id)
+        if version == "baseline":
+            scan_meta = json.loads(row[4]).get("page_scan")
+            if not scan_meta:
+                raise HTTPException(404, "Scan baseline absent du snapshot de validation")
+            payload = _payload_binary(scan_meta, "thumb_webp" if thumb else "image_webp")
+            if payload is None and thumb:
+                payload = _payload_binary(scan_meta, "image_webp")
+            width, height = scan_meta.get("width_px"), scan_meta.get("height_px")
+            if payload is None and run["status"] != "ACCEPTED":
+                scan = conn.execute(
+                    "SELECT image_webp, thumb_webp, width_px, height_px FROM page_scans"
+                    " WHERE document_id=? AND page_number=?", (row[1], row[2])).fetchone()
+                if scan is not None:
+                    payload = scan[1] if thumb and scan[1] else scan[0]
+                    width, height = scan[2], scan[3]
+        else:
+            filename = run.get("working_db_filename")
+            if filename and os.path.exists(_working_db_path(filename)):
+                working = db.get_connection(filename)
+                scan = working.execute(
+                    "SELECT image_webp, thumb_webp, width_px, height_px FROM page_scans"
+                    " WHERE document_id=? AND page_number=?", (row[1], row[2])).fetchone()
+                if scan is None:
+                    raise HTTPException(404, "Scan absent de la copie de validation")
+                payload = scan[1] if thumb and scan[1] else scan[0]
+                width, height = scan[2], scan[3]
+            else:
+                scan_meta = json.loads(row[5]).get("page_scan")
+                if not scan_meta:
+                    raise HTTPException(404, "Scan absent du snapshot de travail")
+                payload = _payload_binary(scan_meta, "thumb_webp" if thumb else "image_webp")
+                if payload is None and thumb:
+                    payload = _payload_binary(scan_meta, "image_webp")
+                width, height = scan_meta.get("width_px"), scan_meta.get("height_px")
+                if payload is None and run["status"] == "ACCEPTED":
+                    scan = conn.execute(
+                        "SELECT image_webp, thumb_webp, width_px, height_px FROM page_scans"
+                        " WHERE document_id=? AND page_number=?", (row[1], row[2])).fetchone()
+                    if scan is not None:
+                        payload = scan[1] if thumb and scan[1] else scan[0]
+                        width, height = scan[2], scan[3]
+        if payload is None:
+            raise HTTPException(404, "Scan sans binaire")
+        return Response(content=payload, media_type="image/webp", headers={
+            "X-Scan-Width": str(width or ""), "X-Scan-Height": str(height or ""),
+            "Cache-Control": "private, max-age=300",
+        })
+    finally:
+        if working is not None:
+            working.close()
+        conn.close()
+
+
+@router.get("/runs/{run_id}/pages/{page_number}/artifacts/{artifact_id}/binary")
+def validation_artifact_binary(run_id: str, page_number: int, artifact_id: str,
+                               db_name: str = Query(alias="db"), document_id: Optional[str] = None,
+                               version: Literal["baseline", "working"] = "working"):
+    conn = _conn(db_name)
+    working = None
+    try:
+        run = _run(conn, run_id)
+        row = _page_row(conn, run_id, page_number, document_id)
+        if version == "baseline":
+            artifacts = json.loads(row[4]).get("artifacts", [])
+            artifact = next((item for item in artifacts if item.get("id") == artifact_id), None)
+            payload = _payload_binary(artifact or {}, "raw_binary")
+        else:
+            filename = run.get("working_db_filename")
+            if filename and os.path.exists(_working_db_path(filename)):
+                working = db.get_connection(filename)
+                artifact = working.execute(
+                    "SELECT raw_binary FROM scientific_artifacts"
+                    " WHERE id=? AND document_id=? AND page_number=?",
+                    (artifact_id, row[1], row[2])).fetchone()
+                payload = artifact[0] if artifact else None
+            else:
+                artifacts = json.loads(row[5]).get("artifacts", [])
+                artifact = next((item for item in artifacts if item.get("id") == artifact_id), None)
+                payload = _payload_binary(artifact or {}, "raw_binary")
+        if payload is None:
+            raise HTTPException(404, "Artefact sans binaire dans cette version du run")
+        return Response(content=payload, media_type="application/octet-stream",
+                        headers={"Cache-Control": "private, max-age=300"})
+    finally:
+        if working is not None:
+            working.close()
         conn.close()
 
 

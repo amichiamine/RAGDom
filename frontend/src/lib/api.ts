@@ -17,6 +17,7 @@ import {
   validationPageStatusCounts,
   validationScopeFromDto, validationScopeToDto, validationTargetsFromPages,
 } from '@/lib/validation'
+import { loginPathFor } from '@/lib/authNavigation'
 
 // Phase 7 : VITE_API_URL (origine du backend) pour l'UI hébergée (Cloudflare/tunnel) ;
 // vide en local (même origine via le proxy Vite / le reverse-proxy de production).
@@ -57,7 +58,7 @@ async function handleUnauthorized(): Promise<void> {
     if (me.auth_required && !me.authenticated) {
       lastAuthRedirect = Date.now()
       setAdminToken(null)
-      window.location.assign('/login')
+      window.location.assign(loginPathFor(window.location))
     }
   } catch { /* /auth/me injoignable : on n'interfère pas */ }
 }
@@ -339,10 +340,10 @@ export const api = {
       ),
 
     listRuns: (db: string, page = 1, limit = 25) =>
-      request<{ runs: ValidationRunListItemResponse[] }>(withDb('/validation/runs', db)).then(response => {
-        const total = response.runs.length
-        const start = (page - 1) * limit
-        const data = response.runs.slice(start, start + limit).map(item => ({
+      request<{ runs: ValidationRunListItemResponse[]; pagination: ValidationRunListResponse['pagination'] }>(
+        withDb('/validation/runs', db, { page: String(page), limit: String(limit) }),
+      ).then(response => {
+        const data = response.runs.map(item => ({
           id: item.id,
           status: item.status,
           scope: validationScopeFromDto(db, {
@@ -367,10 +368,7 @@ export const api = {
           batch_ids: item.batch_ids,
           error_log: item.error_log,
         }))
-        return {
-          data,
-          pagination: { page, limit, total, total_pages: Math.max(1, Math.ceil(total / limit)) },
-        } satisfies ValidationRunListResponse
+        return { data, pagination: response.pagination } satisfies ValidationRunListResponse
       }),
 
     getRun: (runId: string, db: string): Promise<ValidationRun> =>
@@ -418,13 +416,19 @@ export const api = {
         documentId ? { document_id: documentId } : undefined,
       ), { method: 'PUT', body: JSON.stringify({ working }) }),
 
+    getPageScan: async (runId: string, pageNumber: number, db: string, documentId: string, version: 'baseline' | 'working' = 'working') =>
+      (await checkedResponse(withDb(
+        `/validation/runs/${encodeURIComponent(runId)}/pages/${pageNumber}/scan`,
+        db, { document_id: documentId, version },
+      ), undefined, false)).blob(),
+    getArtifactBinary: async (runId: string, pageNumber: number, artifactId: string, db: string, documentId: string, version: 'baseline' | 'working' = 'working') =>
+      (await checkedResponse(withDb(
+        `/validation/runs/${encodeURIComponent(runId)}/pages/${pageNumber}/artifacts/${encodeURIComponent(artifactId)}/binary`,
+        db, { document_id: documentId, version },
+      ), undefined, false)).blob(),
+
     getPage: async (runId: string, pageNumber: number, db: string, documentId?: string): Promise<ValidationPage> => {
       const raw = await api.validation.getWorkingPage(runId, pageNumber, db, documentId)
-      const [tocResult, curriculumResult, benchmarkResult] = await Promise.all([
-        request<{ toc: TocNode[] }>(withDb('/library/toc', db, { document_id: raw.document_id })).catch(() => ({ toc: [] })),
-        request<CurriculumPayload>(withDb('/library/curriculum', db)).catch(() => null),
-        request<{ data: BenchmarkRow[] }>(withDb('/library/benchmarks', db, { document_id: raw.document_id, page: '1', limit: '250' })).catch(() => ({ data: [] })),
-      ])
       const sanitizeArtifacts = (items: ValidationWorkingPageResponse['working']['artifacts']): Artifact[] =>
         items.map(item => ({ ...item, raw_binary: null, has_binary: item.raw_binary != null }))
       const beforeChunks = raw.baseline.chunks
@@ -433,11 +437,13 @@ export const api = {
       const afterArtifacts = sanitizeArtifacts(raw.working.artifacts)
       const ids = new Set([...beforeArtifacts.map(item => item.id), ...afterArtifacts.map(item => item.id)])
       const artifacts = Array.from(ids).map(id => {
+        const beforeRaw = raw.baseline.artifacts.find(item => item.id === id) ?? null
+        const afterRaw = raw.working.artifacts.find(item => item.id === id) ?? null
         const before = beforeArtifacts.find(item => item.id === id) ?? null
         const after = afterArtifacts.find(item => item.id === id) ?? null
         return {
           artifact_id: id,
-          change: !before ? 'added' : !after ? 'removed' : JSON.stringify(before) === JSON.stringify(after) ? 'unchanged' : 'changed',
+          change: !before ? 'added' : !after ? 'removed' : JSON.stringify(beforeRaw) === JSON.stringify(afterRaw) ? 'unchanged' : 'changed',
           before,
           after,
         } as ValidationDiff['artifacts'][number]
@@ -451,14 +457,9 @@ export const api = {
         inspection: {
           chunks: afterChunks,
           artifacts: afterArtifacts,
-          toc: tocResult.toc ?? [],
-          curriculum: curriculumResult ? {
-            terms: curriculumResult.terms,
-            programs: curriculumResult.programs,
-            assessments: curriculumResult.assessments,
-            links: curriculumResult.links,
-          } : null,
-          benchmarks: (benchmarkResult.data ?? []).filter(row => row.page_number === raw.page_number),
+          toc: raw.working_inspection?.toc ?? [],
+          curriculum: raw.working_inspection?.curriculum ?? null,
+          benchmarks: raw.working_inspection?.benchmarks ?? [],
           errors: raw.error_log ? [{ message: raw.error_log }] : [],
         },
         diff: {

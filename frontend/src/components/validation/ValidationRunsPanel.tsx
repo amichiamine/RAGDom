@@ -3,12 +3,13 @@ import { useSearchParams } from 'react-router-dom'
 import { Ban, Check, RotateCcw, X, RefreshCw, Timer, ChevronLeft, ChevronRight } from 'lucide-react'
 import { api } from '@/lib/api'
 import { isValidationRunTerminal, readValidationDeepLink, updateValidationDeepLink } from '@/lib/validation'
+import { formatDateTime } from '@/lib/utils'
 import { useLanguage } from '@/contexts/LanguageContext'
 import { useToast } from '@/components/common/Toast'
 import ValidationInspector from './ValidationInspector'
 import ValidationDiffView from './ValidationDiffView'
 import Modal from '@/components/common/Modal'
-import type { ValidationPage, ValidationRun, ValidationRunSummary } from '@/types'
+import type { ValidationPage, ValidationRun, ValidationRunSummary, ValidationScopeKind } from '@/types'
 
 interface Props {
   activeDb: string | null
@@ -17,9 +18,20 @@ interface Props {
 }
 
 const PAGE_SIZE = 20
+const SCOPE_LABEL_KEYS: Record<ValidationScopeKind, string> = {
+  database: 'database',
+  document: 'document',
+  toc: 'toc_node',
+  chapter: 'chapter',
+  course: 'course',
+  title: 'heading',
+  page: 'page',
+  page_range: 'range',
+  selection: 'selection',
+}
 
 export default function ValidationRunsPanel({ activeDb, readonly, createdRun }: Props) {
-  const { t } = useLanguage()
+  const { t, language } = useLanguage()
   const toast = useToast()
   const [searchParams, setSearchParams] = useSearchParams()
   const [runs, setRuns] = useState<ValidationRunSummary[]>([])
@@ -152,7 +164,7 @@ export default function ValidationRunsPanel({ activeDb, readonly, createdRun }: 
         {readonly ? <p className="validation-empty" role="status">{t('validation.readonly')}</p> : loading && runs.length === 0 ? <p>{t('common.loading')}</p> : runs.length === 0 ? <p className="validation-empty">{t('validation.runs.empty')}</p> : (
           <div className="validation-run-items">{runs.map(item => (
             <button type="button" key={item.id} className={item.id === runId ? 'active' : ''} aria-current={item.id === runId ? 'true' : undefined} onClick={() => updateDeepLink(item.id, null, null, item.scope.db)}>
-              <span><strong>{item.label ?? item.scope.db}</strong><small>{new Date(item.created_at).toLocaleString()}</small></span>
+              <span><strong>{item.label ?? item.scope.db}</strong><small>{formatDateTime(item.created_at, language)}</small></span>
               <span><StatusBadge status={item.status} /><small className="font-num">{item.pages_total} {t('validation.metrics.pages')}</small></span>
             </button>
           ))}</div>
@@ -175,7 +187,7 @@ export default function ValidationRunsPanel({ activeDb, readonly, createdRun }: 
             <div className="validation-progress" role="progressbar" aria-label={t('validation.runs.progress')} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(run.progress)}><span style={{ width: `${Math.min(100, Math.max(0, run.progress))}%` }} /></div>
             <div className="validation-run-summary">
               <span>{run.pages_total} {t('validation.metrics.pages')}</span>
-              <span>{run.operation}</span>
+              <span>{t(`validation.operation.${run.operation}`)}</span>
               {run.batch_id && <span><code dir="ltr">{run.batch_id.slice(0, 8)}</code></span>}
               {run.working_db_filename && <span title={run.working_db_filename}>{t('validation.builder.working_copy')} · {run.working_db_exists ? t('validation.runs.copy_available') : t('validation.runs.copy_removed')}</span>}
             </div>
@@ -189,8 +201,8 @@ export default function ValidationRunsPanel({ activeDb, readonly, createdRun }: 
                 {run.status === 'COMPLETED' && <div className="validation-decision-bar" aria-label={t('validation.decisions.title')}>
                   <button type="button" className="btn btn-sm btn-outline-warning" onClick={() => void mutate('restore', 'page')} disabled={readonly || mutating}><RotateCcw size={14} /> {t('validation.decisions.restore_page')}</button>
                 </div>}
-                <ValidationDiffView diff={selectedPage.diff} db={run.scope.db} />
-                <ValidationInspector inspection={selectedPage.inspection} db={run.scope.db} documentId={selectedPage.document_id} pageNumber={selectedPage.page_number} />
+                <ValidationDiffView diff={selectedPage.diff} runId={run.id} db={run.scope.db} documentId={selectedPage.document_id} pageNumber={selectedPage.page_number} />
+                <ValidationInspector inspection={selectedPage.inspection} runId={run.id} db={run.scope.db} documentId={selectedPage.document_id} pageNumber={selectedPage.page_number} />
               </>
             )}
 
@@ -224,7 +236,7 @@ export default function ValidationRunsPanel({ activeDb, readonly, createdRun }: 
             <p role="alert" style={{ fontWeight: 700, color: 'var(--warning)' }}>{t('validation.decisions.accept_confirm_warning')}</p>
             <dl className="validation-confirm-summary">
               <div><dt>{t('db.select')}</dt><dd dir="ltr">{run.scope.db}</dd></div>
-              <div><dt>{t('validation.scope.title')}</dt><dd>{t(`validation.scope.${run.scope.kind}`)}</dd></div>
+              <div><dt>{t('validation.scope.title')}</dt><dd>{t(`validation.scope.${SCOPE_LABEL_KEYS[run.scope.kind]}`)}</dd></div>
               <div><dt>{t('validation.metrics.pages')}</dt><dd className="font-num">{run.pages_total}</dd></div>
             </dl>
             <p>{t('validation.decisions.accept_confirm_detail')}</p>

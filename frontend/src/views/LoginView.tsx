@@ -1,6 +1,7 @@
 import { useEffect, useState, useMemo, FormEvent } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { api } from '@/lib/api'
+import { safePostAuthPath } from '@/lib/authNavigation'
 import { useLanguage } from '@/contexts/LanguageContext'
 import { Spinner } from '@/components/common/Feedback'
 
@@ -9,13 +10,16 @@ import { Spinner } from '@/components/common/Feedback'
  *  - setup_required → « Créer le compte administrateur » (+ jeton d'initialisation
  *    affiché uniquement si POST /auth/setup renvoie 401 : jeton env exigé serveur).
  *  - sinon → « Connexion ».
- * Succès → navigate('/automation'). RTL-safe (flux vertical, marges logiques).
+ * Succès → reprise du deep-link interne sûr, ou /automation par défaut.
+ * RTL-safe (flux vertical, marges logiques).
  */
 const USERNAME_RE = /^[A-Za-z0-9_\-.]{3,64}$/
 
 export default function LoginView() {
   const { t } = useLanguage()
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
+  const postAuthPath = safePostAuthPath(searchParams.get('next'))
 
   const [checking, setChecking] = useState(true)
   const [setupMode, setSetupMode] = useState(false)
@@ -35,7 +39,7 @@ export default function LoginView() {
       .then(me => {
         if (cancelled) return
         // Déjà connecté : pas de raison de rester sur /login.
-        if (me.authenticated) { navigate('/automation', { replace: true }); return }
+        if (me.authenticated) { navigate(postAuthPath, { replace: true }); return }
         setSetupMode(me.setup_required)
         // Le serveur annonce d'AVANCE si le jeton d'initialisation est exigé (web).
         if ((me as { init_token_required?: boolean }).init_token_required) setNeedsInitToken(true)
@@ -43,7 +47,7 @@ export default function LoginView() {
       .catch(() => { if (!cancelled) setSetupMode(false) })
       .finally(() => { if (!cancelled) setChecking(false) })
     return () => { cancelled = true }
-  }, [navigate])
+  }, [navigate, postAuthPath])
 
   const title = setupMode ? t('auth.setup_title') : t('auth.login_title')
   const subtitle = setupMode ? t('auth.setup_subtitle') : t('auth.login_subtitle')
@@ -75,7 +79,7 @@ export default function LoginView() {
       } else {
         await api.auth.login(u, password)
       }
-      navigate('/automation', { replace: true })
+      navigate(postAuthPath, { replace: true })
     } catch (err) {
       const msg = err instanceof Error ? err.message : t('common.error_generic')
       // Setup + 401 : le serveur exige le jeton d'initialisation → révéler le champ.

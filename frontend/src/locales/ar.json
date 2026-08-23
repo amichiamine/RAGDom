@@ -526,7 +526,11 @@
       "artifacts": "آثار",
       "human_preserved": "تعديلات محمية",
       "latency": "زمن الاستجابة",
-      "confidence": "الثقة"
+      "confidence": "الثقة",
+      "ram": "استخدام الذاكرة"
+    },
+    "operation": {
+      "REPROCESS": "إعادة معالجة كاملة"
     },
     "runs": {
       "title": "عمليات تحقق محفوظة",
