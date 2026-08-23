@@ -223,8 +223,8 @@ La promotion d'une famille Tier 2/3 → Tier 1 se fait exclusivement par add-on 
 
 * **OS/Drivers :** PyMuPDF (fitz), ONNX Runtime CPU (onnxruntime), llama.cpp (Moteur AVX2).
 * **Vision & Restauration (CV) :** OpenCV (opencv-python-headless, C++ backend), deskew, DocAligner (Light ONNX), Scikit-image (Sauvola), CLAHE, Pillow (WebP 300 DPI).
-* **Segmentation & OCR (Tier 1, ONNX) :** rapid-layout (layout documentaire), RapidOCR (ONNX), PyMuPDF4LLM.
-* **Moteurs Métiers Tier 1 :** rapid-latex-ocr (Maths, ONNX), rapid-table (Tableaux, ONNX), Tree-sitter (Code), RDKit (validation SMILES), Biopython (validation FASTA), music21 (validation Musique), scikit-learn (Clustering TOC DBSCAN).
+* **Segmentation & OCR (Tier 1, ONNX) :** rapid-layout (layout documentaire), RapidOCR (ONNX), PyMuPDF4LLM. Les moteurs lourds sont chargés à la demande, jamais préchargés en pile complète.
+* **Moteurs Métiers Tier 1 :** rapid-latex-ocr (Maths, ONNX), rapid-table (Tableaux, ONNX), Tree-sitter (Code), RDKit (validation SMILES), Biopython (validation FASTA), music21 (validation Musique), scikit-learn (Clustering TOC DBSCAN). RapidOCR, rapid-latex-ocr et rapid-table ne sont instanciés que si la page exige leur traitement.
 * **Tier 2 (via VLM Couche 5) :** molécules, schémas électroniques, diagrammes complexes, partitions — transcription VLM tracée (`vlm_provider_used`).
 * **Tier 3 (import structuré) :** PDB, glTF, IFC, GeoJSON, GRIB, DICOM.
 * **Interdiction absolue :** PyTorch, TensorFlow, CUDA, Nvidia drivers, Docker/Conda.
@@ -331,7 +331,7 @@ Source : `Dockerfile`, `backend/main.py`. Un build = un artefact = un processus 
 * **Bases pré-ingérées via release GitHub :** les `.sqlite` du corpus (trop volumineux pour le dépôt) sont publiés comme **assets d'une release GitHub** et **téléchargés au build Docker** (`curl` → `databases_publiees/`). Au démarrage, le lifespan copie chaque `.sqlite` absent de `DATABASES_DIR` (seed non destructif, cf. `RAGDOM_PUBLISHED_DBS`) → la bibliothèque renaît identique à chaque réveil du disque éphémère. Échec de téléchargement = build tolérant (démarrage à vide, message d'avertissement).
 * **Corpus embarqué dans l'image :** les PDF sources font partie de l'image (`COPY sources/`), `SOURCES_DIR=/app/sources` — persistants aux restarts malgré le disque éphémère ; les uploads web atterrissent au même endroit.
 * **Données persistantes :** volume `/data` (`DATABASES_DIR`, `PIPELINE_SET_DIR`, `MODELS_DIR`, `CONFIG_DB_PATH`).
-* **Contrainte 512 Mo (hébergements FREE) → `RAGDOM_LOW_MEMORY=true` :** l'encodeur d'embeddings ONNX (~300 Mo de pic) n'est **jamais** chargé (sinon OOM kill) ; la recherche passe en **BM25 seul** en ligne. Les bases pré-construites conservent leurs vecteurs pour un futur hébergement plus large. `llama-cpp-python` (LLM GGUF local) est exclu de l'image web (compilation longue, inutile en ligne) — fallback LLM web = Ollama/API.
+* **Contrainte 512 Mo (hébergements FREE) → `RAGDOM_LOW_MEMORY=true` :** l'encodeur d'embeddings ONNX (~300 Mo de pic) n'est **jamais** chargé et la recherche passe en **BM25 seul**. Le pipeline ne précharge ni rapid-layout, ni rapid-latex-ocr, ni rapid-table; RapidOCR n'est chargé que pour une page scannée. L'OCR VLM de page entière en mode `auto` est désactivé afin d'éviter l'image/base64 pleine page; seul `RAGDOM_VLM_PAGE_OCR=true` constitue un opt-in explicite. Les crops/images restent conservés (`raw_binary`/`needs_vlm`) pour requalification ultérieure. Ce hotfix fait suite à deux recettes live qui avaient provoqué un restart Render après le lancement de la page 1. Les bases pré-construites conservent leurs vecteurs pour un futur hébergement plus large. `llama-cpp-python` (LLM GGUF local) est exclu de l'image web — fallback LLM web = Ollama/API.
 
 ---
 
@@ -1084,4 +1084,4 @@ En readonly, le frontend désactive les actions et le middleware masque toutes l
 
 La requalification mutante `POST /api/pipeline/requalify-artifacts` avec `run_id` est autorisée uniquement **sur la working DB physique d'un run `COMPLETED`** : l'API part du nom officiel pour résoudre le run, ouvre ensuite exclusivement `validation_test_<run>.sqlite`, borne les candidats aux pages du run, puis resynchronise `working_json`. Tout run non terminé, terminal ou sans copie isolée retourne 409 ; aucune écriture de requalification `run_id` n'atteint l'officielle.
 
-Preuves finales rejouées après exécution end-to-end : pytest **161/161** normal et **161/161** faible mémoire, Vitest **17/17**, build TypeScript strict + Vite **8.2.2** vert (**3 711 modules**), React Router DOM **7.18.2**, `npm audit` **0 vulnérabilité**.
+Preuves finales rejouées après exécution end-to-end et hotfix faible mémoire : pytest **164/164** normal et **164/164** faible mémoire, Vitest **17/17**, build TypeScript strict + Vite **8.2.2** vert (**3 711 modules**), React Router DOM **7.18.2**, `npm audit` **0 vulnérabilité**.

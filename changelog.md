@@ -7,6 +7,13 @@
 
 ---
 
+## 2026-08-23 — Hotfix final faible mémoire
+
+- RapidOCR, rapid-latex-ocr et rapid-table sont chargés à la demande selon les besoins de la page. Avec `RAGDOM_LOW_MEMORY=true`, rapid-layout, rapid-latex-ocr et rapid-table ne sont pas préchargés; RapidOCR est instancié uniquement pour une page scannée.
+- L'OCR VLM de page entière en mode `auto` est neutralisé sur 512 Mo; seul l'opt-in explicite `RAGDOM_VLM_PAGE_OCR=true` le réactive. Les crops/images non raffinés restent conservés pour requalification ultérieure.
+- Cause opérationnelle : deux recettes live ont provoqué un restart Render après le lancement de la page 1 avant ce hotfix.
+- Preuves finales : pytest **164/164** normal et **164/164** faible mémoire; Vitest **17/17**; `npm audit` **0 vulnérabilité**.
+
 ## 2026-08-23 — Correctifs release finaux du Studio de validation
 
 - Migration additive/idempotente **007** finalisée : working DB, opération, batch(s), état/progression, erreur, dates et index; `/runs` crée par `Connection.backup` une copie `validation_test_<run>.sqlite` et `/execute` lance réellement le pipeline uniquement dans cette copie.

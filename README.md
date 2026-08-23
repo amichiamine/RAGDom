@@ -90,7 +90,9 @@ La migration additive/idempotente **007** complète 005/006 avec `working_db_fil
 
 L'authentification conserve les deep-links internes Validation (`db/run/doc/page`, query et hash) via un paramètre `next` validé ; les destinations externes, protocol-relative ou inconnues retombent sur `/automation`. Les tests end-to-end utilisent des PDF et bases temporaires, désactivent les appels VLM/LLM externes et vérifient isolation, diff réel, publication scopée, source absente, polling après reprise, annulation non reprenable et suppression des copies.
 
-**Preuves finales release :** pytest **161/161** en mode normal et **161/161** avec `RAGDOM_LOW_MEMORY=true`; Vitest **17/17**; build TypeScript strict + Vite **8.2.2** vert (**3 711 modules**); `npm audit` **0 vulnérabilité**.
+**Mode 512 Mo / hotfix low-memory :** les moteurs RapidOCR, rapid-latex-ocr et rapid-table sont instanciés à la demande. Avec `RAGDOM_LOW_MEMORY=true`, rapid-layout, rapid-latex-ocr et rapid-table ne sont pas préchargés; RapidOCR n'est chargé que pour une page scannée. L'OCR VLM de page entière en mode `auto` est désactivé sur 512 Mo et ne peut être réactivé que par l'opt-in explicite `RAGDOM_VLM_PAGE_OCR=true`. Les crops/images restent conservés avec les marqueurs de requalification pour être repris ultérieurement. Ce garde-fou corrige deux recettes live qui avaient provoqué un restart Render après le lancement de la page 1.
+
+**Preuves finales release :** pytest **164/164** en mode normal et **164/164** avec `RAGDOM_LOW_MEMORY=true`; Vitest **17/17**; build TypeScript strict + Vite **8.2.2** vert (**3 711 modules**); `npm audit` **0 vulnérabilité**.
 
 **Instructions pour ArchiSys3.0 :**
 

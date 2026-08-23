@@ -1,5 +1,11 @@
 # JOURNAL des passes (le plus récent en premier)
 
+## 2026-08-23 — Hotfix final faible mémoire du pipeline
+- Deux recettes live ont provoqué un restart Render après le lancement de la page 1 sur l'instance 512 Mo : la pile ONNX/VLM était encore trop chargée avant ce correctif.
+- Les moteurs RapidOCR, rapid-latex-ocr et rapid-table sont désormais chargés à la demande selon les besoins de la page. Avec `RAGDOM_LOW_MEMORY=true`, rapid-layout, rapid-latex-ocr et rapid-table ne sont pas préchargés; RapidOCR n'est instancié que pour une page scannée.
+- L'OCR VLM de page entière en mode `auto` est désactivé sous 512 Mo afin d'éviter l'image/base64 pleine page; seul `RAGDOM_VLM_PAGE_OCR=true` constitue un opt-in explicite. Les crops/images restent persistés avec `needs_vlm` pour une requalification ultérieure.
+- Preuves finales : pytest **164/164** en mode normal et **164/164** avec `RAGDOM_LOW_MEMORY=true`; Vitest **17/17**; `npm audit` **0 vulnérabilité**.
+
 ## 2026-08-23 — Portabilité finale des chemins sources Validation
 - `POST /api/validation/runs/{id}/execute` accepte d'abord tout chemin direct existant vers un PDF (comportement local-first), puis relocalise les anciens chemins absolus Windows/Linux en réutilisant leur suffixe sous `sources/` dans le `SOURCES_DIR` courant.
 - En dernier recours, un nom de fichier n'est accepté que s'il correspond à un unique PDF sous `SOURCES_DIR`; un nom ambigu ou une source introuvable laisse le run `BLOCKED`.
