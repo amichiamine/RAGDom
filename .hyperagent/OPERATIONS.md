@@ -4,13 +4,14 @@
 - `npm run dev` À LA RACINE : lance backend (venv auto-détecté, port libre auto)
   + frontend Vite (concurrently, scripts/dev-backend.mjs). Modes : --setup, --pytest.
 - Backend seul : cd backend && python main.py (chemins auto-déduits, .env pré-rempli).
-- Tests backend : `cd backend && python -m pytest tests/ -q --ignore=tests/bench_ram_100p.py` → **160/160**; rejouer aussi avec `RAGDOM_LOW_MEMORY=true` → **160/160**.
+- Tests backend : `cd backend && python -m pytest tests/ -q --ignore=tests/bench_ram_100p.py` → **161/161**; rejouer aussi avec `RAGDOM_LOW_MEMORY=true` → **161/161**.
 - Frontend : `cd frontend && npm test` → **17/17**; `npm run build` → TypeScript strict + Vite **8.2.2**, **3 711 modules**; `npm audit` → **0 vulnérabilité**. React Router DOM est verrouillé en **7.18.2**.
 
 ## Exploitation du Studio de validation
 - Le Studio est dans Automation. Toujours faire `POST /api/validation/resolve-scope` avant `POST /api/validation/runs`; les scopes API sont `base`, `document`, `toc|chapter|course|title`, `page`, `page_range`, `page_selection` (l'UI traduit `database`→`base` et `selection`→`page_selection`).
 - `POST /runs` crée une copie physique `validation_test_<run>.sqlite` par `Connection.backup`; appeler ensuite `POST /runs/{id}/execute`. Le pipeline complet et ses batches/jobs tournent uniquement sur cette copie, jamais sur l'officielle.
-- Le détail expose `CREATED/QUEUED/RUNNING/COMPLETED/BLOCKED/FAILED/CANCELLED`, progression, opération, batch(s), copie et erreur. `BLOCKED` signifie notamment PDF source officiel absent; aucun contenu officiel n'a alors changé.
+- À l'exécution, un chemin direct existant vers un PDF est accepté en priorité (local-first). Sinon, l'API relocalise les anciens chemins absolus Windows/Linux en prenant le suffixe situé sous `sources/` et en le rattachant au `SOURCES_DIR` courant; le chemin résolu n'est persisté que dans la working DB. Le fallback par nom de fichier exige une correspondance unique sous `SOURCES_DIR` : plusieurs correspondances restent `BLOCKED`.
+- Le détail expose `CREATED/QUEUED/RUNNING/COMPLETED/BLOCKED/FAILED/CANCELLED`, progression, opération, batch(s), copie et erreur. `BLOCKED` signifie notamment PDF source officiel absent ou nom ambigu; aucun contenu officiel n'a alors changé.
 - `accept` et `reject` s'appliquent au **run entier**. Reject supprime copie/WAL/SHM; accept vérifie le hash de toutes les lignes promues — scans et benchmarks inclus — et les éditions humaines, promeut transactionnellement le scope depuis la copie, puis la supprime.
 - L'inspecteur sert les scans/binaires d'artefacts baseline ou working depuis la base demandée et lit TOC/curriculum/benchmarks dans la working DB. Les bases legacy dont `document_toc` n'a pas `parent_id` restent compatibles.
 - Le frontend suit seulement le run ouvert par polling toutes les 5 s; GET détail réconcilie aussi un batch après restart. Aucun SSE Validation dédié. Après authentification, le paramètre `next` interne restaure le deep-link `db/run/doc/page`; aucune URL externe n'est acceptée.

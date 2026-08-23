@@ -1,12 +1,13 @@
 # 2026-08-23 — Correctifs release finaux Validation
 
 - Migration **007** additive/idempotente : working DB, opération, batch(s), état/progression, erreur, dates et index. `create_run` utilise `Connection.backup`; `/execute` lance le vrai pipeline uniquement sur `validation_test_<run>.sqlite`.
+- Portabilité finale des sources : `/execute` accepte d'abord un chemin direct PDF existant (local-first), sinon relocalise les anciens chemins absolus Windows/Linux grâce au suffixe sous `sources/` vers le `SOURCES_DIR` courant. Un fallback par nom n'est admis que s'il est unique; l'ambiguïté reste `BLOCKED`. Seule la working DB reçoit le chemin résolu.
 - Inspecteur complet : scans/binaires d'artefacts baseline et working depuis leur base, TOC/curriculum/benchmarks depuis la working DB; TOC legacy sans `parent_id` compatible.
 - Accept scoped transactionnel : hash canonique étendu aux scans et benchmarks promus, conflits officiels fermés en 409; reject supprime DB/WAL/SHM; source absente → `BLOCKED` explicite.
 - Cancel non reprenable : jobs actifs/reprenables supprimés de la copie, batchs stoppés, recovery nul, nouveau `/execute` refusé.
 - Namespace `validation_test_` masqué et protégé des exports, duplications et mutations génériques. Requalification mutante `run_id` seulement sur la working DB d'un run `COMPLETED`, jamais sur l'officielle.
 - Auth : deep-links internes Validation conservés après login; destinations externes/inconnues refusées.
-- Preuves finales : pytest **160/160** normal et faible mémoire, Vitest **17/17**, build Vite **8.2.2** vert (**3 711 modules**), `npm audit` **0 vulnérabilité**.
+- Preuves finales : pytest **161/161** normal et faible mémoire, Vitest **17/17**, build Vite **8.2.2** vert (**3 711 modules**), `npm audit` **0 vulnérabilité**.
 - Hotfix runtime post-déploiement : vec0 n'est reconstruit que si les comptes divergent (plus de collision PK à chaque connexion) ; ownership des programmes/liens legacy multi-documents dérivé du TOC et des entités, termes globaux admis sans faux état dégradé.
 
 # 2026-08-22 — Studio de validation final
@@ -17,7 +18,7 @@
 - Curriculum multi-livres non destructif et profil FastEmbed compatible MiniLM-L12-v2 / pooling **mean** / 384d normalisées, sans réindexation silencieuse.
 - UI Automation : builder/preview, scopes, deep-links, liste/pagination, inspecteur/diff, restauration et confirmation. Polling ciblé toutes les 5 s; aucun SSE Validation dédié. Readonly : UI désactivée et routes masquées en 404.
 - Correctif release ultérieur : la requalification mutante avec `run_id` est autorisée exclusivement sur la working DB isolée d'un run `COMPLETED`, puis resynchronisée; jamais sur l'officielle.
-- Qualité finale de clôture : pytest **160/160** normal + **160/160** faible mémoire, Vitest **17/17**, build Vite **8.2.2** vert (**3 711 modules**), React Router DOM **7.18.2**, `npm audit` **0 vulnérabilité**.
+- Qualité finale de clôture : pytest **161/161** normal + **161/161** faible mémoire, Vitest **17/17**, build Vite **8.2.2** vert (**3 711 modules**), React Router DOM **7.18.2**, `npm audit` **0 vulnérabilité**.
 
 # 2026-08-22 — V5.1 : fusion RRF filtrée par canal
 

@@ -1,10 +1,15 @@
 # JOURNAL des passes (le plus récent en premier)
 
+## 2026-08-23 — Portabilité finale des chemins sources Validation
+- `POST /api/validation/runs/{id}/execute` accepte d'abord tout chemin direct existant vers un PDF (comportement local-first), puis relocalise les anciens chemins absolus Windows/Linux en réutilisant leur suffixe sous `sources/` dans le `SOURCES_DIR` courant.
+- En dernier recours, un nom de fichier n'est accepté que s'il correspond à un unique PDF sous `SOURCES_DIR`; un nom ambigu ou une source introuvable laisse le run `BLOCKED`.
+- Le chemin résolu est écrit uniquement dans la working DB `validation_test_<run>.sqlite`; la base officielle conserve sa provenance et reste inchangée. Test de non-régression Windows/Linux ajouté; suite backend finale **161/161** dans les modes normal et faible mémoire.
+
 ## 2026-08-23 — Hotfix de vérification runtime Render
 - Le premier déploiement du Studio a révélé deux états dégradés sans perte de service : `vec_chunks` était réinséré en bloc avec `INSERT OR REPLACE` (collision de clé primaire dans vec0) et 40 lignes curriculum legacy multi-documents restaient sans propriétaire.
 - Correctif vectoriel : le backfill ne reconstruit `vec_chunks` que si les comptes divergent ; reconstruction par suppression/réinsertion, puis réouverture idempotente sans doublons.
 - Correctif curriculum : programmes attribués via `competencies_json.toc_id`, assessments via leurs chunks, liens via leurs entités ; les termes réellement globaux peuvent rester sans document sans dégrader le health.
-- Preuves locales : pytest **160/160** normal et **160/160** faible mémoire ; tests ciblés réouverture vec0 et backfill multi-documents verts.
+- Preuves locales : pytest **161/161** normal et **161/161** faible mémoire ; tests ciblés réouverture vec0 et backfill multi-documents verts.
 
 ## 2026-08-23 — Correctifs release finaux documentés
 - **Exécution physique** : la migration additive/idempotente **007** ajoute à `validation_runs` working DB, opération, batch(s), état/progression, erreur et dates. `POST /runs` crée la copie `validation_test_<run>.sqlite` par `Connection.backup`; `/execute` y lance réellement le pipeline, sans mutation officielle avant acceptation.
@@ -13,7 +18,7 @@
 - **Confinement** : le namespace `validation_test_` est réservé, masqué de la découverte/health et non exportable/duplicable; les mutations génériques library/curriculum/pipeline y sont refusées. Une requalification mutante avec `run_id` est autorisée uniquement sur la copie physique d'un run `COMPLETED`, puis resynchronise `working_json`; l'officielle n'est jamais ciblée.
 - **Annulation** : cancel supprime tous les jobs actifs/reprenables de la working DB et stoppe ses batchs. Recovery ne peut pas ressusciter le run, et `/execute` refuse un run `CANCELLED`.
 - **Frontend/auth** : les deep-links Validation `db/run/doc/page` (query et hash inclus) sont conservés après login via un paramètre `next` limité aux routes internes sûres; les redirections externes ou inconnues retombent sur `/automation`.
-- **Qualité finale rejouée** : pytest **160/160** normal puis **160/160** avec `RAGDOM_LOW_MEMORY=true`; Vitest **17/17**; build TypeScript strict + Vite **8.2.2** vert (**3 711 modules**); React Router DOM **7.18.2**; `npm audit` **0 vulnérabilité**.
+- **Qualité finale rejouée** : pytest **161/161** normal puis **161/161** avec `RAGDOM_LOW_MEMORY=true`; Vitest **17/17**; build TypeScript strict + Vite **8.2.2** vert (**3 711 modules**); React Router DOM **7.18.2**; `npm audit` **0 vulnérabilité**.
 - **Prochaine action** : push de `feat/validation-integration`, déploiement, puis recette live.
 
 ## 2026-08-22 20:58 — V5.1 : seuils par canal avant fusion RRF

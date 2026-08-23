@@ -12,13 +12,14 @@
 - [x] **Studio de validation end-to-end** : `create_run` produit par `Connection.backup` une copie `validation_test_<run>.sqlite`; `/execute` lance le reprocess/pipeline complet uniquement dans cette copie, avec batches/jobs/pages/events et polling restart-safe.
 - [x] **Décision run-level** : reject supprime DB/WAL/SHM; accept contrôle le hash canonique de toutes les lignes promues — scans et benchmarks inclus — ainsi que les éditions humaines, puis promeut transactionnellement uniquement les pages du scope. Toute modification officielle concurrente ferme en 409 sans écrasement.
 - [x] **Migration 007** : colonnes additives/idempotentes copie/opération/batch(s)/état/progression/erreur/dates et index; copies confinées dans le namespace `validation_test_`, masquées de la découverte/health, non exportables/duplicables et refusées par les mutations génériques.
-- [x] **États et erreurs réels** : `CREATED/QUEUED/RUNNING/COMPLETED/BLOCKED/FAILED/CANCELLED`; source PDF absente explicitement bloquée sans mutation officielle. Cancel supprime les jobs reprenables, stoppe les batchs, empêche recovery et toute nouvelle exécution du run.
+- [x] **Portabilité `source_path`** : `/execute` accepte en priorité un chemin direct PDF existant (local-first), sinon relocalise les anciens chemins absolus Windows/Linux via leur suffixe sous `sources/` vers le `SOURCES_DIR` courant. Le fallback par nom exige une correspondance unique; l'ambiguïté reste `BLOCKED`. Seule la working DB est mise à jour.
+- [x] **États et erreurs réels** : `CREATED/QUEUED/RUNNING/COMPLETED/BLOCKED/FAILED/CANCELLED`; source PDF absente ou ambiguë explicitement bloquée sans mutation officielle. Cancel supprime les jobs reprenables, stoppe les batchs, empêche recovery et toute nouvelle exécution du run.
 - [x] **Requalification isolée** : avec `run_id`, une mutation est autorisée uniquement sur la working DB d'un run `COMPLETED`, bornée à ses pages puis resynchronisée dans `working_json`; jamais sur l'officielle.
 - [x] **Curriculum multi-document** : build isolé/non destructif entre livres, import et CRUD scopés, données legacy ambiguës signalées plutôt qu'attribuées silencieusement.
 - [x] **Embedding compatible** : FastEmbed MiniLM-L12-v2, pooling `mean`, 384d normalisées et contrat complet; profil absent/incompatible/multiple bloque le vectoriel, aucune réindexation silencieuse.
 - [x] **UI Validation Studio** : builder/preview, scope selector, runs paginés/deep-linkés, scans et artefacts baseline/working, TOC/curriculum/benchmarks de working DB, restaurations et confirmation. TOC legacy sans `parent_id` compatible; deep-link `db/run/doc/page` préservé après auth. Polling ciblé 5 s, aucun SSE Validation dédié. Readonly : contrôles désactivés et API masquée en 404.
 - [x] **Recherche hybride V5.1** : seuil BM25 et seuil vectoriel appliqués avant rangs/RRF, rang FTS unique par chunk, ordre stable.
-- [x] **Qualité finale** : pytest **160/160** normal et **160/160** avec `RAGDOM_LOW_MEMORY=true`; Vitest **17/17**; TypeScript/build Vite **8.2.2** verts (**3 711 modules**); `npm audit` **0 vulnérabilité**. Les E2E Validation désactivent tout LLM/VLM externe.
+- [x] **Qualité finale** : pytest **161/161** normal et **161/161** avec `RAGDOM_LOW_MEMORY=true`; Vitest **17/17**; TypeScript/build Vite **8.2.2** verts (**3 711 modules**); `npm audit` **0 vulnérabilité**. Les E2E Validation désactivent tout LLM/VLM externe.
 - [x] **Lot 1 sprint** : GET /library/page-scans (manifeste galerie), agrégats curriculum
       (per_term + global en SQL), filtres chunks (pedagogical_type/page_start/page_end/toc_id)
 - [x] **Frontend pixel-perfect COMPLET (vagues A/B/C/D + audit croisé)** :
@@ -49,7 +50,7 @@
 4. Chiffrement des clés LLM au repos (reliquat Web-Ready indépendant du Studio).
 
 ## Prochaine Action Prioritaire
-**Push → déploiement → recette live.** L'intégration de `feat/validation-integration` est terminée et le socle automatisé final est vert : backend **160/160** dans les deux modes, frontend **17/17**, build Vite 8.2.2 (**3 711 modules**) et audit npm à zéro.
+**Push → déploiement → recette live.** L'intégration de `feat/validation-integration` est terminée et le socle automatisé final est vert : backend **161/161** dans les deux modes, frontend **17/17**, build Vite 8.2.2 (**3 711 modules**) et audit npm à zéro.
 
 
 **MAJ 2026-08-21 (V3.8)** : modèle LLM par clé (active_model), POST /pipeline/reprocess (ré-exécution scopée), PipelineLauncher UI (lancer/ré-exécuter/stop/file), SourcesManager avec dossiers imbriqués + upload ciblé, 3 écarts d'audit Library corrigés. 53/53 tests, tsc/build verts.
