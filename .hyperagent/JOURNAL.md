@@ -1,5 +1,11 @@
 # JOURNAL des passes (le plus récent en premier)
 
+## 2026-08-23 — Correctifs Hub post-recette utilisateur
+- **Constat utilisateur validé** : pas de moyen de purger/supprimer un document ou une base, et un re-lancement sur le même PDF créait un doublon de document au lieu de reprocesser.
+- **Backend** : nouvelle route `DELETE /api/library/documents/{document_id}?db=` (suppression transactionnelle d'un document isolé via cascades, 409 si batch en cours, sandbox refusée). Anti-double-ingestion dans `POST /pipeline/start` : en mode document/folder, un `source_path` déjà présent route vers le reprocess scopé du document existant (`reused_existing_document=true`) au lieu de dupliquer. La purge auto au re-lancement reste intelligente : ne purge que les pages du scope retraité.
+- **Frontend** : `PurgeStudio` + `DatabaseLifecycle` branchés sur l'Automation Hub et suppression d'un document isolé accessible dans `SourceDocumentsTable` ; suivi monitoring corrélé par `batch_id` (déduplication des pages, état de connexion SSE, réinitialisation des compteurs) ; UX anti-doublon (`reused_existing_document` affiché comme info) ; guidage post-reboot quand le compte admin n'existe plus.
+- **Qualité rejouée** : pytest **170/170** normal et **170/170** faible mémoire ; Vitest **34/34** ; tsc 0 erreur ; build Vite vert ; `npm audit` **0 vulnérabilité**.
+
 ## 2026-08-23 — Clôture production du Studio
 - Le commit `6b298c5` est déployé et live via Render deploy `dep-da556kjncjis73fqv2pg`.
 - Health final : `status=ok`; Validation `status=ok`, `ambiguities=0`, `failed=0`; sqlite-vec `ready`. Une recherche arabe réelle a confirmé `bm25_rank=1`.
