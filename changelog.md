@@ -17,6 +17,7 @@
 - Requalification `run_id` corrigée : la mutation est autorisée uniquement sur la working DB physique d'un run `COMPLETED`, bornée à ses pages et suivie d'une resynchronisation de `working_json`; elle n'écrit jamais dans l'officielle.
 - Auth frontend corrigée : le deep-link Validation `db/run/doc/page` avec query/hash survit au login via un `next` interne validé; toute destination externe ou inconnue retombe sur `/automation`.
 - Preuves finales : pytest **160/160** normal et **160/160** faible mémoire; Vitest **17/17**; build TypeScript strict + Vite **8.2.2** vert (**3 711 modules**); React Router DOM **7.18.2**; `npm audit` **0 vulnérabilité**.
+- Hotfix runtime post-déploiement : réouverture vec0 idempotente sans collision de clé primaire et backfill déterministe des programmes/liens curriculum legacy multi-documents ; les termes globaux ne dégradent plus le health.
 
 ## 2026-08-22 — V5.1 : fusion RRF filtrée par canal
 

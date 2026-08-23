@@ -1,5 +1,11 @@
 # JOURNAL des passes (le plus récent en premier)
 
+## 2026-08-23 — Hotfix de vérification runtime Render
+- Le premier déploiement du Studio a révélé deux états dégradés sans perte de service : `vec_chunks` était réinséré en bloc avec `INSERT OR REPLACE` (collision de clé primaire dans vec0) et 40 lignes curriculum legacy multi-documents restaient sans propriétaire.
+- Correctif vectoriel : le backfill ne reconstruit `vec_chunks` que si les comptes divergent ; reconstruction par suppression/réinsertion, puis réouverture idempotente sans doublons.
+- Correctif curriculum : programmes attribués via `competencies_json.toc_id`, assessments via leurs chunks, liens via leurs entités ; les termes réellement globaux peuvent rester sans document sans dégrader le health.
+- Preuves locales : pytest **160/160** normal et **160/160** faible mémoire ; tests ciblés réouverture vec0 et backfill multi-documents verts.
+
 ## 2026-08-23 — Correctifs release finaux documentés
 - **Exécution physique** : la migration additive/idempotente **007** ajoute à `validation_runs` working DB, opération, batch(s), état/progression, erreur et dates. `POST /runs` crée la copie `validation_test_<run>.sqlite` par `Connection.backup`; `/execute` y lance réellement le pipeline, sans mutation officielle avant acceptation.
 - **Inspection complète** : le Studio lit scans et binaires d'artefacts baseline/working depuis la base correspondante; TOC, curriculum et benchmarks proviennent de la working DB. L'inspection tolère aussi les schémas TOC legacy dépourvus de `parent_id`.

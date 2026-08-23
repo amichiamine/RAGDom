@@ -7,6 +7,7 @@
 - Namespace `validation_test_` masqué et protégé des exports, duplications et mutations génériques. Requalification mutante `run_id` seulement sur la working DB d'un run `COMPLETED`, jamais sur l'officielle.
 - Auth : deep-links internes Validation conservés après login; destinations externes/inconnues refusées.
 - Preuves finales : pytest **160/160** normal et faible mémoire, Vitest **17/17**, build Vite **8.2.2** vert (**3 711 modules**), `npm audit` **0 vulnérabilité**.
+- Hotfix runtime post-déploiement : vec0 n'est reconstruit que si les comptes divergent (plus de collision PK à chaque connexion) ; ownership des programmes/liens legacy multi-documents dérivé du TOC et des entités, termes globaux admis sans faux état dégradé.
 
 # 2026-08-22 — Studio de validation final
 
