@@ -1,10 +1,10 @@
-# 2026-08-23 — Mode Render 512 Mo final
+# 2026-08-23 — Mode Render 512 Mo final, OCR opt-in
 
 - Sous `RAGDOM_LOW_MEMORY=true` uniquement, le scan passe de **300 à 150 DPI**; deskew, Sauvola, rapid-layout, rapid-latex-ocr et rapid-table sont sautés.
-- RapidOCR reste activé par défaut : seul moteur ONNX chargé, uniquement pour une page scannée; `RAGDOM_LOW_MEMORY_OCR=false` le désactive. Une page native ne charge aucun OCR.
-- L'OCR VLM pleine page `auto` est désactivé sur 512 Mo et ne repasse le garde-fou qu'avec `RAGDOM_VLM_PAGE_OCR=true`. `page_scans` persiste le DPI réel; les crops/images restent conservés pour requalification ultérieure.
-- Deux recettes live avaient provoqué un restart Render après le lancement de la page 1 avant ce durcissement. La prochaine recette doit confirmer un run de la page 1 sans restart.
-- Preuves finales : pytest **165/165** normal et faible mémoire, Vitest **17/17**, `npm audit` **0 vulnérabilité**.
+- RapidOCR est **désactivé par défaut** pour éviter un troisième restart après deux échecs live; seul `RAGDOM_LOW_MEMORY_OCR=true` l'active explicitement.
+- Sans opt-in, une page scannée reste image-only à 150 DPI dans la working DB, avec badge/benchmark `ImageOnly-LowMemory`, et peut être retraitée sur un environnement plus large ou avec l'opt-in. Une page native conserve PyMuPDF sans ONNX.
+- L'OCR VLM pleine page `auto` reste désactivé sur 512 Mo et ne repasse le garde-fou qu'avec `RAGDOM_VLM_PAGE_OCR=true`. `page_scans` persiste le DPI réel; les crops/images restent conservés pour requalification ultérieure.
+- Preuves finales inchangées : pytest **165/165** normal et faible mémoire, Vitest **17/17**, `npm audit` **0 vulnérabilité**.
 
 # 2026-08-23 — Correctifs release finaux Validation
 

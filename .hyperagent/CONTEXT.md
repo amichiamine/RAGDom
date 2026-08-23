@@ -18,8 +18,9 @@ Cible locale utilisateur : Windows, c:\xampp\htdocs\RAGDom, `npm run dev` racine
   Autodeploy INOPÉRANT → redéploiement par API après chaque push (skill render-ragdom).
   Disque ÉPHÉMÈRE 512 Mo RAM ; env : `RAGDOM_LOW_MEMORY=true` (recherche BM25 seule;
   scans 150 DPI; deskew/Sauvola/rapid-layout/rapid-latex-ocr/rapid-table sautés;
-  RapidOCR seul moteur ONNX, uniquement sur page scannée et désactivable par
-  `RAGDOM_LOW_MEMORY_OCR=false`; page native sans OCR; VLM pleine page `auto` désactivé), RAGDOM_SEED_LLM_KEYS (4 clés Gemini
+  RapidOCR désactivé par défaut, opt-in uniquement par `RAGDOM_LOW_MEMORY_OCR=true`;
+  scan sans opt-in = `ImageOnly-LowMemory` dans la working DB; page native PyMuPDF sans ONNX;
+  VLM pleine page `auto` désactivé), RAGDOM_SEED_LLM_KEYS (4 clés Gemini
   de l'utilisateur, seed au boot), RAGDOM_AUTH_TOKEN, RAGDOM_READONLY=false.
 - Corpus réel : sources/1AM/math/official-books/ (manuel scan 210 p, 52,7 Mo)
   + sources/1AM/math/sources/ (7 sujets dzexams). Embarqué dans l'image Docker
@@ -34,7 +35,7 @@ Cible locale utilisateur : Windows, c:\xampp\htdocs\RAGDom, `npm run dev` racine
 - **Sécurité release** : résolution stricte avant mutation, DTO sans champs supplémentaires, DB sanitisée, ownership cross-document contrôlé, éditions humaines protégées et acceptation atomique. Le hash optimiste couvre aussi les scans et benchmarks promus. Le namespace `validation_test_` est masqué des listings/health et interdit aux mutations, exports et duplications génériques; seules les routes Validation pilotent ses copies. Readonly masque Validation en 404.
 - **Portabilité des sources Validation** : `/api/validation/runs/{id}/execute` conserve la priorité local-first d'un chemin direct existant vers un PDF, sinon relocalise un ancien chemin absolu Windows/Linux par son suffixe sous `sources/` vers le `SOURCES_DIR` courant. Le fallback par nom n'est admis que pour une correspondance unique; toute ambiguïté reste `BLOCKED`. Seule la working DB reçoit le chemin résolu, jamais l'officielle.
 - **Exécution terminale** : l'annulation supprime tous les jobs reprenables de la copie et stoppe ses batchs; un run `CANCELLED` ne peut être ni repris par recovery ni ré-exécuté. Une requalification **mutante** avec `run_id` n'est permise que sur la working DB physique d'un run `COMPLETED`, puis resynchronise `working_json`; elle ne mute jamais l'officielle.
-- **Mode Render 512 Mo final** : avec `RAGDOM_LOW_MEMORY=true`, le scan passe seul de 300 à **150 DPI**; deskew, Sauvola, rapid-layout, rapid-latex-ocr et rapid-table sont sautés. RapidOCR reste activé par défaut et devient le seul moteur ONNX chargé, uniquement sur une page scannée; `RAGDOM_LOW_MEMORY_OCR=false` le désactive. Une page native ne charge aucun OCR. `RAGDOM_VLM_PAGE_OCR=auto` n'envoie aucune page entière sur 512 Mo; seul `true` l'autorise explicitement. `page_scans` persiste le DPI réel. Cause : deux recettes live ont redémarré Render après le lancement de la page 1 avant ce durcissement; la prochaine recette doit confirmer un run de la page 1 sans restart.
+- **Mode Render 512 Mo final** : avec `RAGDOM_LOW_MEMORY=true`, le scan passe seul de 300 à **150 DPI**; deskew, Sauvola, rapid-layout, rapid-latex-ocr et rapid-table sont sautés. RapidOCR est désactivé par défaut pour éviter un troisième restart après deux échecs live; seul `RAGDOM_LOW_MEMORY_OCR=true` l'active. Sans opt-in, une page scannée reste image-only à 150 DPI dans la working DB, porte le badge/benchmark `ImageOnly-LowMemory` et peut être retraitée ultérieurement sur un environnement plus large ou avec l'opt-in. Une page native conserve PyMuPDF sans ONNX. `RAGDOM_VLM_PAGE_OCR=auto` n'envoie aucune page entière sur 512 Mo; seul `true` l'autorise explicitement. `page_scans` persiste le DPI réel.
 - **Preuves finales release** : pytest **165/165** en mode normal ET **165/165** avec `RAGDOM_LOW_MEMORY=true`; Vitest **17/17**; TypeScript/build Vite **8.2.2** vert (**3 711 modules**); `npm audit` **0 vulnérabilité**.
 - Recherche RRF V5.1 : chaque canal BM25/vectoriel est filtré par son seuil avant fusion ; rangs FTS uniques par chunk et déterministes.
 - Ingestion réelle 230/230 pages : sommaire 45 entrées (dérivé des titres),
@@ -51,8 +52,8 @@ Cible locale utilisateur : Windows, c:\xampp\htdocs\RAGDom, `npm run dev` racine
 ## Spécificités moteur ajoutées par les tests réels
 - Couche 2 : OCR VLM de page entière (Tier 2 D3-B) — pages scannées transcrites
   par le provider vision (rotation clés), gate qualité pour polices non-Unicode,
-  repli RapidOCR ; flag `RAGDOM_VLM_PAGE_OCR` (`auto`/`false`/`true`). En faible mémoire,
-  `auto` est désactivé et `true` reste l'unique opt-in explicite.
+  repli RapidOCR en mode normal ; flag `RAGDOM_VLM_PAGE_OCR` (`auto`/`false`/`true`). En faible mémoire,
+  RapidOCR exige `RAGDOM_LOW_MEMORY_OCR=true`, `auto` est désactivé et `true` reste l'unique opt-in VLM explicite.
 - Sommaire de repli dérivé des titres Markdown au finalize (orchestrator).
 - Modèle LLM PAR CLÉ (active_model sur llm_keys, détection live ?key_id=,
   auto-détection robuste : 404 dépréciés/400 non-texte/403 par clé → parcours).
