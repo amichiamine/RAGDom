@@ -104,7 +104,7 @@ export default function ScopeSelector({ databases, activeDb, value, onChange, di
           <select className="form-select" value={value.kind} onChange={e => setKind(e.target.value as ValidationScopeKind)} disabled={!value.db}>
             <option value="database">{t('validation.scope.database')}</option>
             <option value="document" disabled={!value.document_id}>{t('validation.scope.document')}</option>
-            <option value="toc" disabled={!value.document_id}>TOC</option>
+            <option value="toc" disabled={!value.document_id}>{t('validation.scope.toc_node')}</option>
             <option value="chapter" disabled={!value.document_id}>{t('validation.scope.chapter')}</option>
             <option value="course" disabled={!value.document_id}>{t('validation.scope.course')}</option>
             <option value="title" disabled={!value.document_id}>{t('validation.scope.heading')}</option>

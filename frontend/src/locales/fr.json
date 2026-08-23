@@ -526,7 +526,11 @@
       "artifacts": "artefacts",
       "human_preserved": "éditions protégées",
       "latency": "Latence",
-      "confidence": "Confiance"
+      "confidence": "Confiance",
+      "ram": "Mémoire RAM"
+    },
+    "operation": {
+      "REPROCESS": "Ré-exécution complète"
     },
     "runs": {
       "title": "Exécutions persistantes",

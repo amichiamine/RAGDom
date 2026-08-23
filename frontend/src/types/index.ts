@@ -438,6 +438,27 @@ export interface ValidationWorkingPagePayload {
   page_number: number;
   chunks: Array<Chunk & Record<string, unknown>>;
   artifacts: Array<Artifact & { raw_binary?: unknown } & Record<string, unknown>>;
+  page_scan?: {
+    id: string;
+    width_px: number | null;
+    height_px: number | null;
+    dpi: number | null;
+    has_image?: boolean;
+    has_thumb?: boolean;
+    image_webp?: unknown;
+    thumb_webp?: unknown;
+    created_at?: string | null;
+  } | null;
+}
+export interface ValidationWorkingInspectionResponse {
+  toc: TocNode[];
+  curriculum: {
+    terms: CurriculumTerm[];
+    programs: CurriculumProgram[];
+    assessments: Assessment[];
+    links: ContentLink[];
+  };
+  benchmarks: BenchmarkRow[];
 }
 export interface ValidationWorkingPageResponse {
   id: string;
@@ -446,6 +467,7 @@ export interface ValidationWorkingPageResponse {
   status: ValidationPageStatus;
   baseline: ValidationWorkingPagePayload;
   working: ValidationWorkingPagePayload;
+  working_inspection: ValidationWorkingInspectionResponse | null;
   error_log: string | null;
   updated_at: string;
 }

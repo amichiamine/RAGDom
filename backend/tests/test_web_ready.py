@@ -43,6 +43,8 @@ def test_public_classification():
     assert not is_public("POST", "/api/curriculum/terms")
     assert not is_public("GET", "/api/system/sources")
     assert not is_public("GET", "/api/system/databases/x.sqlite/export")
+    assert not is_public("GET", "/api/validation/runs")
+    assert not is_public("GET", "/api/validation/runs/run-1/pages/1/scan")
 
 
 def test_readonly_hides_admin(monkeypatch):
@@ -61,6 +63,9 @@ def test_readonly_hides_admin(monkeypatch):
                           json={"confirm": "Zz.sqlite"}).status_code == 404
     assert client.post("/api/curriculum/terms?db=x.sqlite",
                        json={"term_index": 1, "label": "x"}).status_code == 404
+    assert client.get("/api/validation/runs", params={"db": "x.sqlite"}).status_code == 404
+    assert client.get("/api/validation/runs/run-1/pages/1/scan",
+                      params={"db": "x.sqlite"}).status_code == 404
 
 
 def test_auth_token_guards_admin(monkeypatch):
@@ -73,6 +78,9 @@ def test_auth_token_guards_admin(monkeypatch):
                       headers={"Authorization": "Bearer faux"}).status_code == 401
     assert client.get("/api/llm/keys",
                       headers={"Authorization": "Bearer s3cret"}).status_code == 200
+    assert client.get("/api/validation/runs", params={"db": "x.sqlite"}).status_code == 401
+    assert client.get("/api/validation/runs", params={"db": "x.sqlite"},
+                      headers={"Authorization": "Bearer s3cret"}).status_code == 404
 
 
 def test_ask_rate_limit(monkeypatch):

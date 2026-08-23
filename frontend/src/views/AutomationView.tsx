@@ -1,6 +1,6 @@
-import { useEffect, useState, useRef, useCallback, useMemo } from 'react'
+import { lazy, Suspense, useEffect, useState, useRef, useCallback, useMemo } from 'react'
 import type { ReactNode } from 'react'
-import { useNavigate, useSearchParams } from 'react-router-dom'
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { api } from '@/lib/api'
 import { useDatabase } from '@/contexts/DatabaseContext'
 import { useLanguage } from '@/contexts/LanguageContext'
@@ -23,17 +23,20 @@ import TelemetryExplorer from '@/components/admin/TelemetryExplorer'
 import DatabaseLifecycle from '@/components/admin/DatabaseLifecycle'
 import ArtifactImportModal from '@/components/admin/ArtifactImportModal'
 import { FilePlus2, Rocket, Activity, FolderOpen, BrainCircuit, SlidersHorizontal, Layers, ShieldCheck } from 'lucide-react'
-import ValidationStudio from '@/components/validation/ValidationStudio'
 import { formatBytes, formatNumber } from '@/lib/utils'
+import { loginPathFor } from '@/lib/authNavigation'
 
 type TabKey = 'ingestion' | 'monitoring' | 'validation' | 'contents' | 'documents' | 'providers' | 'settings'
 const TAB_ORDER: TabKey[] = ['ingestion', 'monitoring', 'validation', 'contents', 'documents', 'providers', 'settings']
+const ValidationStudio = lazy(() => import('@/components/validation/ValidationStudio'))
 
 export default function AutomationView() {
   const { databases, activeDb, setActiveDb, isLoading: dbLoading, refresh } = useDatabase()
   const { t } = useLanguage()
   const toast = useToast()
   const navigate = useNavigate()
+  const location = useLocation()
+  const requestedLoginPath = useRef(loginPathFor(location)).current
 
   // ── Onglet actif dans l'URL (?tab=) pour être partageable ; défaut = 1er ──
   const [searchParams, setSearchParams] = useSearchParams()
@@ -73,10 +76,10 @@ export default function AutomationView() {
   useEffect(() => {
     let cancelled = false
     api.auth.me()
-      .then(me => { if (!cancelled && me.auth_required && !me.authenticated) navigate('/login', { replace: true }) })
+      .then(me => { if (!cancelled && me.auth_required && !me.authenticated) navigate(requestedLoginPath, { replace: true }) })
       .catch(() => { /* /auth/me injoignable : ne pas bloquer l'atelier */ })
     return () => { cancelled = true }
-  }, [navigate])
+  }, [navigate, requestedLoginPath])
 
   const [health, setHealth] = useState<SystemHealth | null>(null)
   const [documents, setDocuments] = useState<Document[]>([])
@@ -332,7 +335,9 @@ export default function AutomationView() {
 
         {/* ─────────────────── ONGLET VALIDATION LIVE ─────────────────── */}
         {activeTab === 'validation' && (
-          <ValidationStudio databases={databases} activeDb={activeDb} readonly={health?.readonly ?? false} />
+          <Suspense fallback={<div className="workspace-tab"><div className="auto-card" aria-busy="true">{t('common.loading')}</div></div>}>
+            <ValidationStudio databases={databases} activeDb={activeDb} readonly={health?.readonly ?? false} />
+          </Suspense>
         )}
 
         {/* ─────────────────── ONGLET CONTENUS ─────────────────── */}

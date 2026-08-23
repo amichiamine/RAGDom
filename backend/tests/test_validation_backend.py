@@ -59,8 +59,8 @@ def validation_db():
                          " VALUES (?,?,?,?,?,300,?,?)",
                          ("%s-s%s" % (doc_id, page), doc_id, page, 100, 200, b"webp", b"thumb"))
     conn.execute("INSERT INTO scientific_artifacts"
-                 " (id,document_id,chunk_id,page_number,domain,artifact_type,searchable_text,raw_data)"
-                 " VALUES ('a1','d1','d1-c2',2,'math','latex_formula','x','x')")
+                 " (id,document_id,chunk_id,page_number,domain,artifact_type,searchable_text,raw_data,raw_binary)"
+                 " VALUES ('a1','d1','d1-c2',2,'math','latex_formula','x','x',?)", (b"artifact-baseline",))
     conn.execute("INSERT INTO processing_benchmarks"
                  " (id,document_id,page_number,engine_used,execution_time_ms)"
                  " VALUES ('b1','d1',2,'test',10)")
@@ -120,6 +120,57 @@ def test_universal_scope_resolver_and_strict_guards():
     assert extra.status_code == 422
 
 
+def test_validation_run_pagination_and_isolated_binary_routes():
+    run_ids = [
+        _create_run({"scope_type": "page", "document_id": "d1", "page": page})
+        for page in (1, 2, 3)
+    ]
+    first = client.get("/api/validation/runs", params={"db": TEST_DB, "page": 1, "limit": 2})
+    second = client.get("/api/validation/runs", params={"db": TEST_DB, "page": 2, "limit": 2})
+    assert first.status_code == 200 and len(first.json()["runs"]) == 2
+    assert first.json()["pagination"] == {"page": 1, "limit": 2, "total": 3, "total_pages": 2}
+    assert second.status_code == 200 and len(second.json()["runs"]) == 1
+
+    run_id = run_ids[1]
+    detail = client.get("/api/validation/runs/%s" % run_id, params={"db": TEST_DB}).json()
+    working_db = detail["working_db_filename"]
+    isolated = db.get_connection(working_db)
+    isolated.execute("UPDATE page_scans SET image_webp=? WHERE document_id='d1' AND page_number=2",
+                     (b"working-webp",))
+    isolated.execute("UPDATE scientific_artifacts SET raw_binary=? WHERE id='a1'",
+                     (b"artifact-working",))
+    isolated.execute("INSERT INTO document_toc"
+                     " (id,document_id,parent_id,level,title,page_start,page_end)"
+                     " VALUES ('working-toc','d1','t1',2,'Working only',2,2)")
+    isolated.execute("INSERT INTO curriculum_terms"
+                     " (id,document_id,term_index,label) VALUES ('working-term','d1',1,'Working term')")
+    isolated.execute("INSERT INTO processing_benchmarks"
+                     " (id,document_id,page_number,engine_used,execution_time_ms)"
+                     " VALUES ('working-bench','d1',2,'working-engine',20)")
+    isolated.commit(); isolated.close()
+
+    route = "/api/validation/runs/%s/pages/2" % run_id
+    page_payload = client.get(route, params={"db": TEST_DB}).json()
+    assert page_payload["baseline"]["page_scan"]["has_image"] is True
+    assert "image_webp" not in page_payload["baseline"]["page_scan"]
+    assert client.get(route + "/scan", params={"db": TEST_DB, "version": "baseline"}).content == b"webp"
+    assert client.get(route + "/scan", params={"db": TEST_DB, "version": "working"}).content == b"working-webp"
+    binary_route = route + "/artifacts/a1/binary"
+    assert client.get(binary_route, params={"db": TEST_DB, "version": "baseline"}).content == b"artifact-baseline"
+    assert client.get(binary_route, params={"db": TEST_DB, "version": "working"}).content == b"artifact-working"
+    assert client.get(route + "/artifacts/unknown/binary",
+                      params={"db": TEST_DB, "version": "working"}).status_code == 404
+    inspection = client.get(route, params={"db": TEST_DB}).json()["working_inspection"]
+    assert any(node["id"] == "working-toc" for node in inspection["toc"][0]["children"])
+    assert [term["id"] for term in inspection["curriculum"]["terms"]] == ["working-term"]
+    assert {row["id"] for row in inspection["benchmarks"]} == {"b1", "working-bench"}
+
+    official = db.get_connection(TEST_DB)
+    assert official.execute("SELECT image_webp FROM page_scans WHERE document_id='d1' AND page_number=2").fetchone()[0] == b"webp"
+    assert official.execute("SELECT raw_binary FROM scientific_artifacts WHERE id='a1'").fetchone()[0] == b"artifact-baseline"
+    official.close()
+
+
 def test_working_copy_snapshots_diff_reject_never_mutate_official():
     run_id = _create_run({"scope_type": "page", "document_id": "d1", "page": 2})
     unsupported = client.post("/api/validation/runs/%s/snapshots?db=%s" % (run_id, TEST_DB),
@@ -171,6 +222,11 @@ def test_accept_is_only_operation_that_updates_official_and_report_is_stable():
         "Version acceptée"
     assert conn.execute("SELECT validation_run_id FROM processing_benchmarks WHERE id='b1'").fetchone()[0] == run_id
     conn.close()
+    archived_route = "/api/validation/runs/%s/pages/2" % run_id
+    assert client.get(archived_route + "/scan",
+                      params={"db": TEST_DB, "version": "working"}).content == b"webp"
+    assert client.get(archived_route + "/artifacts/a1/binary",
+                      params={"db": TEST_DB, "version": "working"}).content == b"artifact-baseline"
     report = client.get("/api/validation/runs/%s/report?db=%s" % (run_id, TEST_DB)).json()
     assert report["schema"] == "ragdom.validation-report.v1"
     assert report["run"]["status"] == "ACCEPTED" and report["benchmark_ids"] == ["b1"]

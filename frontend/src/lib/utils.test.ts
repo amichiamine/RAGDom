@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { domainBadgeStyle, domainHue, formatBytes, formatDate, formatNumber } from './utils'
+import { domainBadgeStyle, domainHue, formatBytes, formatDate, formatDateTime, formatNumber } from './utils'
 
 describe('formatting helpers', () => {
   it('formats byte sizes at stable binary boundaries', () => {
@@ -19,6 +19,13 @@ describe('formatting helpers', () => {
     expect(formatDate(null)).toBe('—')
     expect(formatDate(undefined)).toBe('—')
     expect(formatDate('not-a-date')).toBe('not-a-date')
+    expect(formatDateTime('not-a-date', 'fr')).toBe('not-a-date')
+  })
+
+  it('formats validation timestamps with the selected UI locale', () => {
+    const timestamp = '2026-08-22 14:05:00'
+    expect(formatDateTime(timestamp, 'fr')).not.toBe(formatDateTime(timestamp, 'ar'))
+    expect(formatDateTime(timestamp, 'en')).toMatch(/2026/)
   })
 })
 

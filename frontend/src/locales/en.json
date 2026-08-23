@@ -526,7 +526,11 @@
       "artifacts": "artifacts",
       "human_preserved": "protected edits",
       "latency": "Latency",
-      "confidence": "Confidence"
+      "confidence": "Confidence",
+      "ram": "RAM usage"
+    },
+    "operation": {
+      "REPROCESS": "Full reprocessing"
     },
     "runs": {
       "title": "Persistent runs",
