@@ -90,10 +90,12 @@
     "reconnect": "Réessayer",
     "upload": "Téléverser",
     "new_folder": "Nouveau dossier",
-    "send": "Envoyer"
+    "send": "Envoyer",
+    "delete_document": "Supprimer le document"
   },
   "library": {
     "select_document": "Choisir un document",
+    "document_deleted": "Document supprimé.",
     "documents": "Documents",
     "toc": "Table des matières",
     "page": "Page",
@@ -233,6 +235,12 @@
       "ingestion_sub": "Lancez, ré-exécutez ou arrêtez le pipeline et gérez vos sources (arbre, dossiers, upload).",
       "monitoring": "Suivi",
       "monitoring_sub": "Monitoring temps réel : étapes du pipeline, console live (SSE) et état de la file.",
+      "conn_connected": "Connecté (SSE)",
+      "conn_reconnecting": "Reconnexion…",
+      "conn_disconnected": "Déconnecté",
+      "delete_document_title": "Supprimer le document",
+      "delete_document_warning": "Supprime ce document et son contenu indexé (chunks, artefacts, scans, jobs).",
+      "delete_document_confirm": "Ressaisissez le nom du document pour confirmer :",
       "contents": "Contenus",
       "contents_sub": "Explorez et éditez les données ingérées : base → document → chapitre/page → chunks, avec ré-exécution et purge scopées.",
       "documents": "Documents",
@@ -401,7 +409,9 @@
     "username_invalid": "Identifiant invalide (3–64 caractères : lettres, chiffres, _ - .).",
     "logged_in_as": "Connecté",
     "logout": "Déconnexion",
-    "session_state": "État de session"
+    "session_state": "État de session",
+    "post_reboot_setup": "Le compte administrateur n'existe plus (redémarrage du serveur). Recréez-le ci-dessous — le jeton d'administration de l'environnement reste valide et ne bloque rien.",
+    "session_active": "Session active"
   },
   "providers": {
     "title": "Fournisseurs LLM",
@@ -463,6 +473,9 @@
     "all_layers_note": "La ré-exécution repasse TOUTES les couches sur le périmètre (l'exécution d'une couche isolée n'est pas prévue par le contrat moteur — unité d'exécution : la page).",
     "reprocess_button": "Ré-exécuter",
     "reprocessed": "Ré-exécution lancée",
+    "reused_existing": "Ce document est déjà indexé — seul le suivi existant est affiché (pas une erreur).",
+    "skipped_ready": "page(s) déjà terminée(s) ignorée(s)",
+    "job_complete": "Lot terminé.",
     "queue": "File",
     "queue_current": "En cours",
     "queue_idle": "File au repos",

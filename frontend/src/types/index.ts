@@ -217,6 +217,8 @@ export interface PipelineSSEEvent {
   artifacts_extracted?: number;  // job_complete
   done?: boolean;                // job_complete
   success?: boolean;             // job_complete
+  reused_existing_document?: boolean; // job_complete / page_update — anti-doublon : la source a déjà un document indexé (pas d'erreur)
+  skipped_ready?: number;        // queue_update / job_complete — pages déjà READY non ré-indexées
   error?: string;                // error
   details?: string;              // error
 }
@@ -226,6 +228,13 @@ export interface PipelineQueueState {
   current_job: { batch_id: string | null; job_id: string; status: PipelineStatus; page_number: number } | null;
   queued_jobs: number;
   completed_today: number;
+}
+
+/** Résumé d'un lancement remonté au Suivi (corrélation SSE par batch + anti-doublon). */
+export interface BatchLaunch {
+  pagesTotal: number
+  batchIds?: string[]
+  reusedExistingDocument?: boolean
 }
 
 export interface BatchStatusResponse { // V3.1.1

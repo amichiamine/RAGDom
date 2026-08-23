@@ -90,10 +90,12 @@
     "reconnect": "Retry",
     "upload": "Upload",
     "new_folder": "New folder",
-    "send": "Send"
+    "send": "Send",
+    "delete_document": "Delete document"
   },
   "library": {
     "select_document": "Choose a document",
+    "document_deleted": "Document deleted.",
     "documents": "Documents",
     "toc": "Table of contents",
     "page": "Page",
@@ -233,6 +235,12 @@
       "ingestion_sub": "Launch, re-run or stop the pipeline and manage your sources (tree, folders, upload).",
       "monitoring": "Monitoring",
       "monitoring_sub": "Real-time monitoring: pipeline steps, live console (SSE) and queue state.",
+      "conn_connected": "Connected (SSE)",
+      "conn_reconnecting": "Reconnecting…",
+      "conn_disconnected": "Disconnected",
+      "delete_document_title": "Delete document",
+      "delete_document_warning": "Deletes this document and its indexed content (chunks, artifacts, scans, jobs).",
+      "delete_document_confirm": "Retype the document name to confirm:",
       "contents": "Contents",
       "contents_sub": "Explore and edit ingested data: database → document → chapter/page → chunks, with scoped re-run and purge.",
       "documents": "Documents",
@@ -401,7 +409,9 @@
     "username_invalid": "Invalid username (3–64 characters: letters, digits, _ - .).",
     "logged_in_as": "Signed in",
     "logout": "Sign out",
-    "session_state": "Session state"
+    "session_state": "Session state",
+    "post_reboot_setup": "The administrator account no longer exists (server restart). Recreate it below — the environment admin token remains valid and does not block anything.",
+    "session_active": "Session active"
   },
   "providers": {
     "title": "LLM Providers",
@@ -463,6 +473,9 @@
     "all_layers_note": "Re-running replays ALL layers over the scope (running a single isolated layer is not provided by the engine contract — execution unit: the page).",
     "reprocess_button": "Re-run",
     "reprocessed": "Re-run started",
+    "reused_existing": "This document is already indexed — showing the existing tracking only (not an error).",
+    "skipped_ready": "already-finished page(s) skipped",
+    "job_complete": "Batch complete.",
     "queue": "Queue",
     "queue_current": "Running",
     "queue_idle": "Queue idle",

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Database, FileText, ListTree, Layers, RefreshCw, Trash2, UserPen, Image as ImageIcon, Search, Activity, Pencil, Microscope } from 'lucide-react'
 import { api } from '@/lib/api'
-import type { Chunk, Document, TocNode, DatabaseInfo, PurgePayload, PurgeResult, PurgeScope } from '@/types'
+import type { Chunk, Document, TocNode, DatabaseInfo, PurgePayload, PurgeResult, PurgeScope, BatchLaunch } from '@/types'
 import { useLanguage } from '@/contexts/LanguageContext'
 import { useToast } from '@/components/common/Toast'
 import Modal from '@/components/common/Modal'
@@ -22,7 +22,7 @@ interface Props {
   /** Une purge/ré-exécution modifie la base → rafraîchit les métriques du hub. */
   onChanged: () => void
   /** Une ré-exécution démarre un batch → informe le hub (compteur/onglet Suivi). */
-  onBatchStarted: (pagesTotal: number) => void
+  onBatchStarted: (launch: BatchLaunch) => void
   /** Remonte l'état « une édition est ouverte non sauvée » pour la pastille de l'onglet. */
   onDirtyChange: (dirty: boolean) => void
 }
@@ -174,7 +174,10 @@ export default function ContentsExplorer({
           ? { db, scope: 'chapter' as const, document_id: documentId, toc_id: tocId, preserve_human_edits: true }
           : { db, scope: 'page_range' as const, document_id: documentId, page_start: Number(pageNumber), page_end: Number(pageNumber), preserve_human_edits: true }
       const res = await api.pipeline.reprocess(payload)
-      onBatchStarted(res.pages_total ?? 0)
+      onBatchStarted({
+        pagesTotal: res.pages_total ?? 0,
+        batchIds: res.batch_ids ?? (res.batch_id ? [res.batch_id] : []),
+      })
       toast.success(t('automation.contents.reprocess_started'))
       onChanged()
     } catch (e) {

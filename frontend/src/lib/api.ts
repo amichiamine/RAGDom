@@ -240,6 +240,9 @@ export const api = {
         withDb('/library/benchmarks', db, { ...(documentId ? { document_id: documentId } : {}), page: String(page), limit: String(limit) })),
     importArtifact: (db: string, formData: FormData) =>
       requestForm(withDb('/library/artifacts/import', db), formData),
+    // DELETE /api/library/documents/{id} — suppression d'un document isolé (cascade chunks/artifacts/jobs).
+    deleteDocument: (db: string, documentId: string) =>
+      request<{ deleted: boolean; document_id: string }>(withDb(`/library/documents/${encodeURIComponent(documentId)}`, db), { method: 'DELETE' }),
   },
   search: {
     hybrid: (db: string, query: string, topK = 5, filters?: Record<string, string>) =>
@@ -258,12 +261,16 @@ export const api = {
     // Backend /pipeline/queue exige ?db= et renvoie l'état réel de la file séquentielle.
     getQueue: (db: string) => request<PipelineQueueState>(withDb('/pipeline/queue', db)),
     start: (payload: { source_path: string; target_db?: string; mode: 'document' | 'chapter' | 'page_range' | 'folder'; page_start?: number; page_end?: number; toc_id?: string }) =>
-      request<{ batch_id: string; batch_ids?: string[]; status: BatchStatus; pages_total: number; target_db: string }>('/pipeline/start', {
+      request<{
+        batch_id: string; batch_ids?: string[]; status: BatchStatus; pages_total: number; target_db: string;
+        reused_existing_document?: boolean; // anti-doublon : document déjà enregistré (pas une erreur)
+        skipped_ready?: number;             // pages déjà READY non ré-indexées
+      }>('/pipeline/start', {
         method: 'POST', body: JSON.stringify(payload),
       }),
     // Ré-exécution SCOPÉE (§7.4) : purge du périmètre puis ré-ingestion complète (toutes couches).
     reprocess: (payload: { db: string; scope: 'document' | 'page_range' | 'chapter'; document_id: string; page_start?: number; page_end?: number; toc_id?: string; preserve_human_edits?: boolean }) =>
-      request<{ reprocessed_scope: string; purged: unknown; batch_id: string; pages_total: number; page_start: number; page_end: number; status: BatchStatus }>('/pipeline/reprocess', {
+      request<{ reprocessed_scope: string; purged: unknown; batch_id: string; batch_ids?: string[]; pages_total: number; page_start: number; page_end: number; status: BatchStatus }>('/pipeline/reprocess', {
         method: 'POST', body: JSON.stringify(payload),
       }),
     // Backend /pipeline/status EXIGE ?db= (alias du query `db_name`) — sans lui : 422.
