@@ -552,6 +552,10 @@ def test_embedding_profile_natural_key_384_contract_and_vector_recovery():
         db.init_vector_support(conn)
         expected = conn.execute("SELECT COUNT(*) FROM document_chunks WHERE embedding_vector IS NOT NULL").fetchone()[0]
         assert conn.execute("SELECT COUNT(*) FROM vec_chunks").fetchone()[0] == expected
+        # Reopening an already complete vec0 index must not reinsert duplicate PKs.
+        db.init_vector_support(conn)
+        assert db.vector_state()["status"] == "ready"
+        assert conn.execute("SELECT COUNT(*) FROM vec_chunks").fetchone()[0] == expected
         conn.execute("UPDATE document_chunks SET embedding_vector=NULL WHERE id='d1-c1'")
         assert conn.execute("SELECT COUNT(*) FROM vec_chunks WHERE chunk_id='d1-c1'").fetchone()[0] == 0
     conn.close()
@@ -563,6 +567,13 @@ def test_curriculum_legacy_ambiguity_and_cross_document_guards():
                  " VALUES ('legacy-null',NULL,1,'legacy')")
     conn.execute("INSERT INTO curriculum_terms (id,document_id,term_index,label)"
                  " VALUES ('d2-term','d2',1,'d2')")
+    conn.execute("INSERT INTO curriculum_programs"
+                 " (id,term_id,seq_index,title,source,competencies_json,document_id)"
+                 " VALUES ('legacy-program','legacy-null',1,'legacy','auto',?,NULL)",
+                 (json.dumps({"source": "auto", "toc_id": "t1"}),))
+    conn.execute("INSERT INTO content_links"
+                 " (id,link_type,from_id,to_id,page_number,metadata_json,document_id)"
+                 " VALUES ('legacy-link','program_term','legacy-program','legacy-null',2,'{}',NULL)")
     conn.commit(); conn.close()
     ambiguous = client.post("/api/curriculum/programs?db=" + TEST_DB,
                             json={"term_id": "d2-term", "seq_index": 1, "title": "x"})
@@ -572,8 +583,17 @@ def test_curriculum_legacy_ambiguity_and_cross_document_guards():
                                 "seq_index": 1, "title": "x"})
     assert crossed.status_code == 409
     health = client.get("/api/system/health").json()
-    assert health["status"] == "degraded"
-    assert health["validation"]["curriculum_ambiguous_rows"] >= 1
+    assert health["status"] == "ok"
+    assert health["validation"]["curriculum_ambiguous_rows"] == 0
+    conn = db.get_connection(TEST_DB)
+    assert conn.execute("SELECT document_id FROM curriculum_programs"
+                        " WHERE id='legacy-program'").fetchone()[0] == "d1"
+    assert conn.execute("SELECT document_id FROM content_links"
+                        " WHERE id='legacy-link'").fetchone()[0] == "d1"
+    # Shared/empty terms may stay global without degrading an otherwise valid base.
+    assert conn.execute("SELECT document_id FROM curriculum_terms"
+                        " WHERE id='legacy-null'").fetchone()[0] == "d1"
+    conn.close()
 
 
 def test_sql_migration_parser_keeps_trigger_body_together():

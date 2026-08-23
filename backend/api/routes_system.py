@@ -73,13 +73,15 @@ def health() -> dict:
             conn = db.get_connection(name)
             validation_failed += conn.execute("SELECT COUNT(*) FROM validation_runs"
                                               " WHERE status='FAILED'").fetchone()[0]
-            for table in ("curriculum_terms", "curriculum_programs", "assessments", "content_links"):
+            for table in ("curriculum_programs", "assessments", "content_links"):
                 curriculum_ambiguities += conn.execute(
                     "SELECT COUNT(*) FROM %s WHERE document_id IS NULL" % table).fetchone()[0]
             conn.close()
         except Exception:
             validation_failed += 1
-    degraded = state["engine"] != "sqlite-vec" or validation_failed > 0 or curriculum_ambiguities > 0
+    degraded = state["status"] not in ("ready", "fallback_bm25_only") or validation_failed > 0
+    validation_status = ("degraded" if validation_failed else
+                         "warning" if curriculum_ambiguities else "ok")
     return {
         "status": "degraded" if degraded else "ok",
         "version": "3.5",
@@ -90,7 +92,7 @@ def health() -> dict:
         "force_sqlite_vec": state["force"],
         "validation": {"failed_runs": validation_failed,
                        "curriculum_ambiguous_rows": curriculum_ambiguities,
-                       "status": "degraded" if validation_failed or curriculum_ambiguities else "ok"},
+                       "status": validation_status},
         "readonly": config.RAGDOM_READONLY,  # Phase 7 : le frontend masque la Vue 3
     }
 

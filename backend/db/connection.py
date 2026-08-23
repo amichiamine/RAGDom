@@ -6,6 +6,7 @@ path-traversal du paramètre ?db=), tech_specs §1 (application conditionnelle
 schema_core.sql / schema_vec.sql), §6 (migrations), §7 (ragdom_config.sqlite).
 Python 3.9+.
 """
+import json
 import logging
 import os
 import re
@@ -101,10 +102,18 @@ def init_vector_support(conn: sqlite3.Connection, force_strict: Optional[bool] =
         # including UPDATE synchronization, and backfill rows inserted meanwhile.
         try:
             conn.executescript(SCHEMA_VEC)
-            conn.execute("INSERT OR REPLACE INTO vec_chunks (chunk_id, embedding)"
-                         " SELECT id, embedding_vector FROM document_chunks"
-                         " WHERE embedding_vector IS NOT NULL")
+            source_count = conn.execute("SELECT COUNT(*) FROM document_chunks"
+                                        " WHERE embedding_vector IS NOT NULL").fetchone()[0]
             vector_count = conn.execute("SELECT COUNT(*) FROM vec_chunks").fetchone()[0]
+            if vector_count != source_count:
+                # vec0 does not honor INSERT OR REPLACE like a regular SQLite table:
+                # reinserting an existing primary key raises UNIQUE. Rebuild only
+                # when counts diverge (typical return from FTS fallback).
+                conn.execute("DELETE FROM vec_chunks")
+                conn.execute("INSERT INTO vec_chunks (chunk_id, embedding)"
+                             " SELECT id, embedding_vector FROM document_chunks"
+                             " WHERE embedding_vector IS NOT NULL")
+                vector_count = conn.execute("SELECT COUNT(*) FROM vec_chunks").fetchone()[0]
         except Exception as schema_exc:  # extension chargée, index/backfill non fiable
             # Ne jamais annoncer ready tant que le schéma ET le backfill n'ont pas
             # réussi. Les probes :memory: sans schéma restent utiles pour vérifier
@@ -304,22 +313,67 @@ def _prepare_legacy_validation_schema(conn: sqlite3.Connection) -> None:
 
 
 def _repair_legacy_curriculum_scope(conn: sqlite3.Connection) -> int:
-    """Backfill NULL curriculum ownership only when the database is unambiguous."""
+    """Backfill legacy curriculum ownership without assigning global terms blindly."""
     documents = [row[0] for row in conn.execute("SELECT id FROM documents ORDER BY id").fetchall()]
     if len(documents) == 1:
-        changed = 0
         for table in ("curriculum_terms", "curriculum_programs", "assessments", "content_links"):
             columns = {row[1] for row in conn.execute("PRAGMA table_info(%s)" % table)}
             if "document_id" in columns:
-                changed += conn.execute("UPDATE %s SET document_id=? WHERE document_id IS NULL" % table,
-                                        (documents[0],)).rowcount
-        conn.commit()  # UPDATE opens a transaction even when every rowcount is zero.
+                conn.execute("UPDATE %s SET document_id=? WHERE document_id IS NULL" % table,
+                             (documents[0],))
+        conn.commit()
         return 0
+
+    # Auto-generated programs carry their originating toc_id in competencies_json.
+    for program_id, raw_metadata in conn.execute(
+            "SELECT id, competencies_json FROM curriculum_programs WHERE document_id IS NULL").fetchall():
+        try:
+            toc_id = (json.loads(raw_metadata or "{}") or {}).get("toc_id")
+        except (TypeError, ValueError):
+            toc_id = None
+        owner = conn.execute("SELECT document_id FROM document_toc WHERE id=?", (toc_id,)).fetchone() if toc_id else None
+        if owner:
+            conn.execute("UPDATE curriculum_programs SET document_id=? WHERE id=?", (owner[0], program_id))
+
+    # Assessments are owned by the document of either referenced chunk.
+    for assessment_id, subject_id, correction_id in conn.execute(
+            "SELECT id, subject_chunk_id, correction_chunk_id FROM assessments WHERE document_id IS NULL").fetchall():
+        owners = {row[0] for chunk_id in (subject_id, correction_id) if chunk_id
+                  for row in conn.execute("SELECT document_id FROM document_chunks WHERE id=?", (chunk_id,)).fetchall()}
+        if len(owners) == 1:
+            conn.execute("UPDATE assessments SET document_id=? WHERE id=?", (owners.pop(), assessment_id))
+
+    def entity_owners(entity_id):
+        owners = set()
+        for table in ("curriculum_programs", "assessments", "document_chunks", "document_toc"):
+            columns = {row[1] for row in conn.execute("PRAGMA table_info(%s)" % table)}
+            if "document_id" in columns:
+                owners.update(row[0] for row in conn.execute(
+                    "SELECT document_id FROM %s WHERE id=? AND document_id IS NOT NULL" % table,
+                    (entity_id,)).fetchall())
+        return owners
+
+    # Links inherit ownership from whichever endpoint is document-scoped.
+    for link_id, from_id, to_id in conn.execute(
+            "SELECT id, from_id, to_id FROM content_links WHERE document_id IS NULL").fetchall():
+        owners = entity_owners(from_id) | entity_owners(to_id)
+        if len(owners) == 1:
+            conn.execute("UPDATE content_links SET document_id=? WHERE id=?", (owners.pop(), link_id))
+
+    # A term shared by programs from several documents is intentionally global.
+    for term_id, in conn.execute("SELECT id FROM curriculum_terms WHERE document_id IS NULL").fetchall():
+        owners = {row[0] for row in conn.execute(
+            "SELECT DISTINCT document_id FROM curriculum_programs"
+            " WHERE term_id=? AND document_id IS NOT NULL", (term_id,)).fetchall()}
+        if len(owners) == 1:
+            conn.execute("UPDATE curriculum_terms SET document_id=? WHERE id=?", (owners.pop(), term_id))
+
+    conn.commit()
     ambiguous = 0
-    for table in ("curriculum_terms", "curriculum_programs", "assessments", "content_links"):
-        columns = {row[1] for row in conn.execute("PRAGMA table_info(%s)" % table)}
-        if "document_id" in columns:
-            ambiguous += conn.execute("SELECT COUNT(*) FROM %s WHERE document_id IS NULL" % table).fetchone()[0]
+    # NULL terms may be deliberate cross-document containers; actionable ambiguity
+    # is limited to rows that must own a document to be processed or promoted.
+    for table in ("curriculum_programs", "assessments", "content_links"):
+        ambiguous += conn.execute("SELECT COUNT(*) FROM %s WHERE document_id IS NULL" % table).fetchone()[0]
     return ambiguous
 
 
