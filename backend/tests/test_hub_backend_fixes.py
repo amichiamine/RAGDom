@@ -242,6 +242,52 @@ def test_multiple_scoped_reprocess_same_doc_remain_possible():
     assert _document_count() == 1
 
 
+def test_start_reuses_document_across_relocated_source_path():
+    """Reproduit le cas production : le source_path absolu change (dev→Render,
+    /agent→/app) mais doc_source+filename restent identiques → réutilisation,
+    pas de doublon, et recalage silencieux du source_path."""
+    _cleanup_db()
+    pdf = _make_pdf("HubFixes", "manuel_reloc.pdf",
+                    ["Cours 1 : notion de périmètre $P=2(a+b)$ pour un rectangle.",
+                     "Exercice 1 : calculer $P$ pour $a=3$ et $b=5$.",
+                     "Correction 1 : $P = 2(3+5) = 16$ unités."])
+    first = client.post("/api/pipeline/start", json={"source_path": pdf, "mode": "document"})
+    assert first.status_code == 202, first.text
+    _wait_batch(first.json()["batch_id"])
+    assert _document_count() == 1
+
+    # Simule un déploiement : on réécrit le source_path du document existant vers
+    # un autre chemin absolu (comme le fait le re-seed Render), en conservant
+    # doc_source + filename. L'anti-doublon DOIT retrouver ce document par identité
+    # stable, pas par source_path exact.
+    conn = db.get_connection(TEST_DB)
+    try:
+        doc_id = conn.execute("SELECT id FROM documents").fetchone()[0]
+        conn.execute(
+            "UPDATE documents SET source_path=? WHERE id=?",
+            ("/app/sources/Maths/HubFixes/manuel_reloc.pdf", doc_id))
+        conn.commit()
+    finally:
+        conn.close()
+
+    second = client.post("/api/pipeline/start", json={"source_path": pdf, "mode": "document"})
+    assert second.status_code == 202, second.text
+    payload = second.json()
+    assert payload.get("reused_existing_document") is True
+    assert payload.get("reused_document_id") == doc_id
+    _wait_batch(payload["batch_id"])
+    assert _document_count() == 1  # pas de doublon malgré le source_path divergé
+
+    # Le source_path a été recalcé vers le chemin runtime courant.
+    conn = db.get_connection(TEST_DB)
+    try:
+        sp = conn.execute("SELECT source_path FROM documents WHERE id=?", (doc_id,)).fetchone()[0]
+    finally:
+        conn.close()
+    from api.routes_pipeline import _resolve_source
+    assert sp == _resolve_source(pdf)
+
+
 # ── (3) Purge scopée intelligente ───────────────────────────────────────────
 def test_scoped_reprocess_purges_only_target_range():
     _cleanup_db()

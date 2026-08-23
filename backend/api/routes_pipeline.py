@@ -82,6 +82,18 @@ def _register_document(db_name: str, source_path: str) -> dict:
     conn = db.create_database(db_name)  # applique le DDL si base neuve
     try:
         row = conn.execute("SELECT id, total_pages FROM documents WHERE source_path=?", (real,)).fetchone()
+        if row is None:
+            # Anti-doublon robuste : le source_path absolu est instable d'un
+            # environnement à l'autre (dev /app→/agent, Render /app, Windows C:\…).
+            # Identité stable = (doc_source relatif) + filename. Si un document
+            # porte déjà ce couple, on le réutilise et on recale son source_path.
+            meta = extract_document_metadata(real, config.SOURCES_DIR)
+            row = conn.execute(
+                "SELECT id, total_pages FROM documents WHERE doc_source=? AND filename=?",
+                (meta["doc_source"], os.path.basename(real))).fetchone()
+            if row is not None:
+                conn.execute("UPDATE documents SET source_path=? WHERE id=?", (real, row[0]))
+                conn.commit()
         if row:
             return {"id": row[0], "total_pages": row[1], "exists": True}
         import fitz
