@@ -57,6 +57,39 @@ def _resolve_source(source_path: str) -> str:
     return os.path.realpath(source_path)
 
 
+def _resolve_runtime_source_path(stored_path: Optional[str]) -> Optional[str]:
+    """Relocate a persisted source path to the current deployment's SOURCES_DIR.
+
+    A database imported from dev or a GitHub release may contain an absolute path
+    from another host (/agent/workspace/... or C:\\xampp\\...). We resolve it
+    relative to config.SOURCES_DIR using its /sources/ suffix or doc_source/filename.
+    """
+    if not stored_path:
+        return None
+    root = os.path.realpath(config.SOURCES_DIR)
+    direct = os.path.realpath(stored_path)
+    if os.path.isfile(direct) and direct.lower().endswith(".pdf"):
+        return direct
+    normalized = stored_path.replace("\\", "/")
+    marker = "/sources/"
+    if marker in normalized:
+        relative = normalized.rsplit(marker, 1)[1]
+        candidate = os.path.realpath(os.path.join(root, *relative.split("/")))
+        if os.path.isfile(candidate):
+            return candidate
+    filename = os.path.basename(normalized)
+    if filename and os.path.isdir(root):
+        matches = []
+        for directory, _, files in os.walk(root):
+            if filename in files:
+                matches.append(os.path.realpath(os.path.join(directory, filename)))
+                if len(matches) > 1:
+                    break
+        if len(matches) == 1:
+            return matches[0]
+    return None
+
+
 def extract_document_metadata(source_path: str, sources_dir: str) -> dict:
     """Implémentation IMPOSÉE tech_specs §13 (doc_source, tags, niveau, nom de base)."""
     rel_path = os.path.relpath(os.path.dirname(source_path), sources_dir)
@@ -405,12 +438,14 @@ def _reprocess_existing_document(db_name: str, document_id: str, source_path: st
     complet. Aucun doublon de ligne ``documents`` : l'ID est conservé et la purge
     scopée ne touche jamais les autres documents (ni les pages hors périmètre).
     """
-    if not os.path.exists(source_path):
+    actual_path = _resolve_runtime_source_path(source_path)
+    if not actual_path:
         raise HTTPException(409, "PDF source absent de /sources/ — ré-exécution impossible")
     body = ReprocessBody(db=db_name, scope="document", document_id=document_id)
     conn = db.get_mutable_connection_or_http(db_name)
     try:
         conn.execute("BEGIN IMMEDIATE")
+        conn.execute("UPDATE documents SET source_path=? WHERE id=?", (actual_path, document_id))
         try:
             targets = resolve_scope(conn, body.scope, body.document_id, body.toc_id,
                                     body.page, body.page_start, body.page_end, body.pages)
@@ -427,7 +462,7 @@ def _reprocess_existing_document(db_name: str, document_id: str, source_path: st
                     groups[-1].append(selected)
             for group in groups:
                 batch = orchestrator.enqueue_batch(
-                    db_name, target.document_id, source_path, body.scope,
+                    db_name, target.document_id, actual_path, body.scope,
                     group[0], group[-1], conn=conn, commit=False, emit=False)
                 batches.append(batch)
         conn.commit()
@@ -465,9 +500,12 @@ def reprocess(body: ReprocessBody):
                                (target.document_id,)).fetchone()
             if row is None:
                 raise HTTPException(404, "Document introuvable")
-            if not os.path.exists(row[0]):
+            actual = _resolve_runtime_source_path(row[0])
+            if not actual:
                 raise HTTPException(409, "PDF source absent de /sources/ — ré-exécution impossible")
-            sources[target.document_id] = row[0]
+            if actual != row[0]:
+                conn.execute("UPDATE documents SET source_path=? WHERE id=?", (actual, target.document_id))
+            sources[target.document_id] = actual
 
         purge_result = _purge_for_reprocess(conn, body, targets)
         batches = []
