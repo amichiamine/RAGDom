@@ -1,5 +1,10 @@
 # JOURNAL des passes (le plus récent en premier)
 
+## 2026-08-23 — Sémantique health du curriculum global
+- Les termes réellement globaux conservent intentionnellement `document_id = NULL`. Il en va de même pour les liens `course_exercise` et `course_program` réellement cross-document lorsque leurs deux endpoints existent et ont chacun un propriétaire valide distinct.
+- Ces lignes globales ne sont plus comptées dans `validation.curriculum_ambiguous_rows` et ne placent plus le health Validation en `warning`. Seuls les `curriculum_programs`/`assessments` sans propriétaire et les liens NULL dont les endpoints sont introuvables restent des ambiguïtés actionnables.
+- Preuves finales inchangées : pytest **165/165** en mode normal et **165/165** avec `RAGDOM_LOW_MEMORY=true`; Vitest **17/17**; `npm audit` **0 vulnérabilité**.
+
 ## 2026-08-23 — Mode Render 512 Mo final, OCR opt-in
 - Deux recettes live ont provoqué un restart Render après le lancement de la page 1 sur l'instance 512 Mo. Pour éviter un troisième restart, le profil `RAGDOM_LOW_MEMORY=true` ne charge désormais **aucun moteur ONNX par défaut**.
 - Le scan passe de **300 à 150 DPI** uniquement dans ce mode; deskew, Sauvola, rapid-layout, rapid-latex-ocr et rapid-table sont sautés. RapidOCR est lui aussi désactivé par défaut et ne s'active qu'avec l'opt-in explicite `RAGDOM_LOW_MEMORY_OCR=true`.

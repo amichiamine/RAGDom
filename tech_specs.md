@@ -597,9 +597,15 @@ Afin de garantir une résilience maximale sous tous les environnements hôtes (W
        "queue_length": 0,
        "vector_engine": "sqlite-vec | fts5-fallback",
        "vector_engine_status": "ready | fallback_bm25_only | error",
-       "vector_engine_message": "Moteur hybride opérationnel (FTS5 + sqlite-vec 384d)" 
+       "vector_engine_message": "Moteur hybride opérationnel (FTS5 + sqlite-vec 384d)",
+       "validation": {
+         "failed_runs": 0,
+         "curriculum_ambiguous_rows": 0,
+         "status": "ok | warning | degraded"
+       }
      }
      ```
+   * `validation.curriculum_ambiguous_rows` ne recense que les anomalies d'ownership actionnables : `curriculum_programs`/`assessments` sans `document_id`, plus les liens NULL dont les endpoints sont introuvables. Les termes réellement globaux et les liens `course_exercise`/`course_program` réellement cross-document avec deux endpoints existants et deux propriétaires valides distincts gardent intentionnellement `document_id = NULL` et ne déclenchent pas le statut `warning`.
    * **Dans l'UI Automation Hub :**
      - Si le moteur est en mode dégradé, un **Bandeau d'Alerte Jaune/Orange** persistant s'affiche en tête de page : 
        `⚠️ Alerte Moteur : Mode dégradé FTS5 BM25 actif (sqlite-vec non chargé). Recherche sémantique vectorielle désactivée.`
@@ -1483,11 +1489,11 @@ Le détail d'une page sert le scan et le binaire d'un artefact depuis la version
 - **006 — hardening** : ajoute `assessments.document_id`, `validation_events.document_id`, `validation_run_pages.baseline_hash` et l'index unique partiel `uq_jobs_active_page` empêchant deux jobs actifs pour la même page.
 - **007 — validation_execution** : ajoute de façon additive `validation_runs.working_db_filename`, `operation`, `batch_id`, `batch_ids_json`, `execution_status`, `progress_current`, `progress_total`, `error_log`, `started_at`, `completed_at`, l'index `idx_validation_runs_execution_status` et l'unicité partielle `uq_validation_runs_working_db`.
 
-Le migrateur rejoue 005/006/007 de façon reprenable et idempotente, tolère seulement les colonnes déjà présentes, vérifie le schéma durci après migration et ne déclare la version qu'après succès. Le backfill d'ownership curriculum n'est automatique que pour une base mono-document ; en multi-document, les NULL ambigus restent signalés au lieu d'être attribués arbitrairement.
+Le migrateur rejoue 005/006/007 de façon reprenable et idempotente, tolère seulement les colonnes déjà présentes, vérifie le schéma durci après migration et ne déclare la version qu'après succès. Le backfill d'ownership curriculum attribue une ligne uniquement lorsqu'un propriétaire unique peut être dérivé; il laisse intentionnellement `document_id = NULL` aux termes globaux et aux liens `course_exercise`/`course_program` réellement cross-document dont les deux endpoints existants ont des propriétaires valides distincts.
 
 ### **16.4 Curriculum multi-document et embeddings compatibles**
 
-Les tables `curriculum_terms`, `curriculum_programs`, `assessments` et `content_links` portent désormais `document_id`. La construction multi-livres traite chaque document isolément, préserve le curriculum des autres livres et ignore proprement un document sans structure pédagogique. Les programmes, évaluations et liens sont refusés s'ils relient des propriétaires de documents différents.
+Les tables `curriculum_terms`, `curriculum_programs`, `assessments` et `content_links` portent désormais `document_id`, nullable pour représenter les lignes globales. La construction multi-livres traite chaque document isolément, préserve le curriculum des autres livres et ignore proprement un document sans structure pédagogique. Le diagnostic health `validation.curriculum_ambiguous_rows` exclut les termes globaux et les liens `course_exercise`/`course_program` cross-document dont les deux endpoints sont résolus vers deux propriétaires valides distincts. Seuls les programmes/assessments sans owner et les liens NULL dont aucun endpoint n'est retrouvable sont actionnables et placent `validation.status` en `warning`; les runs `FAILED` le placent en `degraded`.
 
 Le profil de requête/vectorisation compatible est contractuel : `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2`, FastEmbed installé, pooling **`mean`**, 384 dimensions, L2-normalisé, float32 little-endian, métrique sqlite-vec L2, préfixes `query: ` / `passage: `, troncature tokenizer et `pipeline_version=ragdom-fastembed-mean-v1`. Les métadonnées complètes de contrat sont obligatoires. Profil absent/incompatible, dimensions de BLOB incohérentes, vecteurs non assignés ou plusieurs profils actifs sont diagnostiqués et bloquent la recherche vectorielle ; aucune réindexation silencieuse n'est effectuée.
 

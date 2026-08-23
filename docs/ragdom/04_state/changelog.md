@@ -1,3 +1,9 @@
+# 2026-08-23 — Health curriculum : globaux et liens cross-document
+
+- Les termes réellement globaux gardent intentionnellement `document_id = NULL`.
+- Les liens `course_exercise`/`course_program` réellement cross-document gardent également `document_id = NULL` lorsque leurs deux endpoints existent et ont deux propriétaires valides distincts; ils ne comptent plus dans les ambiguïtés health.
+- Seuls les programmes/assessments sans owner et les liens NULL dont les endpoints sont introuvables alimentent `validation.curriculum_ambiguous_rows`. Preuves finales inchangées : pytest **165/165** normal et faible mémoire.
+
 # 2026-08-23 — Mode Render 512 Mo final, OCR opt-in
 
 - Sous `RAGDOM_LOW_MEMORY=true` uniquement, le scan passe de **300 à 150 DPI**; deskew, Sauvola, rapid-layout, rapid-latex-ocr et rapid-table sont sautés.
