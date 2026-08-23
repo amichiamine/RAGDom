@@ -803,6 +803,21 @@ def test_sources_mutations_reject_symlink_escape(tmp_path):
                 pass
 
 
+def test_validation_relocates_legacy_source_path_to_runtime_root(tmp_path, monkeypatch):
+    from api import routes_validation
+
+    runtime_root = tmp_path / "sources"
+    target = runtime_root / "1AM" / "math" / "book.pdf"
+    target.parent.mkdir(parents=True)
+    target.write_bytes(b"%PDF-1.4")
+    monkeypatch.setattr(routes_validation.config, "SOURCES_DIR", str(runtime_root))
+
+    old_linux = "/agent/workspace/RAGDom/sources/1AM/math/book.pdf"
+    old_windows = r"C:\\xampp\\htdocs\\RAGDom\\sources\\1AM\\math\\book.pdf"
+    assert routes_validation._resolve_runtime_source_path(old_linux) == str(target)
+    assert routes_validation._resolve_runtime_source_path(old_windows) == str(target)
+
+
 def test_terminal_run_rejects_late_benchmark_attachment():
     run_id = _create_run({"scope_type": "page", "document_id": "d1", "page": 2})
     assert client.post("/api/validation/runs/%s/accept?db=%s" %

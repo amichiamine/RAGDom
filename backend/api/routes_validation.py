@@ -547,6 +547,42 @@ def _start_monitor(db_name: str, run_id: str) -> None:
         monitor.start()
 
 
+def _resolve_runtime_source_path(stored_path: Optional[str]) -> Optional[str]:
+    """Relocate a persisted source path to the current deployment's SOURCES_DIR."""
+    if not stored_path:
+        return None
+    root = os.path.realpath(config.SOURCES_DIR)
+    direct = os.path.realpath(stored_path)
+    # The document row was created by the guarded ingestion path and may point to
+    # a user-managed PDF outside SOURCES_DIR in local-first deployments.
+    if os.path.isfile(direct) and direct.lower().endswith(".pdf"):
+        return direct
+
+    normalized = stored_path.replace("\\", "/")
+    marker = "/sources/"
+    if marker in normalized:
+        relative = normalized.rsplit(marker, 1)[1]
+        candidate = os.path.realpath(os.path.join(root, *relative.split("/")))
+        try:
+            confined = os.path.commonpath([root, candidate]) == root
+        except ValueError:
+            confined = False
+        if confined and os.path.isfile(candidate):
+            return candidate
+
+    # Last-resort portability for old absolute paths: accept only one exact
+    # filename match under the configured source root.
+    filename = os.path.basename(normalized)
+    matches = []
+    if filename and os.path.isdir(root):
+        for directory, _, files in os.walk(root):
+            if filename in files:
+                matches.append(os.path.realpath(os.path.join(directory, filename)))
+                if len(matches) > 1:
+                    break
+    return matches[0] if len(matches) == 1 else None
+
+
 @router.post("/runs/{run_id}/execute", status_code=202)
 def execute_run(run_id: str, db_name: str = Query(alias="db")):
     from api import routes_pipeline
@@ -568,9 +604,10 @@ def execute_run(run_id: str, db_name: str = Query(alias="db")):
         for target in targets:
             row = official.execute("SELECT source_path FROM documents WHERE id=?",
                                    (target.document_id,)).fetchone()
-            source = row[0] if row else None
-            if not source or not os.path.isfile(source):
-                missing.append({"document_id": target.document_id, "source_path": source})
+            stored_source = row[0] if row else None
+            source = _resolve_runtime_source_path(stored_source)
+            if not source:
+                missing.append({"document_id": target.document_id, "source_path": stored_source})
             else:
                 sources[target.document_id] = source
         if missing:
@@ -588,6 +625,9 @@ def execute_run(run_id: str, db_name: str = Query(alias="db")):
         working = db.get_connection(filename)
         try:
             working.execute("BEGIN IMMEDIATE")
+            for document_id, source_path in sources.items():
+                working.execute("UPDATE documents SET source_path=? WHERE id=?",
+                                (source_path, document_id))
             # A backup may contain official queues.  They are historical data in this
             # sandbox and must never be drained by the validation worker.
             working.execute("DELETE FROM pipeline_jobs WHERE status IN"
