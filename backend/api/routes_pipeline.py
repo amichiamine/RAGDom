@@ -73,8 +73,7 @@ class StartBody(StrictBody):
 
 def _register_document(db_name: str, source_path: str) -> dict:
     """Crée la base si besoin + enregistre le document (métadonnées §13). Idempotent."""
-    if db.is_validation_working_db(db_name):
-        raise HTTPException(400, "Namespace validation_test_ réservé aux runs isolés")
+    db.require_official_mutation_target(db_name)
     real = _resolve_source(source_path)
     if not real.startswith(os.path.realpath(config.SOURCES_DIR) + os.sep):
         raise HTTPException(400, "source_path hors de /sources/")
@@ -184,6 +183,7 @@ def start(body: StartBody):
             raise HTTPException(404, "Dossier source introuvable")
         folder_db = body.target_db or extract_document_metadata(
             os.path.join(real, "x.pdf"), config.SOURCES_DIR)["db_name"]
+        db.require_official_mutation_target(folder_db)
         batches, total = [], 0
         for name in sorted(os.listdir(real)):
             if not name.lower().endswith(".pdf"):
@@ -200,6 +200,7 @@ def start(body: StartBody):
         return {"batch_id": batches[0], "batch_ids": batches, "status": "QUEUED",
                 "pages_total": total, "target_db": folder_db}
     db_name = body.target_db or extract_document_metadata(real, config.SOURCES_DIR)["db_name"]
+    db.require_official_mutation_target(db_name)
     doc = _register_document(db_name, real)
     page_start, page_end = _resolve_pages(body, db_name, doc)
     batch = orchestrator.enqueue_batch(db_name, doc["id"], real, body.mode, page_start, page_end)
@@ -273,7 +274,7 @@ def stop():
 
 @router.delete("/batch/{batch_id}")
 def cancel_batch(batch_id: str, db_name: str = Query(alias="db")):
-    conn = db.get_connection_or_http(db_name)
+    conn = db.get_mutable_connection_or_http(db_name)
     try:
         batch = conn.execute("SELECT status FROM ingestion_batches WHERE id=?", (batch_id,)).fetchone()
         if batch is None:
@@ -356,7 +357,7 @@ def _purge_for_reprocess(conn, body: ReprocessBody, targets) -> dict:
 @router.post("/reprocess", status_code=202)
 def reprocess(body: ReprocessBody):
     """Valide, purge et enfile sous un verrou SQLite d'écriture unique."""
-    conn = db.get_connection_or_http(body.db)
+    conn = db.get_mutable_connection_or_http(body.db)
     try:
         # BEGIN IMMEDIATE est acquis avant la résolution. Toute écriture concurrente
         # finit avant notre image ou attend notre commit; un échec fait un rollback
@@ -439,7 +440,7 @@ def purge(body: PurgeBody):
     whole_base = body.scope in ("database", "base")
     if whole_base and body.confirm != body.db:
         raise HTTPException(400, "La purge complète exige confirm = nom exact de la base")
-    conn = db.get_connection_or_http(body.db)
+    conn = db.get_mutable_connection_or_http(body.db)
     try:
         special = body.scope in ("database", "curriculum_only", "artifacts_only")
         targets = []
@@ -915,7 +916,7 @@ def requalify_artifacts(body: RequalifyBody):
     UPDATE type/raw_data/render_config_json/caption/searchable_text (+ ancre)."""
     official_db = body.db
     allowed_run_pages = None
-    conn = db.get_connection_or_http(body.db)
+    conn = db.get_mutable_connection_or_http(body.db)
     try:
         if body.run_id:
             run = conn.execute("SELECT status, execution_status, working_db_filename FROM validation_runs"
@@ -1102,7 +1103,7 @@ class RetryBody(StrictBody):
 
 @router.post("/retry")
 def retry(body: RetryBody):
-    conn = db.get_connection_or_http(body.db)
+    conn = db.get_mutable_connection_or_http(body.db)
     try:
         retried, refused = 0, []
         for job_id in body.job_ids:

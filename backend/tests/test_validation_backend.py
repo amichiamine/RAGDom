@@ -349,6 +349,56 @@ def test_run_requalify_is_fail_closed_and_terminal_actions_preserve_official(mon
     assert _official_digest() == before
 
 
+def test_accept_preserves_unchanged_human_artifact_ignoring_run_provenance():
+    conn = db.get_connection(TEST_DB)
+    conn.execute("UPDATE scientific_artifacts SET is_human_edited=1, caption='édition humaine'"
+                 " WHERE id='a1'")
+    conn.commit(); conn.close()
+    run_id = _create_run({"scope_type": "page", "document_id": "d1", "page": 2})
+
+    accepted = client.post("/api/validation/runs/%s/accept?db=%s" % (run_id, TEST_DB))
+    assert accepted.status_code == 200, accepted.text
+    conn = db.get_connection(TEST_DB)
+    try:
+        row = conn.execute("SELECT caption,is_human_edited,validation_run_id"
+                           " FROM scientific_artifacts WHERE id='a1'").fetchone()
+        assert row == ("édition humaine", 1, run_id)
+    finally:
+        conn.close()
+
+
+@pytest.mark.parametrize("mutation,expected", [
+    ("UPDATE page_scans SET width_px=321 WHERE id='d1-s2'", 321),
+    ("UPDATE processing_benchmarks SET execution_time_ms=321 WHERE id='b1'", 321),
+])
+def test_accept_detects_concurrent_promoted_scan_or_benchmark_change(mutation, expected):
+    run_id = _create_run({"scope_type": "page", "document_id": "d1", "page": 2})
+    conn = db.get_connection(TEST_DB)
+    conn.execute(mutation)
+    conn.commit(); conn.close()
+
+    conflict = client.post("/api/validation/runs/%s/accept?db=%s" % (run_id, TEST_DB))
+    assert conflict.status_code == 409
+    conn = db.get_connection(TEST_DB)
+    try:
+        if "page_scans" in mutation:
+            assert conn.execute("SELECT width_px FROM page_scans WHERE id='d1-s2'").fetchone()[0] == expected
+        else:
+            assert conn.execute("SELECT execution_time_ms FROM processing_benchmarks"
+                                " WHERE id='b1'").fetchone()[0] == expected
+    finally:
+        conn.close()
+
+
+def test_accept_legacy_baseline_hash_falls_back_to_logical_page_comparison():
+    run_id = _create_run({"scope_type": "page", "document_id": "d1", "page": 1})
+    conn = db.get_connection(TEST_DB)
+    conn.execute("UPDATE validation_run_pages SET baseline_hash=NULL WHERE run_id=?", (run_id,))
+    conn.commit(); conn.close()
+    accepted = client.post("/api/validation/runs/%s/accept?db=%s" % (run_id, TEST_DB))
+    assert accepted.status_code == 200, accepted.text
+
+
 def test_accept_optimistic_concurrency_and_human_edit_protection():
     run_id = _create_run({"scope_type": "page", "document_id": "d1", "page": 2})
     conn = db.get_connection(TEST_DB)
@@ -498,6 +548,43 @@ def test_sqlite_duplicate_uses_atomic_backup():
     assert copied.execute("SELECT COUNT(*) FROM documents").fetchone()[0] == 2
     copied.close()
     os.remove(path)
+
+
+def test_validation_namespace_blocks_generic_mutations_but_validation_route_can_stage():
+    run_id = _create_run({"scope_type": "page", "document_id": "d1", "page": 2})
+    run = client.get("/api/validation/runs/%s?db=%s" % (run_id, TEST_DB)).json()
+    working_db = run["working_db_filename"]
+
+    assert client.get("/api/library/chunks", params={
+        "db": working_db, "document_id": "d1"}).status_code == 200
+    blocked = [
+        client.put("/api/library/chunks/d1-c2", params={"db": working_db},
+                   json={"content_markdown": "mutation générique"}),
+        client.put("/api/library/artifacts/a1", params={"db": working_db},
+                   json={"caption": "mutation générique"}),
+        client.post("/api/curriculum/terms", params={"db": working_db},
+                    json={"id": "forbidden", "document_id": "d1", "term_index": 1,
+                          "label": "interdit"}),
+        client.post("/api/pipeline/purge", json={
+            "db": working_db, "scope": "page", "document_id": "d1", "page": 2}),
+        client.post("/api/pipeline/retry", json={"db": working_db, "job_ids": ["missing"]}),
+        client.post("/api/system/databases/%s/duplicate" % working_db,
+                    json={"new_name": "Forbidden_Copy.sqlite"}),
+    ]
+    assert all(response.status_code == 403 for response in blocked), [
+        (response.status_code, response.text) for response in blocked]
+
+    page = client.get("/api/validation/runs/%s/pages/2?db=%s" % (run_id, TEST_DB)).json()
+    page["working"]["chunks"][0]["content_markdown"] = "mutation Validation autorisée"
+    staged = client.put("/api/validation/runs/%s/pages/2?db=%s" % (run_id, TEST_DB),
+                        json={"working": page["working"]})
+    assert staged.status_code == 200, staged.text
+    working = db.get_connection(working_db)
+    try:
+        assert working.execute("SELECT content_markdown FROM document_chunks"
+                               " WHERE id='d1-c2'").fetchone()[0] == "mutation Validation autorisée"
+    finally:
+        working.close()
 
 
 def test_historical_chapter_and_folder_confinement_guards():

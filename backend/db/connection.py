@@ -187,6 +187,19 @@ def get_connection_or_http(db_name: str) -> sqlite3.Connection:
         raise HTTPException(404, str(exc))
 
 
+def require_official_mutation_target(db_name: str) -> None:
+    """Deny generic mutations against the reserved validation sandbox namespace."""
+    if is_validation_working_db(db_name):
+        from fastapi import HTTPException  # import local : db/ reste utilisable hors HTTP
+        raise HTTPException(403, "Copie validation_test_ mutable uniquement via /api/validation")
+
+
+def get_mutable_connection_or_http(db_name: str) -> sqlite3.Connection:
+    """Open an official DB for a generic mutating route, fail-closed for sandboxes."""
+    require_official_mutation_target(db_name)
+    return get_connection_or_http(db_name)
+
+
 def create_database(db_name: str) -> sqlite3.Connection:
     """Crée (ou ouvre) une base documentaire et applique le DDL conditionnel."""
     db_path = sanitize_db_name(db_name)
